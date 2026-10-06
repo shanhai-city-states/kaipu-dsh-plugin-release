@@ -1,0 +1,9 @@
+# 统一成 LF —— 本仓的产物是给上游提 PR 的 YAML/JSON/TS，
+# 若被 Windows 的 core.autocrlf 改成 CRLF，diff 会变成"整文件重写"的噪音，
+# 一个 20 行的改动能看起来像改了 500 行。
+* text=auto eol=lf
+
+# 二进制（别做行尾/编码转换）
+*.png binary
+*.tgz binary
+*.ico binary

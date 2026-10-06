@@ -1,0 +1,26 @@
+# 山海·开铺 · 智囊团插件 · patch 层
+# =====================================================================
+# ★★ 本文件是「可摘除」约束的一半：
+#
+#   智囊团 = **一个独立模块**。**摘掉本文件这段 insert + 删掉整个包目录**
+#   ⇒ 场地插件（plugin-platform）**必须仍完整可用** —— 宿主能起、能接第三方
+#   Agent、能出审计流程。
+#
+#   ⇒ 所以本包：
+#     · **不许**被 plugin-platform 依赖（package.json 里也查得到）
+#     · **不许**往场地插件的座位里塞东西
+#     · **只**通过契约（@shanhai/kaipu-contract）与场地通信
+#
+# ★ 命名：`expertTeam` → `wisdomTeam` 待评审组定，
+#   **尚未定** ⇒ 内部包名先用 `wisdom-team`，对外字段用别名并存
+#   （`wisdomTeam ?? expertTeam`，契约增补 #16）。
+
+- insert:
+    - id: shanhai-kaipu-wisdom-team
+      name: '@shanhai/kaipu-wisdom-team'
+      config:
+        # 内置智囊团的"样品间"姿态：客户没带自己的 Agent 时开箱即用。
+        # ★ 客户带了自己的 Agent ⇒ 灯位可被顶替。
+        builtinSample: true
+        # 灯组定义（Step 4 从服务端 /scenes 拉；此处仅示意本地兜底开关）
+        lampGroups: []

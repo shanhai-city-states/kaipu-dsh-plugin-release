@@ -1,0 +1,43 @@
+# 山海·开铺 · 场地插件 · patch 层
+# =====================================================================
+# 由本包 package.json 的
+#   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+# 声明，作为 profile 的一个 bundle 层被加载。
+#
+# 语法（承实测约定）：
+#   - insert:         新增插件行
+#   - id + config:    覆盖已有行的配置（整段替换，非合并）
+#   - id + disabled:  禁用已有行（★ 顶层平铺，**没有** `disabled: [a,b]` 列表写法，
+#                               写了会被**静默忽略**）
+#
+# ⚠️ 禁用宿主插件行前必读：
+#   「关掉一个 UI 元素」和「禁用一个插件行」是两件事 —— 后者会连同
+#   该插件**对外提供的 cordis 服务**一起撤掉，影响面远超预期。
+#   曾禁 `ui-workspace` ⇒ 15 个插件 Failed to initialize、整站白屏。
+#   ⇒ 禁用任何宿主行之前，先查清它是不是**服务提供者**（`super(ctx, 'xxx')`）。
+#   ⇒ 优先用「座位 priority 遮蔽」，**不要**整包禁用。
+#
+# ★ 本仓纪律：**零宿主改动**（插件要能独立分发）。
+#   只用上游自带的 patch 语法与座位，**不改 DSH 源码**。
+
+- insert:
+    - id: shanhai-kaipu-platform
+      name: '@shanhai/kaipu-platform'
+      config:
+        # ── 场地能力开关（Step 2 起逐个打开）──────────────────────
+        scenesCatalog: true      # 场景/Agent 目录面
+        runView: true            # 运行视图（逐灯 + 判定路由）
+        capabilityBoundary: true # 能力边界页
+        roleSeats: true          # 角色位
+        # ── 服务端接入 ─────────────────────────────────────────
+        # ★★ 这里**故意留空**：本文件是**随包发布**的，而联调面是临时的 ——
+        #   把联调地址写在这里 ⇒ 对方撤掉之后，真实用户会去连一个死地址。
+        # ⇒ 纪律：**发布的包保持中性**（空 = 本地/未接入模式），
+        #   联调地址写在 **dev profile 的覆盖层**里（由开发配置脚本生成，
+        #   落在 .gitignore 内的 dev/ 下）。
+        #   想改地址/铺子：改 dev profile 的 `KAIPU_BASE_URL` / `KAIPU_ACCOUNT`
+        #   想验"未接入模式"：在 dev profile 里设 `KAIPU_DISCONNECT=1`
+        baseUrl: ''
+        accountId: ''
+        # fingerprint: ''       # 不填 ⇒ 本机推导（同机稳定）；填了就用填的（部署期最稳）
+        clientVersion: '0.1.0'

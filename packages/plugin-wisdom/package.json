@@ -1,0 +1,86 @@
+{
+  "name": "@shanhai/kaipu-wisdom-team",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "山海·开铺 · 智囊团插件 —— 场地插件的配套侧边面板。★ 可单独装 / 可不装；卸掉它，场地仍完整可用。当前为骨架版。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanhai-city-states/kaipu-dsh-plugin.git",
+    "directory": "packages/plugin-wisdom"
+  },
+  "icon": "icon.svg",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "kaipu",
+    "wisdom",
+    "panel"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "scripts": {
+    "build": "node ../../tools/build.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "//inject": "★ 这里是【包名】词表（模块图边 / boot 顺序）；src/client/index.ts 的 inject 是【服务名】词表。两套都要填，填反了会卡在 waiting for services。",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "kaipu": {
+    "//": "★ 本块是【本仓自己的】声明，DSH 官方**不读**。DSH 只读 dsh.bundle / dsh.client / dsh.profile 三个键（已逐条核实）。我们自己的约束一律放 kaipu.*，不塞进 dsh 命名空间。",
+    "dshRange": ">=0.2.0-rc.2 <0.3.0",
+    "//descriptionReviewedAt": "★ 官方 contributing.md：描述会被当作声明并与代码核对。每次改描述都要真的复核代码并更新这个日期 —— --release 缺它即 FAIL。",
+    "descriptionReviewedAt": "2026-10-05",
+    "declaredSurfaces": [
+      "ui.panel",
+      "ui.slot",
+      "data.local"
+    ],
+    "//surfaces": "只声明真的用到的，供人审阅（**不是**运行时门禁）。",
+    "//compat": "⚠️ 分发侧目前没有官方兼容闸门：官方闸门只认 @deepseek-ai/dsh / @deepseek-ai/dsh-* 的 peer，而我们不 import 任何 dsh-* 包。"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "react": "^18.3.1"
+  },
+  "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react 由宿主 DSH 提供（peer）；契约包是构建期依赖，已内联进产物，故放 devDependencies。",
+  "devDependencies": {
+    "@shanhai/kaipu-contract": "workspace:*"
+  }
+}

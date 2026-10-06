@@ -1,0 +1,25 @@
+{
+  "name": "@shanhai/kaipu-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "山海·开铺 · 插件仓 —— 场地插件（主推）+ 智囊团插件 + 契约层；Tauri 壳为可选零门槛分发形态",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev:profile": "node tools/setup-dev-profile.mjs",
+    "verify:step1": "node tools/gen-contract.mjs --check && node tools/clean-scan.mjs && node tools/check-decoupling.mjs",
+    "verify:step2": "node tools/check-package.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/react": "^18.3.31"
+  },
+  "//types": "★ 不需要 @types/react-dom —— 本仓 client half 只用 react（createElement / hooks）与 react/jsx-runtime，不挂载根节点（挂载由宿主做）。少一个依赖少一处版本坑。",
+  "//react": "★ 对齐宿主：DSH 用 react@18.3.1 + @types/react@18.3.31（实测自 harness 的 pnpm store）。react 与 react/jsx-runtime 都由宿主 PLATFORM_MODULES 提供，我们只是声明类型 —— 类型版本必须跟宿主一致。"
+}

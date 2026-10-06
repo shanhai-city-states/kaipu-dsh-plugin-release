@@ -1,0 +1,13 @@
+{
+  "//": "host half —— ★ 不含 DOM lib（防误用 window / fetch / document）。ESM（与 DSH host 一致）。",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "lib": ["ES2022"],
+    "types": [],
+    "tsBuildInfoFile": "lib/.tsbuildinfo.host"
+  },
+  "include": ["src/index.ts"],
+  "references": [{ "path": "../contract" }]
+}

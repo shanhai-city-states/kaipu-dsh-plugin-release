@@ -1,0 +1,18 @@
+{
+  "//": "host half —— ★ 不含 DOM lib（防误用 window / fetch / document）。ESM（与 DSH host 一致）。",
+  "//remote": "src/remote/** 也在 host 侧（跑在 Node，不经打包）—— 必须一起编进 lib/。",
+  "//paths": "★ @deepseek-ai/* 不进本仓 node_modules（本仓不是 DSH monorepo）⇒ 用 src/remote/dsh-typert.d.ts 的最小声明过编译；运行时由宿主提供真身（peer，同 dshmarket 的做法）。",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "lib": ["ES2022"],
+    "types": [],
+    "paths": {
+      "@deepseek-ai/dsh-typert-protocol": ["./src/remote/dsh-typert.d.ts"]
+    },
+    "tsBuildInfoFile": "lib/.tsbuildinfo.host"
+  },
+  "include": ["src/index.ts", "src/remote/**/*.ts"],
+  "references": [{ "path": "../contract" }]
+}

@@ -1,0 +1,17 @@
+{
+  "//": "client half —— ★ 这一侧才含 DOM lib 与 JSX（host 侧故意不含）",
+  "//cjs": "★★ 编译成 CommonJS，让配套的打包脚本只需改相对 require 的目标，无需语法改写。",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "types": ["react"],
+    "tsBuildInfoFile": "lib/.tsbuildinfo.client"
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
+}

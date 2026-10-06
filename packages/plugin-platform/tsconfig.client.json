@@ -1,0 +1,17 @@
+{
+  "//": "client half —— ★ 这一侧才含 DOM lib 与 JSX（host 侧故意不含，见 tsconfig.json）",
+  "//cjs": "★★ 关键设计：client half 编译成 **CommonJS**（不是 ESM）。这样 tsc 产物里就是标准的 `require()` / `exports.x =`，配套的打包脚本只需把相对 require 改指到同 bundle 内的局部变量，**不需要任何 ESM→CJS 的语法改写**（手写的 ESM 改写器是这里最大的脆弱点）。",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "types": ["react"],
+    "tsBuildInfoFile": "lib/.tsbuildinfo.client"
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]
+}

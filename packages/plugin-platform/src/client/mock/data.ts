@@ -1,0 +1,447 @@
+/**
+ * 山海·开铺 · 场地插件 · **演示数据**（mock）
+ * =====================================================================
+ * ★★ 三条纪律（写在最前面，改这个文件前先读）
+ *
+ *   1) **形状严格按契约** —— 类型一律从 `@shanhai/kaipu-contract` 取，
+ *      本地**不另行定义**任何字段名/事件名/判定字符串。契约层存在的唯一理由就是这个。
+ *      （契约包的运行时值会被内联进 bundle。）
+ *
+ *   2) **确定性** —— 不用 `Math.random()`、不用 `Date.now()`。
+ *      理由：界面判据要能被探针**断言到具体字面量**（"第 2 轮"/"未参与维度"…）。
+ *      带随机数的 mock 只能证明"界面没崩"，证明不了"它显示了该显示的东西"。
+ *
+ *   3) ★★ **必须在界面上明示这是演示数据**（`DATA_SOURCE_LABEL`）。
+ *      理由与官方 `contributing.md` 同源：「描述必须属实，会被当作声明与代码核对」。
+ *      把 mock 混成看起来像真数据，等于自己给自己造了一个"名不副实"的把柄。
+ *
+ * ── 这组数据刻意覆盖的**全部契约分支**（Step 6 的验收面）──────────────
+ *
+ *   | 场景 | 覆盖 |
+ *   |:--|:--|
+ *   | 开铺审计 · 标准 | **round=2 回炉**（⚡有条件 → ✅通过）+ **dims 裁剪**（skippedDims） |
+ *   | 复核演练 · 全场未接入 | `agentId === null` ⇒ 界面「待接入」 |
+ *   | 预约核验 · 需外部预约 | `requiresExternal` + `seatHolders` |
+ *   | 资料预检 | **⛔拒收**（不收费） |
+ *   | 开铺审计 · 进行中 | 停在第一轮中段 ⇒ 可演示 **「已停止接收」**（R5） |
+ *
+ *   四类判定 `✅通过 / ⚡有条件 / ❌驳回 / ⛔拒收` **全部出现**（R3：必须可区分且可见）。
+ */
+import type { AgentCard, SceneCard, SceneCategory, SceneRecommendation, SceneRunEvent } from '@shanhai/kaipu-contract'
+
+/** ★ 数据来源标签 —— 面板必须显示它（纪律 3） */
+export const DATA_SOURCE_LABEL = '演示数据（mock）'
+
+/* ─────────────────────────── GET /agents ─────────────────────────── */
+
+export const MOCK_AGENTS: AgentCard[] = [
+  {
+    id: 'ag-1001',
+    slug: 'subject-verifier',
+    name: '主体核验方',
+    role: '执行',
+    capabilities: ['证照核验', '主体一致性'],
+    skillSummary: '核验证照与主体信息是否一致。',
+    status: 'enabled',
+    version: 3,
+  },
+  {
+    id: 'ag-1002',
+    slug: 'duty-confirmer',
+    name: '权责确认方',
+    role: '执行',
+    capabilities: ['权责边界', '签署留痕'],
+    skillSummary: '确认权责边界并留存签署痕迹。',
+    status: 'enabled',
+    version: 2,
+  },
+  {
+    id: 'ag-1003',
+    slug: 'trail-auditor',
+    name: '留痕审计方',
+    role: '审计',
+    capabilities: ['过程留痕', '完整性检查'],
+    skillSummary: '检查过程留痕是否完整、可追溯。',
+    status: 'enabled',
+    version: 5,
+  },
+  {
+    id: 'ag-1004',
+    slug: 'conflict-screener',
+    name: '利益冲突筛查方',
+    role: '审计',
+    capabilities: ['关联关系筛查'],
+    skillSummary: '筛查关联关系与利益冲突。',
+    // ★ `disabled` ⇒ 界面灰显「已停用」且**不许点**。
+    //   契约（models.ts）写明：返回全部（含 disabled）是为了让用户看见"被关掉了" ——
+    //   看不见的话，用户会以为是自己出错。
+    status: 'disabled',
+    version: 1,
+  },
+  {
+    /**
+     * ★★ `pending`（占地未接入）—— 契约 **v1.3 §23.4** 新增的合法值。
+     *
+     * 为什么演示数据必须有这一条（2026-10-05 补）：
+     *   它是真服务端**空铺的常态**（实测 `GET /agents` 回 `{id:"zhinangtuan",
+     *   status:"pending", name:"(待接入)", role:"综合维度", capabilities:[]}`）。
+     *   而演示数据原先只有 `enabled` / `disabled` 两态 ⇒ **三态里的那一态在演示态看不到**，
+     *   判据也就只能断两态。
+     *
+     * ★ 字段刻意**照真实占位条目来**：`capabilities: []` · `skillSummary: ''` · `version: 0`
+     *   （服务端不给这三个）—— 界面与提示文案**必须能容忍"没有内容"**，
+     *   而不是让 `vundefined` 或"｜"露到屏幕上。
+     */
+    id: 'ag-1005',
+    slug: 'pending-slot',
+    name: '(待接入)',
+    role: '综合维度',
+    capabilities: [],
+    skillSummary: '',
+    status: 'pending',
+    version: 0,
+  },
+]
+
+/* ─────────────────────────── GET /scenes ─────────────────────────── */
+
+export const MOCK_SCENES: SceneCard[] = [
+  {
+    scene: 'opening-audit',
+    label: '开铺审计 · 标准',
+    version: '1.1',
+    lamps: [
+      { lamp: '主体核验', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '权责确认', agentId: 'ag-1002', agentName: '权责确认方' },
+      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
+      // ★★ `agentId: null` ⇒ **该维度尚未接入执行方** ⇒ 界面显「待接入」。
+      //    这是「场地零内置可跑」的用户可见面，**当一等公民做**，不是异常态。
+      { lamp: '利益冲突筛查', agentId: null, agentName: null },
+    ],
+    loopPolicy: { maxLoop: 2, maxGlobalLoops: 4 },
+    requiresExternal: false,
+    // ★ 形状按契约 v1.3 §23.3（**数组**，每项 {seat, holderType, holderId, holderName}）
+    //   —— 原先是「对象 + 三个固定键」的早期推测，契约落纸后改回契约形状。
+    seatHolders: [
+      { seat: 'execution', holderType: 'platform', holderId: 'ag-1001', holderName: '主体核验方' },
+      { seat: 'audit', holderType: 'platform', holderId: 'ag-1003', holderName: '留痕审计方' },
+    ],
+    description: '标准开铺审计：四维会商，最高 2 轮回炉。',
+    category: 'standard_review',
+  },
+  {
+    scene: 'dry-run',
+    label: '复核演练 · 全场未接入',
+    version: '0.9',
+    lamps: [
+      { lamp: '主体核验', agentId: null, agentName: null },
+      { lamp: '权责确认', agentId: null, agentName: null },
+      { lamp: '留痕完整性', agentId: null, agentName: null },
+    ],
+    loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
+    requiresExternal: false,
+    description: '★ 场地零内置可跑的用户可见面：一个执行方都没有时，界面全是「待接入」；场地本身仍可用。',
+    category: 'daily_selfcheck',
+  },
+  {
+    scene: 'reservation-audit',
+    label: '预约核验 · 需外部预约',
+    version: '1.0',
+    lamps: [
+      { lamp: '主体核验', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
+      { lamp: '利益冲突筛查', agentId: null, agentName: null },
+    ],
+    loopPolicy: { maxLoop: 1, maxGlobalLoops: 2 },
+    // true ⇒ `run` 需带 `reservationId`；无有效预约 ⇒ 409 not_checked_in
+    requiresExternal: true,
+    seatHolders: [
+      { seat: 'execution', holderType: 'platform', holderId: 'ag-1001', holderName: '主体核验方' },
+      { seat: 'audit', holderType: 'platform', holderId: 'ag-1003', holderName: '留痕审计方' },
+      // ★ `holderType: 'none'` ⇒ **该执行位无人**（契约 §23.3 三值之一）——
+      //   与"待接入"同源但落在**执行位**这一层（原先 mock 写的是字符串「（未指派）」，
+      //   那是把"没人"编码进了名字里；契约给了它一个**类型值**，就该用它）。
+      { seat: 'management', holderType: 'none', holderId: '', holderName: '（未指派）' },
+    ],
+    description: '带外部预约的核验场景：运行前须有有效预约。',
+    category: 'standard_review',
+  },
+  {
+    scene: 'material-precheck',
+    label: '资料预检',
+    version: '1.2',
+    lamps: [
+      { lamp: '材料齐备性', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
+    ],
+    loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
+    requiresExternal: false,
+    description: '进件前的资料预检：不齐直接拒收，不收费。',
+    category: 'daily_selfcheck',
+  },
+  {
+    scene: 'opening-audit-live',
+    label: '开铺审计 · 进行中',
+    version: '1.1',
+    lamps: [
+      { lamp: '主体核验', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '权责确认', agentId: 'ag-1002', agentName: '权责确认方' },
+      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
+    ],
+    loopPolicy: { maxLoop: 2, maxGlobalLoops: 4 },
+    requiresExternal: false,
+    description: '同一场景的"跑到一半"快照：用于演示客户端断开时的措辞。',
+    // ★★ **刻意留空** —— 契约 #17「未归类不藏」：有场景却没归类 ⇒ 界面必须
+    //    **单列「未归类」如实展示**。留空一个就是为了让这条被演示到、被断言到。
+    category: '',
+  },
+]
+
+/* ─────────────── GET /scenes 新增两段（契约变更 #17 · 纯追加）─────────────── */
+/*
+ * ★★ 这两段是本轮新消费的（设计答复「**消费**」）。
+ *   目的（他的原话）：**让客户先认出场合，而不是先学术语**。
+ *
+ * ★ 严格遵守他给的三条约束：
+ *   1. `when` 是**「对什么场合推荐」**，不是「高频/热门」⇒ 界面上**不许**出现
+ *      「热门 / 多数人 / 大家都在用」类措辞（**没有统计依据，写了就是编**）。
+ *   2. **空分类不出**：某分类一个场景都没有 ⇒ 响应里就不会有它
+ *      ⇒ 客户端**按响应渲染，不自己判空**。所以这份 fixtures 里
+ *      `categories` 只列**真有场景的**两个（daily_selfcheck / standard_review）——
+ *      刻意不放 `content_creation` / `tech_dev` / `project_eval` / `custom`。
+ *   3. **未归类不藏**：`opening-audit-live` 的 `category` 留空 ⇒ 界面必须单列「未归类」。
+ */
+
+export const MOCK_SCENE_CATEGORIES: SceneCategory[] = [
+  {
+    key: 'daily_selfcheck',
+    label: '日常自查',
+    intent: '东西已经写好了/做好了，想有人先帮我看一眼',
+  },
+  {
+    key: 'standard_review',
+    label: '标准审查',
+    intent: '要正式过一遍，出个能拿出去的结论',
+  },
+]
+
+export const MOCK_SCENE_RECOMMENDATIONS: SceneRecommendation[] = [
+  {
+    key: 'quick_check',
+    label: '快速看一眼',
+    when: '就一个东西，想快点知道有没有硬伤',
+    outputLevel: 'light',
+  },
+  {
+    key: 'full_review',
+    label: '完整会商',
+    when: '重要的事，想几个维度一起看',
+    outputLevel: 'standard',
+  },
+]
+
+/* ───────────────── POST /scene/{id}/run 的事件序列 ───────────────── */
+/*
+ * ★ 顺序严格按契约 sse-events.json：
+ *   start → (round_start → lamp_start/lamp_delta×N/lamp_done → round_done)+ → summary → usage → done
+ *
+ * ★ `start.lamps` = **本次实际参与**的维度（`dims` 裁剪后的结果）——
+ *   所以被裁掉的那一维**不出现在这里**，它只会出现在 `summary.skippedDims`。
+ */
+
+const AT = '2026-10-05T12:00:00+08:00'
+
+/** ① 开铺审计 · 标准 —— ★ 两轮（第 2 轮是回炉）+ 一维被裁剪 + 一维待接入 */
+const RUN_OPENING_AUDIT: SceneRunEvent[] = [
+  { event: 'start', requestId: 'req-mock-0001', scene: 'opening-audit', lamps: ['主体核验', '权责确认', '留痕完整性'], serverTime: AT },
+
+  { event: 'round_start', round: 1, reason: '首轮' },
+  { event: 'lamp_start', round: 1, lamp: '主体核验', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '比对营业执照与主体信息…' },
+  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '经营范围一栏与申请书不一致。' },
+  { event: 'lamp_done', round: 1, lamp: '主体核验', verdict: '⚡有条件', detail: '证照影像缺一页，需补件后复核。', latencyMs: 1840 },
+  { event: 'lamp_start', round: 1, lamp: '权责确认', agent: '权责确认方' },
+  { event: 'lamp_delta', round: 1, lamp: '权责确认', text: '核对签署人与权责边界…' },
+  { event: 'lamp_done', round: 1, lamp: '权责确认', verdict: '✅通过', detail: '签署人与权责边界一致。', latencyMs: 1210 },
+  { event: 'lamp_start', round: 1, lamp: '留痕完整性', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 1, lamp: '留痕完整性', text: '逐条核对过程留痕…' },
+  { event: 'lamp_done', round: 1, lamp: '留痕完整性', verdict: '✅通过', detail: '留痕完整、可追溯。', latencyMs: 960 },
+  { event: 'round_done', round: 1, verdict: '⚡有条件' },
+
+  // ★★ 回炉（契约变更 #2）：R2 要求界面按「第 N 轮」分段、**不合并成一条流水**
+  { event: 'round_start', round: 2, reason: '⚡有条件回炉' },
+  { event: 'lamp_start', round: 2, lamp: '主体核验', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 2, lamp: '主体核验', text: '补件已收到，重新核验…' },
+  { event: 'lamp_done', round: 2, lamp: '主体核验', verdict: '✅通过', detail: '补件核验通过。', latencyMs: 1420 },
+  { event: 'lamp_start', round: 2, lamp: '权责确认', agent: '权责确认方' },
+  { event: 'lamp_delta', round: 2, lamp: '权责确认', text: '复核权责边界（第 2 轮）…' },
+  { event: 'lamp_done', round: 2, lamp: '权责确认', verdict: '✅通过', detail: '复核通过。', latencyMs: 880 },
+  { event: 'lamp_start', round: 2, lamp: '留痕完整性', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 2, lamp: '留痕完整性', text: '复核留痕（第 2 轮）…' },
+  { event: 'lamp_done', round: 2, lamp: '留痕完整性', verdict: '✅通过', detail: '复核通过。', latencyMs: 740 },
+  { event: 'round_done', round: 2, verdict: '✅通过' },
+
+  {
+    event: 'summary',
+    verdict: '✅通过',
+    conditions: ['补件已核验（第 2 轮）'],
+    round: 2,
+    participatedDims: ['主体核验', '权责确认', '留痕完整性'],
+    // ★ 契约 #4：报告**不能**给出"审全了"的错觉 ⇒ 这一项必须在报告里可见
+    skippedDims: ['利益冲突筛查'],
+  },
+  { event: 'usage', tokensIn: 12840, tokensOut: 3160, credits: 12, balanceAfter: 488 },
+  { event: 'done', finishReason: 'completed' },
+]
+
+/** ② 预约核验 · 需外部预约 —— ★ 覆盖 ❌驳回（abort） */
+const RUN_RESERVATION: SceneRunEvent[] = [
+  { event: 'start', requestId: 'req-mock-0002', scene: 'reservation-audit', lamps: ['主体核验', '留痕完整性'], serverTime: AT },
+  { event: 'round_start', round: 1, reason: '首轮' },
+  { event: 'lamp_start', round: 1, lamp: '主体核验', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '核验预约单与主体信息…' },
+  { event: 'lamp_done', round: 1, lamp: '主体核验', verdict: '❌驳回', detail: '预约单主体与申请主体不一致。', latencyMs: 1560 },
+  { event: 'lamp_start', round: 1, lamp: '留痕完整性', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 1, lamp: '留痕完整性', text: '中止前留痕已封存。' },
+  { event: 'lamp_done', round: 1, lamp: '留痕完整性', verdict: '❌驳回', detail: '随主判定一并中止。', latencyMs: 520 },
+  { event: 'round_done', round: 1, verdict: '❌驳回' },
+  {
+    event: 'summary',
+    verdict: '❌驳回',
+    conditions: [],
+    round: 1,
+    participatedDims: ['主体核验', '留痕完整性'],
+    skippedDims: ['利益冲突筛查'],
+  },
+  { event: 'usage', tokensIn: 5240, tokensOut: 1180, credits: 5, balanceAfter: 483 },
+  { event: 'done', finishReason: 'aborted' },
+]
+
+/** ③ 资料预检 —— ★ 覆盖 ⛔拒收（不收费） */
+const RUN_PRECHECK: SceneRunEvent[] = [
+  { event: 'start', requestId: 'req-mock-0003', scene: 'material-precheck', lamps: ['材料齐备性', '留痕完整性'], serverTime: AT },
+  { event: 'round_start', round: 1, reason: '首轮' },
+  { event: 'lamp_start', round: 1, lamp: '材料齐备性', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '材料齐备性', text: '逐项核对进件材料清单…' },
+  { event: 'lamp_done', round: 1, lamp: '材料齐备性', verdict: '✅通过', detail: '材料齐备。', latencyMs: 640 },
+  { event: 'lamp_start', round: 1, lamp: '留痕完整性', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 1, lamp: '留痕完整性', text: '检查留痕链…发现断点。' },
+  { event: 'lamp_done', round: 1, lamp: '留痕完整性', verdict: '⛔拒收', detail: '留痕链存在断点，不予受理。', latencyMs: 700 },
+  { event: 'round_done', round: 1, verdict: '⛔拒收' },
+  {
+    event: 'summary',
+    verdict: '⛔拒收',
+    conditions: [],
+    round: 1,
+    participatedDims: ['材料齐备性', '留痕完整性'],
+    skippedDims: [],
+  },
+  // ★ 契约：「⛔拒收 ⇒ 不收费」⇒ credits = 0，且余额不动。
+  { event: 'usage', tokensIn: 3120, tokensOut: 620, credits: 0, balanceAfter: 483 },
+  { event: 'done', finishReason: 'refused' },
+]
+
+/**
+ * ④ 开铺审计 · 进行中 —— **只到第 1 轮中段就断**。
+ * 用途：界面处于 `running`，可演示 R5「断开 = 已停止接收（不写已取消）」。
+ */
+const RUN_LIVE: SceneRunEvent[] = [
+  { event: 'start', requestId: 'req-mock-0004', scene: 'opening-audit-live', lamps: ['主体核验', '权责确认', '留痕完整性'], serverTime: AT },
+  { event: 'round_start', round: 1, reason: '首轮' },
+  { event: 'lamp_start', round: 1, lamp: '主体核验', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '比对营业执照与主体信息…' },
+  { event: 'lamp_done', round: 1, lamp: '主体核验', verdict: '✅通过', detail: '主体信息一致。', latencyMs: 1320 },
+  { event: 'lamp_start', round: 1, lamp: '权责确认', agent: '权责确认方' },
+  { event: 'lamp_delta', round: 1, lamp: '权责确认', text: '核对签署人与权责边界…' },
+  // ← 事件到此为止：仍在 running
+]
+
+/** scene → 事件序列。**没有条目的场景 = 未运行**（不是错误态）。 */
+export const MOCK_RUNS: Record<string, SceneRunEvent[]> = {
+  'opening-audit': RUN_OPENING_AUDIT,
+  'reservation-audit': RUN_RESERVATION,
+  'material-precheck': RUN_PRECHECK,
+  'opening-audit-live': RUN_LIVE,
+}
+
+/* ────────────────── 三条必须显示的约束（对应的数据） ────────────────── */
+
+/**
+ * ★ 约束 ①：报告**无签名** ⇒ 界面必须醒目提示。
+ *
+ * 这里**恒为 `null`（未签名）**，而且是**刻意的**：
+ * 签名只能由服务端给出，而演示数据根本不来自服务端 ——
+ * 显示"已签名"就是撒谎（官方 `contributing.md`：呈现也不能夸大）。
+ * 如实显示未签名，既符合事实，也顺手把"这是演示数据"再说清一遍。
+ */
+export const MOCK_SIGNATURE: null = null
+
+/** 角色位变更记录（约束 ②：变更必须有记录 + 原因，可追溯） */
+export interface SeatChangeRecord {
+  seat: string
+  from: string
+  to: string
+  reason: string
+  at: string
+  by: string
+}
+
+export const MOCK_SEAT_CHANGES: Record<string, SeatChangeRecord[]> = {
+  'opening-audit': [
+    {
+      seat: '执行位',
+      from: '（空）',
+      to: '主体核验方',
+      reason: '首次接入',
+      at: '2026-10-01 10:12',
+      by: '铺主',
+    },
+    {
+      seat: '执行位',
+      from: '主体核验方',
+      to: '权责确认方',
+      reason: '原执行方连续两次超时，改由权责确认方承担',
+      at: '2026-10-03 16:40',
+      by: '铺主',
+    },
+  ],
+  'reservation-audit': [
+    {
+      seat: '审计位',
+      from: '（空）',
+      to: '留痕审计方',
+      reason: '首次接入',
+      at: '2026-10-02 09:05',
+      by: '铺主',
+    },
+  ],
+}
+
+/** 没有变更记录的场景返回空数组（**不是错误态**，界面显「尚无变更记录」） */
+export function seatChangesOf(scene: string): SeatChangeRecord[] {
+  return MOCK_SEAT_CHANGES[scene] ?? []
+}
+
+/**
+ * 错误的 `detail`（**只有两个"另走一条路"的码需要**）。
+ *
+ * ★★ 为什么必须有这张表：契约里那两个码的 `clientAction` 是「**按 `detail.poll` 切到查询接口**」
+ *    「按 `detail.requiresExternal` 显示该场景需进场」「带 `availableAt` 就必须一并显示」。
+ *    **没有 detail 就没有出路** —— 界面只能干说一句"这一单已经在跑了，别急"，用户仍然什么也做不了。
+ *    （这是 Step 7 实测抓到的真实缺口：第一版接线漏了 detail。）
+ *
+ * 形状照抄契约的 `detailShape` 字段：
+ *   duplicate_request → { "state": "running", "poll": "/scene/run/{requestId}" }
+ *   not_checked_in    → { "requiresExternal": true, "availableAt": "<ISO8601>" }
+ *
+ * ★ `availableAt` 用**固定值**（确定性纪律）：判据要能断言到具体字面量。
+ *   日期取了一个明确的时间点，避免"跑的时候刚好跨天"导致断言飘。
+ */
+export const MOCK_ERROR_DETAIL: Record<string, Record<string, unknown>> = {
+  duplicate_request: { state: 'running', poll: '/scene/run/req-mock-0001' },
+  not_checked_in: { requiresExternal: true, availableAt: '2026-10-06T09:30:00+08:00' },
+}
+
+export function errorDetailOf(code: string | null): Record<string, unknown> | undefined {
+  return code === null ? undefined : MOCK_ERROR_DETAIL[code]
+}

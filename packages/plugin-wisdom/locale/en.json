@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Kaipu Wisdom Team",
+    "description": "Companion sidebar panel for the Kaipu site plugin. Installs and uninstalls on its own; the site plugin stays fully usable without it. Scaffold release."
+  }
+}
