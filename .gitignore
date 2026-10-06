@@ -7,9 +7,6 @@ lib/
 lib-cjs/
 *.tsbuildinfo
 
-# 壳（后置）的 Rust 产物
-apps/shell/src-tauri/target/
-
 # 本地环境与临时
 .env
 .env.*
@@ -20,6 +17,6 @@ apps/shell/src-tauri/target/
 dev/
 
 # 本仓**刻意不提交**的东西（干净版纪律）
-#   · 任何密钥/凭据（模型 Key、agent_secret、签名私钥）
+#   · 任何密钥/凭据（模型 Key、签名材料、访问凭据）
 #   · 任何客户数据、种子数据
 #   · 任何内部绝对路径

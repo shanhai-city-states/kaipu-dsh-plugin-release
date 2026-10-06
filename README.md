@@ -4,6 +4,8 @@
 
 **山海·开铺** 是一套 **DSH（DeepSeek Harness）插件**，为「多 Agent 会商 + 审计留痕」这类场景提供**场地能力**。
 
+> 本仓为「开铺」插件的**源码仓** —— 供 DSH 插件市场收录与源码查阅。
+
 它做的是**场地**该做的事：把台子搭好、把流程跑通、把每一轮的痕迹留下。至于谁上台、按什么规矩审 —— **由你来定**。
 
 ---
@@ -16,6 +18,7 @@
 | **定位** | 审计**场地** —— 提供场景与 Agent 目录、运行视图、角色位、能力边界、会商面板 |
 | **不预设执行方** | 场地自身不带任何执行方；一个都没接入时，界面显示「待接入」，场地**依然可用** |
 | **可自带** | 你可以接入自己的 Agent 来使用场地 |
+| **所需 DSH 版本** | `>=0.2.0-rc.2 <0.3.0`（见各包 `package.json` 的 `kaipu.dshRange`） |
 
 ---
 
@@ -46,6 +49,9 @@ dsh plugin --profile <your-profile> list
 
 ## 怎么用
 
+> **当前版本为骨架版**：界面与流程可完整体验，数据接入在后续版本（演示数据均在界面上明确标注）。
+> 安装方式见上一节；包上架情况以 DSH 插件市场为准。
+
 装上之后，场地即可使用。默认是**未接入状态**（不连任何服务端）：
 
 - 打开插件 → 看到场景与 Agent 目录（未接入时显示「待接入」）
@@ -53,6 +59,8 @@ dsh plugin --profile <your-profile> list
 - 任何一步服务端不可达时，场地**不崩、不阻塞**，退化为未接入状态并给出提示
 
 **要把它接到你自己的服务端**，在你的本地 profile 覆盖层里配置即可（覆盖层不进本仓）。
+可配置的键有 `baseUrl`（服务端地址）与 `accountId`（账号标识），也可用环境变量
+`KAIPU_BASE_URL` / `KAIPU_ACCOUNT`；键的完整形状见 `packages/plugin-platform/cordis.patch.yml`。
 
 ---
 
@@ -79,11 +87,16 @@ dsh plugin --profile <your-profile> list
 .
 ├── package.json
 ├── pnpm-workspace.yaml
+├── pnpm-lock.yaml
 ├── tsconfig.base.json
+├── .gitignore
+├── .gitattributes
 └── packages/
     ├── plugin-platform/      # 场地能力（必需）
-    └── plugin-wisdom-team/   # 内置会商组织（可选）
+    └── plugin-wisdom/        # 内置会商组织（可选 · 可单独摘除）
 ```
+
+> 每个包内含 `package.json`、`cordis.patch.yml`、`locale/`、`icon.svg` 与 `src/`。
 
 ---
 

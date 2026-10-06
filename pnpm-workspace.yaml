@@ -1,8 +1,8 @@
-# 山海·开铺 · 客户端仓 —— pnpm workspace 声明
+# 山海·开铺 · 插件仓 —— pnpm workspace 声明
 #
 # ★ 依赖安装请固定 pnpm 版本（本仓在 pnpm@10.18.3 下验证通过）。
 #
-# ★ Step 1 尚未 `install` —— 本文件先就位，Step 2 起才需要依赖。
+# ★ 依赖安装请先在本仓根目录执行 `pnpm install`。
 
 packages:
   - 'packages/*'
