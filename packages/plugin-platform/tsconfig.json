@@ -13,6 +13,5 @@
     },
     "tsBuildInfoFile": "lib/.tsbuildinfo.host"
   },
-  "include": ["src/index.ts", "src/remote/**/*.ts"],
-  "references": [{ "path": "../contract" }]
+  "include": ["src/index.ts", "src/remote/**/*.ts"]
 }

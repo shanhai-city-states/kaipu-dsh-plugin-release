@@ -8,6 +8,5 @@
     "types": [],
     "tsBuildInfoFile": "lib/.tsbuildinfo.host"
   },
-  "include": ["src/index.ts"],
-  "references": [{ "path": "../contract" }]
+  "include": ["src/index.ts"]
 }

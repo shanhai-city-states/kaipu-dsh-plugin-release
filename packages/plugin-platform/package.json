@@ -45,9 +45,7 @@
     "locale/*.json",
     "icon.svg"
   ],
-  "scripts": {
-    "build": "node ../../tools/build.mjs"
-  },
+  "//scripts": "★ 公开面不声明 scripts：构建脚本在不随本仓发布的判据层。留必失败的 path 只会让人以为「装了就坏」。",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -81,6 +79,7 @@
     "@deepseek-ai/dsh-typert-protocol": "^0.2.0-rc.2 || ^0.2.0"
   },
   "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react / react-jsx-runtime 由宿主 DSH 提供（peer，不是 dependency）；契约包是构建期依赖，已内联进产物，故放 devDependencies。",
+  "//contract": "★★ @shanhai/kaipu-contract 是【内部契约包 —— 不随本仓发布】。此处**刻意保留**这条声明：它是「我们声明它存在、但它不在这」的唯一显式标记 —— 删掉它，读者就看不出有个内部契约包，边界反而模糊；留着它，边界是**看得见的**。（产物里相关代码已内联，运行时不需要它。）",
   "devDependencies": {
     "@shanhai/kaipu-contract": "workspace:*"
   },

@@ -10,12 +10,7 @@
   "workspaces": [
     "packages/*"
   ],
-  "scripts": {
-    "build": "node tools/build.mjs",
-    "dev:profile": "node tools/setup-dev-profile.mjs",
-    "verify:step1": "node tools/gen-contract.mjs --check && node tools/clean-scan.mjs && node tools/check-decoupling.mjs",
-    "verify:step2": "node tools/check-package.mjs"
-  },
+  "//scripts": "★ 本仓公开面【不声明 scripts】：构建与验收脚本都在不随本仓发布的判据层（构建期本地可执行）。留一堆指向仓外路径的 script，只会让按字面尝试的人拿到必失败的命令。",
   "devDependencies": {
     "typescript": "^5.6.3",
     "@types/react": "^18.3.31"
