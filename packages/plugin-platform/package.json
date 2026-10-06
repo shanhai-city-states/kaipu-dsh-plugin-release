@@ -79,7 +79,7 @@
     "react": "^18.3.1",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.0-rc.2 || ^0.2.0"
   },
-  "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react / react-jsx-runtime 由宿主 DSH 提供（peer，不是 dependency）；契约包是构建期依赖，已内联进产物，故放 devDependencies。",
+  "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react / react-jsx-runtime 由宿主 DSH 提供（peer，不是 dependency）；契约包是构建期依赖，已内联进产物 —— 其声明见下方 `kaipu.devContract` 字段（人读，不进机器解析）。",
   "//contract": "★★ @shanhai/kaipu-contract 是【内部契约包 —— 不随本仓发布】。此处**刻意保留**这条声明：它是「我们声明它存在、但它不在这」的唯一显式标记 —— 删掉它，读者就看不出有个内部契约包，边界反而模糊；留着它，边界是**看得见的**。★ 但它放在 `kaipu.devContract`（人读字段）而非 `devDependencies`（机器解析）—— 因为后者会让 `pnpm install` 直接失败（workspace 成员不在仓内），疤应当是「看得见但不拦路」。产物里相关代码已内联，运行时不需要它。",
   "//peer": "★ host half 需要宿主的 @deepseek-ai/dsh-typert-protocol（remote 基类 + @Remote 装饰器）。范围带显式预发布分支 —— 只写 ^0.2.0 会静默排除所有 -rc。（同 dshmarket 的写法）"
 }
