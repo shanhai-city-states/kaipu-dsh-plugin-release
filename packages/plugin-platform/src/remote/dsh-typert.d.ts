@@ -7,8 +7,7 @@
  *   （与 `dshmarket` 的做法一致 —— 它裸 import `@deepseek-ai/cordis` 而自己
  *   连 `node_modules` 都没有，靠的就是 peerDependencies + 宿主解析）。
  *
- * **签名抄自上游**（2026-10-05 读到）：
- *   `deepseek-harness/packages/typert/protocol/src/index.ts`
+ * **签名抄自上游**（2026-10-05 读到，此处**按工坊 071-review §二 只记签名、不指路源码**）：
  *     · `export abstract class TypertRemoteService<out T = never> extends Service<T>`
  *       `protected constructor(ctx: Context, serviceKey: string, options: ...)`
  *     · `export function Remote(option: string): RemoteMethodDecorator`

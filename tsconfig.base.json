@@ -1,5 +1,5 @@
 {
-  "//": "山海·开铺 · TS 基线配置。各包 tsconfig extends 本文件。",
+  "//": "山海·开铺 · 客户端仓 · TS 基线配置。各包 tsconfig extends 本文件。",
   "//lib": "★ 实测教训：host 侧 tsconfig **不含 DOM lib**（防误用 window/fetch）；client 侧才含 DOM。",
   "compilerOptions": {
     "target": "ES2022",

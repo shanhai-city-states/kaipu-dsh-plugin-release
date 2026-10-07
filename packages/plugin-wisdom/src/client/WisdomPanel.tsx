@@ -157,6 +157,10 @@ function StatusBand({ snap, sum }: { snap: Loaded; sum: LampSummary }): ReactEle
    ② 灯位一览（核心区）
    ══════════════════════════════════════════════════════════════════ */
 
+/** 网格形状（发起人 2026-10-06 定：一组 5 个灯位一行，预留大概 4-5 组 ⇒ 取上沿 5 行；要调改这两个常量即可） */
+const LAMP_COLS = 5
+const LAMP_ROWS = 5
+
 function LampSection({ lamps, loading }: { lamps: readonly LampSeat[]; loading: boolean }): ReactElement {
   return (
     <section style={{ marginTop: 14 }}>
@@ -170,11 +174,7 @@ function LampSection({ lamps, loading }: { lamps: readonly LampSeat[]; loading: 
              - 全待接入 = 灯组配好了，**人还没来**（去接人） */
         <Hint>这个铺子还没有灯位。灯组由场景定义决定。</Hint>
       ) : (
-        <div style={{ marginTop: 6 }}>
-          {lamps.map((l) => (
-            <LampRow key={l.lamp} seat={l} />
-          ))}
-        </div>
+        <LampGrid lamps={lamps} />
       )}
 
       {/* ★★ 空态一等公民：全空时给一句**正向且诚实**的话 —— 见文件头 */}
@@ -184,18 +184,49 @@ function LampSection({ lamps, loading }: { lamps: readonly LampSeat[]; loading: 
 }
 
 /**
- * 一个灯位一行。
+ * 灯位网格：**真灯位在前，占位补足到 `LAMP_COLS × LAMP_ROWS`**。
+ *
+ * ★★ 占位（`ReservedSlot`）是发起人点名的"预留灯位"—— 它把「位子给你留着了」
+ *   从一句话变成**看得见的格子**。但它必须与真灯位**在判据层可分**：
+ *   真灯位挂 `data-kaipu-wisdom-lamp`，占位挂 `data-kaipu-wisdom-slot="reserved"`
+ *   —— 探针（`wisdom-view-probe.mjs`）数的是前者，占位混进去会把
+ *   "至少渲染 1 个灯位行"和逐态断言全部污染。
+ */
+function LampGrid({ lamps }: { lamps: readonly LampSeat[] }): ReactElement {
+  const reserved = Math.max(0, LAMP_COLS * LAMP_ROWS - lamps.length)
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        display: 'grid',
+        gridTemplateColumns: `repeat(${String(LAMP_COLS)}, minmax(0, 1fr))`,
+        gap: 8,
+      }}
+    >
+      {lamps.map((l) => (
+        <LampCard key={l.lamp} seat={l} />
+      ))}
+      {Array.from({ length: reserved }, (_, i) => (
+        <ReservedSlot key={`reserved-${String(i)}`} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * 一个灯位一张卡（原为一行；2026-10-06 起改网格卡，锚点与文案纪律**原样保留**）。
  *
  * ★★ **判定只认 `agentId`**（契约 §23.3 权威字段）——
- *   这也是既定的关键纪律：即使服务端把 `agentName` 写成 `(待接入)`，
- *   界面也不会"看起来对、其实错"。
+ *   即使服务端把 `agentName` 写成 `(待接入)`，界面也不会"看起来对、其实错"。
  *
- * ★★ 行文案**故意不区分 `vacant` / `registered`**（两者都显「待接入」）：
- *   这是该裁定的保守面（没上线 ≈ 用户拿不到服务，说"待接入"不误导）。
- *   区分发生在**状态带的汇总层**（Q1 裁定的后半句）—— 见 `StatusBand`。
- *   ⇒ ⚠️ 改这里之前先读 `live.ts` 的 `LampState` 注释，那里把边界写死了。
+ * ★★ 状态文案**故意不区分 `vacant` / `registered`**（两者都显「待接入」）：
+ *   区分发生在**状态带的汇总层** —— 见 `StatusBand` 与 `live.ts` 的 `LampState` 注释。
+ *
+ * ★★ 状态**紧贴灯名**（发起人 2026-10-06：别甩到行尾）——
+ *   原一行式布局里状态用 `marginLeft:auto` 推到最右，灯一多名字与状态就分离了；
+ *   卡片式天然上下相邻，这个问题消失。
  */
-function LampRow({ seat }: { seat: LampSeat }): ReactElement {
+function LampCard({ seat }: { seat: LampSeat }): ReactElement {
   const ready = seat.state === 'ready'
   const tip = lampTip(seat)
 
@@ -207,29 +238,61 @@ function LampRow({ seat }: { seat: LampSeat }): ReactElement {
       title={tip}
       aria-label={`${seat.lamp}，${lampAria(seat)}`}
       style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        gap: 8,
-        padding: '6px 0 6px 10px',
-        borderLeft: `2px solid ${ready ? C.accent : VACANT}`,
+        padding: '8px 10px',
+        border: `1px solid ${C.border}`,
+        borderLeft: `3px solid ${ready ? C.accent : VACANT}`,
+        borderRadius: 4,
         // ★ 只有 `ready` 是满色；`vacant`/`registered` 不淡化（那是**正常态**，不是"坏了"）
         cursor: tip === '' ? 'default' : 'help',
+        minWidth: 0,
       }}
     >
-      <span style={{ fontSize: FS.base, color: C.text }}>{seat.lamp}</span>
-
-      {/* ★ 承担方：`ready` 才显名字（等宽，避免 id 抖动）；否则留白 */}
-      {seat.agentId !== null && <span style={{ fontSize: FS.tag, color: C.faint, fontFamily: FONT.mono }}>{seat.agentId}</span>}
+      <div style={{ fontSize: FS.base, color: C.text, overflowWrap: 'break-word' }}>{seat.lamp}</div>
 
       {/* ★★ 状态**共占同一格**：同一时刻只会出现一个取值。
           `data-kaipu-wisdom-lamp-text` 让判据断**这一格**的文本 ——
-          不能断整行（`(待接入)` 这类名字本身含关键字，会被蒙对）。 */}
-      <span
-        data-kaipu-wisdom-lamp-text="1"
-        style={{ marginLeft: 'auto', fontSize: FS.tag, color: ready ? C.dim : VACANT }}
-      >
-        {lampText(seat)}
-      </span>
+          不能断整卡（`(待接入)` 这类名字本身含关键字，会被蒙对）。 */}
+      <div style={{ marginTop: 2 }}>
+        <span
+          data-kaipu-wisdom-lamp-text="1"
+          style={{ fontSize: FS.tag, color: ready ? C.dim : VACANT }}
+        >
+          {lampText(seat)}
+        </span>
+      </div>
+
+      {/* ★ 承担方：`agentId` 有就显（等宽，避免 id 抖动） */}
+      {seat.agentId !== null && (
+        <div style={{ marginTop: 2, fontSize: FS.tag, color: C.faint, fontFamily: FONT.mono, overflowWrap: 'break-word' }}>
+          {seat.agentId}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 预留灯位（虚线卡）—— **不是灯位**，只是"这里的格子留着"。
+ * ⚠️ 不挂 `data-kaipu-wisdom-lamp`（见 `LampGrid` 注释）· `aria-hidden`：屏幕阅读器不读空位。
+ */
+function ReservedSlot(): ReactElement {
+  return (
+    <div
+      data-kaipu-wisdom-slot="reserved"
+      aria-hidden="true"
+      style={{
+        padding: '8px 10px',
+        border: `1px dashed ${C.border}`,
+        borderRadius: 4,
+        color: C.faint,
+        fontSize: FS.tag,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 0,
+      }}
+    >
+      预留
     </div>
   )
 }

@@ -25,6 +25,7 @@
  *   ⇒ 整个 client bundle 加载失败 ⇒ **整站白屏**。list 座位**必须**给 `id`。
  */
 import { createElement } from 'react'
+import { KaipuBrandName } from './Brand.js'
 import { getConnection, type ClientCtxLike } from './bridge.js'
 import { setConnection } from './live.js'
 import { PANEL_ID } from './panel-id.js'
@@ -41,7 +42,7 @@ import type { ClientContext } from './host-modules.js'
  * ★★ 这里**曾经加过** `'remote'`（为了走流式端点），2026-10-05 **撤掉了**，原因记在这：
  *   加了 `'remote'` 之后确实能拿到 `ctx.remote`（键：`ctx/name/ownerCtx/connection/
  *   namespaces/hostFacts/streams/events/mutations`），**但里面没有 `kaipu`** ——
- *   DSH 的 `packages/api/remotes/src/client/index.ts` 是一份**硬编码的内部包清单**
+ *   DSH 侧装配 namespace 的那份清单是**硬编码的内部包清单**
  *   （逐个 `import '@deepseek-ai/xxx/remote'` 再 `ctx.remote.$mount(...)`），
  *   **第三方插件不在其中**，namespace 不会自动来。
  *   ⇒ 运行改走一元通道（`startRun` + `pollRun`），`remote` 也就不需要了。
@@ -71,7 +72,7 @@ export function apply(ctx: ClientContext): void {
         /**
          * ★★ `order` 的取值不是审美，是**位置礼仪**（2026-10-05 实测后改）。
          *
-         * 宿主 `sidebar` 的排序实现（`ui-sidebar/src/client/index.ts:50`）：
+         * 宿主 `sidebar` 的排序规则（实测自行为）：
          *   `.sort((a, b) => a.order - b.order)`  —— 升序，**同值看注册顺序**。
          *
          * 宿主内置项的 order 区间（实测自各包注册处）：
@@ -94,4 +95,22 @@ export function apply(ctx: ClientContext): void {
       PlatformPanelIcon,
     ),
   )
+
+  // ── ③ 宿主侧边栏的**品牌名**（2026-10-07 加 · 发起人点题）──────────
+  //
+  // 座位 `sidebar.brand.name` 是宿主**公开**的品牌位（官方自己的品牌插件
+  // 就是它的示例占用者）⇒ 占它是"坐席位"，不是改宿主源码。
+  // ★ 只占 name、不占 mark：图形标继续用宿主原生那条鱼（发起人：头像先不动）。
+  // ★ 完整的理由 / 字号依据 / 为什么必须兜底 —— 全在 `Brand.tsx` 文件头。
+  ctx.slots.inject('sidebar.brand.name', () => {
+    try {
+      return ctx.slots.register({ name: 'sidebar.brand.name' }, KaipuBrandName)
+    } catch {
+      // ★★ 这一格已经被坐了（宿主是 official 构建时，官方品牌插件先到）。
+      //   座位类型是 **single** —— 同优先级重复注册会 **throw**，
+      //   而 apply() 抛错 ⇒ 整个 client bundle 加载失败 ⇒ **整站白屏**。
+      //   ⇒ 让给它，静默退回宿主原生名。**不争**（同 order:30 那条的姿态）。
+      return () => {}
+    }
+  })
 }

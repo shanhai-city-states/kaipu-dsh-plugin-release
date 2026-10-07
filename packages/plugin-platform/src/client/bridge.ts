@@ -74,6 +74,22 @@ export const ENDPOINTS = {
    */
   startRun: 'startRun',
   pollRun: 'pollRun',
+  /**
+   * ★★ 铺子资料（**本机文件**，不走网）—— 与上面那批的性质不同：
+   *   它们不发请求、不需要接入地址、**断网照常可用**。
+   *   ⇒ 界面上"未接入服务端"时它们照常工作，两者不该互相牵连。
+   */
+  listShopFiles: 'listShopFiles',
+  writeShopFiles: 'writeShopFiles',
+  removeShopFile: 'removeShopFile',
+  readShopTextFile: 'readShopTextFile',
+  /**
+   * ★ 在系统文件管理器里打开铺子目录（2026-10-06）。
+   *   ★★ 参数**只有 `sub`（可选枚举）**、**没有 `path`** —— 路径由 host 自己算，
+   *   外面传不进任意路径（比先例 003 `openPath` 更严）。理由见 host 侧
+   *   `shop-files.ts` 的 `openShopDir` 长注。
+   */
+  openShopDir: 'openShopDir',
 } as const
 
 export type EndpointName = (typeof ENDPOINTS)[keyof typeof ENDPOINTS]

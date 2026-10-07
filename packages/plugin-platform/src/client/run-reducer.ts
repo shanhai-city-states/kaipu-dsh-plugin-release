@@ -63,7 +63,7 @@ export interface SummaryView {
    *   契约变更 #4 要求 `summary` 带这两个数组，用意是**「报告不能给出『审全了』的错觉」**。
    *   但**实测**（配套的联调探针，2026-10-05）服务端发的是：
    *     `{"verdict":"⚪未接入","conditions":[…],"round":1}`   ← **没有这两个字段**
-   *   若我们把"缺字段"兜底成空数组，界面就会显示「未参与维度：（无）」
+   *   若我们把"缺字段"兜底成空数组，界面就会显示「未参与审核面：（无）」
    *   —— 那**恰好**制造了 #4 要防的那个错觉：看起来"该审的都审了"。
    *   ⇒ 所以缺字段时**不许编**：留 `false`，界面据此说清"服务端没给维度信息，
    *     因此**无法判断是否审全**"。**如实说不确定，好过编一个确定的坏答案。**
@@ -114,6 +114,15 @@ export interface RunErrorView {
 export interface RunView {
   requestId: string | null
   scene: string | null
+  /**
+   * ★★ `start.serverTime` —— **服务端**给出的那一刻（2026-10-06 加 · 古茶 013 B2）。
+   *
+   * ★ 为什么值得单独显示：客户端**不掌握**服务端时间，而"这一场是服务端什么时候跑的"
+   *   是一条**可核对的依据**（审计语义：给依据，不给推理）。
+   * ★ 服务端没给 ⇒ `null` ⇒ 界面**不显示这一行**。
+   *   **绝不**退回本地 `Date.now()` 冒充 —— 那是在替服务端说话。
+   */
+  serverTime: string | null
   status: RunStatus
   /** `start.lamps` = 本次**实际参与**的维度（dims 裁剪后的结果） */
   participated: string[]
@@ -137,6 +146,7 @@ export interface RunView {
 export const EMPTY_RUN: RunView = {
   requestId: null,
   scene: null,
+  serverTime: null,
   status: 'idle',
   participated: [],
   rounds: [],
@@ -201,6 +211,16 @@ export function reduceRun(events: readonly SceneRunEvent[], stopped = false): Ru
       case 'start': {
         view.requestId = e.requestId
         view.scene = e.scene
+        /**
+         * ★★ 服务器时刻 —— 契约 §3.4 的 `start` 里就有它。
+         *
+         * ★ 取值方式与下面 `usage` 那一段**同款**（`e as unknown as Record<string, unknown>`
+         *   + `typeof` 判型）：契约类型若没收这个字段，也**不该**在这层编一个值出来。
+         *   拿不到就 `null` ⇒ 界面不显示那一行（不是显示个本地时刻顶上）。
+         */
+        const st = e as unknown as Record<string, unknown>
+        view.serverTime =
+          typeof st['serverTime'] === 'string' && st['serverTime'] !== '' ? st['serverTime'] : null
         view.participated = [...e.lamps]
         break
       }
@@ -316,8 +336,34 @@ export const STATUS_TEXT: Record<RunStatus, string> = {
 
 export const STOPPED_EXPLAIN = '已停止接收 —— 服务端仍在算完并落 lamp_runs；最终判定以服务端报告为准。'
 
+/**
+ * ★★★ 对外措辞：「审核面」——**内部叫灯次，对外叫审核面**（2026-10-07 定）
+ *
+ * 依据：古茶 `010-2026-10-07-003-古茶-界面维度措辞.md` §一（发起人 2026-10-07 采纳：
+ *   「改，全换审核面」）。原措辞是「维度」，问题有三：
+ *     ① **「维度」不是给客户看的词** —— 客户看到"维度"不知道指的是什么；
+ *     ② 契约里已经叫「灯次」、灯名是「智灯/匠灯/戒灯/仁灯/文灯」，
+ *        **内部术语已经够多，界面不该再加一个"维度"**；
+ *     ③ 「审核面」直接告诉客户"**这是审的一个面**"，且与「灯」不冲突（一盏灯负责一个审核面）。
+ *
+ * ★★ 口径一句话：**内部叫灯次，对外叫审核面。一个面向施工，一个面向客户。**
+ *
+ * ⚠️⚠️ **改的范围边界**（很容易"改过头"，所以写死在这里）：
+ *   只改**我们自己写的界面文案**（labels / 说明句 / 术语条目）。
+ *   **不改下列两类** —— 它们不是我们的措辞，客户看到什么由服务端决定：
+ *     · **契约字段名**（`dims` / `participatedDims` / `run_when` / `dim` 等）——
+ *       它们是与服务端见面的**接口词汇**，改了就是改契约（本仓纪律：不单方改契约）；
+ *     · **服务端下发的数据值**（如 `/agents[].role` 的值「综合维度」、
+ *       `RecommendationView.when` 的值）—— 客户端**原样显示**，改 mock 只会让
+ *       mock 与服务端不一致（`live.ts` 就是靠 `role === 灯名` 精确匹配找执行方的）。
+ *   ⇒ 判别的问法：**这句话是谁写的？** 我们写的 ⇒ 改；服务端给的 ⇒ 不动。
+ *
+ * ⚠️ 改这些字符串会**连带**改 `tools/probe/run-view-probe.mjs` 里几条锚文本的断言
+ *   （它们正是断"R4 尾部那两行在不在"）。那些断言是**有意锚文案**的 ——
+ *   见该文件品牌名那条注释里对"什么时候该锚文案"的判别。
+ */
 export const DIMS_FOOTER = {
-  participated: '本次参与维度',
-  skipped: '未参与维度',
+  participated: '本次参与审核面',
+  skipped: '未参与审核面',
   basis: '裁剪依据',
 } as const

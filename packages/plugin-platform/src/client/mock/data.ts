@@ -8,7 +8,7 @@
  *      （契约包的运行时值会被内联进 bundle。）
  *
  *   2) **确定性** —— 不用 `Math.random()`、不用 `Date.now()`。
- *      理由：界面判据要能被探针**断言到具体字面量**（"第 2 轮"/"未参与维度"…）。
+ *      理由：界面判据要能被探针**断言到具体字面量**（"第 2 轮"/"未参与审核面"…）。
  *      带随机数的 mock 只能证明"界面没崩"，证明不了"它显示了该显示的东西"。
  *
  *   3) ★★ **必须在界面上明示这是演示数据**（`DATA_SOURCE_LABEL`）。
@@ -26,6 +26,47 @@
  *   | 开铺审计 · 进行中 | 停在第一轮中段 ⇒ 可演示 **「已停止接收」**（R5） |
  *
  *   四类判定 `✅通过 / ⚡有条件 / ❌驳回 / ⛔拒收` **全部出现**（R3：必须可区分且可见）。
+ *
+ * ── ★★ 2026-10-07：灯名字段已对齐契约 v1.4（本文件最重要的一次改动）────────
+ *
+ * **权威来源**：`083-interface-contract-v1.4-20261007.md`（sha256 `f1211713…` · 1,448 行）
+ *   §3.1 `role: "匠灯"` / `lamp: "匠灯"` · §3.3 `lamps: ["智灯","匠灯","戒灯","仁灯"]`
+ *   · §3.4 SSE `start.lamps` / `lamp_start.lamp` / `dims` 同值域。
+ *
+ * **为什么必须改**（原来填的是「主体核验」这类**自编维度名**）：
+ *   ① **事实错误**：`lamps[].lamp` / `agents[].role` 的真值是**灯名**。
+ *      工坊 2026-10-07 实测 `GET /scenes` / `start.lamps` 均返灯名。
+ *   ② **这条本来就在撒谎**：`live.ts:214` 用 `agents.find(x => x.role === raw)`
+ *      把 `role` 与 lamp 名精确匹配 —— 而旧 mock 里 `role` 是 `'执行'`/`'审计'`、
+ *      `lamp` 是 `'主体核验'`，**根本匹配不上**。旧数据下这条兜底路径**恒不命中**。
+ *      改成灯名后它才**真的能工作**：这是**修好**，不只是改名。
+ *   ③ 裁定(a) 的原话 = **内容自编 + 形状合契约** —— 而这里错的是**形状**（取值域），
+ *      不是内容。
+ *
+ * **★ 全局映射（一个执行位一盏灯，跨场景必须一致）**
+ *   —— 因为同一个 agent 的 `role` 是**固定**的，它在任何场景出现，
+ *   `lamp` 都必须与之一致，否则 `role === lamp` 这条匹配又会断。
+ *
+ *   | agent | 执行方名（**自编**） | 灯（**契约值**） |
+ *   |:--|:--|:--|
+ *   | `ag-1001` | 主体核验方 | **智灯** |
+ *   | `ag-1002` | 权责确认方 | **匠灯** |
+ *   | `ag-1003` | 留痕审计方 | **戒灯** |
+ *   | `ag-1004` | 利益冲突筛查方 | **仁灯** |
+ *   | `ag-1005` | (待接入) | `综合维度` ★ **保留原值**，见该条注释（真服务端实测） |
+ *
+ *   ★ **只取四灯**，不引入第五个名字：v1.4 §3.3 的**内置**多灯场景
+ *     (`multi-dim-review`) 就是 `["智灯","匠灯","戒灯","仁灯"]` 四盏。
+ *     **我方不发明内置场景里没有的取值**（少做比多做好）。
+ *
+ *   ★ **哪些保持自编**（裁定(a) 的"内容自编"那一半）：
+ *     `agentName` / `seatHolders[].holderName` / `MOCK_SEAT_CHANGES` 的 from·to
+ *     —— 它们承载的是「**哪个执行方坐这个位子**」（人/机构），**不是灯名**。
+ *     契约 §3.1 里 `name` 与 `lamp` 本就是两个字段。
+ *
+ * ⚠️ **反向判据已配**：`tools/probe/run-view-probe.mjs` ⓪.3 段断「界面不出现旧自编名」——
+ *   ★ **先加的反向那条**（旧名必须 0 命中），正向只是它的前提。
+ *   理由：只断"新的在"是假绿 —— 改漏一处（比如只改了场景没改事件序列），正向照样全绿。
  */
 import type { AgentCard, SceneCard, SceneCategory, SceneRecommendation, SceneRunEvent } from '@shanhai/kaipu-contract'
 
@@ -39,7 +80,11 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1001',
     slug: 'subject-verifier',
     name: '主体核验方',
-    role: '执行',
+    // ★ 契约 v1.4 §3.1：`role` 的值域 = **灯名**（示例 `"role": "匠灯", "lamp": "匠灯"`），
+    //   不是"执行/审计"这类**我方自编的角色词**。
+    //   ⇒ 它同时是 `live.ts` 老形状兜底（`role === lamp` 匹配）的**唯一依据**，
+    //     填错不会报错，只会**静默失配**。
+    role: '智灯',
     capabilities: ['证照核验', '主体一致性'],
     skillSummary: '核验证照与主体信息是否一致。',
     status: 'enabled',
@@ -49,7 +94,7 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1002',
     slug: 'duty-confirmer',
     name: '权责确认方',
-    role: '执行',
+    role: '匠灯',
     capabilities: ['权责边界', '签署留痕'],
     skillSummary: '确认权责边界并留存签署痕迹。',
     status: 'enabled',
@@ -59,7 +104,7 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1003',
     slug: 'trail-auditor',
     name: '留痕审计方',
-    role: '审计',
+    role: '戒灯',
     capabilities: ['过程留痕', '完整性检查'],
     skillSummary: '检查过程留痕是否完整、可追溯。',
     status: 'enabled',
@@ -69,7 +114,7 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1004',
     slug: 'conflict-screener',
     name: '利益冲突筛查方',
-    role: '审计',
+    role: '仁灯',
     capabilities: ['关联关系筛查'],
     skillSummary: '筛查关联关系与利益冲突。',
     // ★ `disabled` ⇒ 界面灰显「已停用」且**不许点**。
@@ -95,6 +140,22 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1005',
     slug: 'pending-slot',
     name: '(待接入)',
+    /**
+     * ★★ 2026-10-07 灯名对齐时**特意保留**了这一处的 `综合维度` —— 它不是漏改，是真值。
+     *
+     * 三个来源都指向同一个字面量：
+     *   ① **真服务端实测**（2026-10-05）：`GET /agents` 的占位条目
+     *      `{id:"zhinangtuan", status:"pending", name:"(待接入)", role:"综合维度", …}`；
+     *   ② 契约 **v1.4 §22.1**：`round_start` 样例明写
+     *      `data: { "round": 1, "reason": "首轮", "lamps": ["综合维度"] }`
+     *      并注明「★ light-review **单灯场景的真实名**（不属四灯内置场景）」；
+     *   ③ 同一份契约 §22.3 的 `start.lamps` = `[…]`（实现侧真跑读数）。
+     *
+     * ★★ 所以「`lamp` 一定是灯名」是**错的归纳**：
+     *   多灯内置场景用**灯名**，**单灯场景**用**场景特定的名**。
+     *   ⇒ 「把演示数据里所有非灯名一律改成灯名」会**改错**这一处。
+     *   这正是"**值以权威件为准，不按我对规律的记忆改**"的一个具体落点。
+     */
     role: '综合维度',
     capabilities: [],
     skillSummary: '',
@@ -111,12 +172,13 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '开铺审计 · 标准',
     version: '1.1',
     lamps: [
-      { lamp: '主体核验', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '权责确认', agentId: 'ag-1002', agentName: '权责确认方' },
-      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
-      // ★★ `agentId: null` ⇒ **该维度尚未接入执行方** ⇒ 界面显「待接入」。
+      // ★ 四盏灯的顺序与 v1.4 §3.3 内置场景 `["智灯","匠灯","戒灯","仁灯"]` **逐字一致**
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
+      // ★★ `agentId: null` ⇒ **该灯尚未接入执行方** ⇒ 界面显「待接入」。
       //    这是「场地零内置可跑」的用户可见面，**当一等公民做**，不是异常态。
-      { lamp: '利益冲突筛查', agentId: null, agentName: null },
+      { lamp: '仁灯', agentId: null, agentName: null },
     ],
     loopPolicy: { maxLoop: 2, maxGlobalLoops: 4 },
     requiresExternal: false,
@@ -134,9 +196,9 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '复核演练 · 全场未接入',
     version: '0.9',
     lamps: [
-      { lamp: '主体核验', agentId: null, agentName: null },
-      { lamp: '权责确认', agentId: null, agentName: null },
-      { lamp: '留痕完整性', agentId: null, agentName: null },
+      { lamp: '智灯', agentId: null, agentName: null },
+      { lamp: '匠灯', agentId: null, agentName: null },
+      { lamp: '戒灯', agentId: null, agentName: null },
     ],
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
     requiresExternal: false,
@@ -148,9 +210,9 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '预约核验 · 需外部预约',
     version: '1.0',
     lamps: [
-      { lamp: '主体核验', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
-      { lamp: '利益冲突筛查', agentId: null, agentName: null },
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
+      { lamp: '仁灯', agentId: null, agentName: null },
     ],
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 2 },
     // true ⇒ `run` 需带 `reservationId`；无有效预约 ⇒ 409 not_checked_in
@@ -171,8 +233,10 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '资料预检',
     version: '1.2',
     lamps: [
-      { lamp: '材料齐备性', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
+      // ★ 这一场的执行方是「主体核验方」(ag-1001) 与「留痕审计方」(ag-1003) ——
+      //   按全局映射分别是**智灯**与**戒灯**（灯名跟着 agent 走，不跟着场景走）。
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
     ],
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
     requiresExternal: false,
@@ -184,9 +248,9 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '开铺审计 · 进行中',
     version: '1.1',
     lamps: [
-      { lamp: '主体核验', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '权责确认', agentId: 'ag-1002', agentName: '权责确认方' },
-      { lamp: '留痕完整性', agentId: 'ag-1003', agentName: '留痕审计方' },
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
+      { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
     ],
     loopPolicy: { maxLoop: 2, maxGlobalLoops: 4 },
     requiresExternal: false,
@@ -235,7 +299,7 @@ export const MOCK_SCENE_RECOMMENDATIONS: SceneRecommendation[] = [
   {
     key: 'full_review',
     label: '完整会商',
-    when: '重要的事，想几个维度一起看',
+    when: '重要的事，想几个审核面一起看',
     outputLevel: 'standard',
   },
 ]
@@ -253,32 +317,32 @@ const AT = '2026-10-05T12:00:00+08:00'
 
 /** ① 开铺审计 · 标准 —— ★ 两轮（第 2 轮是回炉）+ 一维被裁剪 + 一维待接入 */
 const RUN_OPENING_AUDIT: SceneRunEvent[] = [
-  { event: 'start', requestId: 'req-mock-0001', scene: 'opening-audit', lamps: ['主体核验', '权责确认', '留痕完整性'], serverTime: AT },
+  { event: 'start', requestId: 'req-mock-0001', scene: 'opening-audit', lamps: ['智灯', '匠灯', '戒灯'], serverTime: AT },
 
   { event: 'round_start', round: 1, reason: '首轮' },
-  { event: 'lamp_start', round: 1, lamp: '主体核验', agent: '主体核验方' },
-  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '比对营业执照与主体信息…' },
-  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '经营范围一栏与申请书不一致。' },
-  { event: 'lamp_done', round: 1, lamp: '主体核验', verdict: '⚡有条件', detail: '证照影像缺一页，需补件后复核。', latencyMs: 1840 },
-  { event: 'lamp_start', round: 1, lamp: '权责确认', agent: '权责确认方' },
-  { event: 'lamp_delta', round: 1, lamp: '权责确认', text: '核对签署人与权责边界…' },
-  { event: 'lamp_done', round: 1, lamp: '权责确认', verdict: '✅通过', detail: '签署人与权责边界一致。', latencyMs: 1210 },
-  { event: 'lamp_start', round: 1, lamp: '留痕完整性', agent: '留痕审计方' },
-  { event: 'lamp_delta', round: 1, lamp: '留痕完整性', text: '逐条核对过程留痕…' },
-  { event: 'lamp_done', round: 1, lamp: '留痕完整性', verdict: '✅通过', detail: '留痕完整、可追溯。', latencyMs: 960 },
+  { event: 'lamp_start', round: 1, lamp: '智灯', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '智灯', text: '比对营业执照与主体信息…' },
+  { event: 'lamp_delta', round: 1, lamp: '智灯', text: '经营范围一栏与申请书不一致。' },
+  { event: 'lamp_done', round: 1, lamp: '智灯', verdict: '⚡有条件', detail: '证照影像缺一页，需补件后复核。', latencyMs: 1840 },
+  { event: 'lamp_start', round: 1, lamp: '匠灯', agent: '权责确认方' },
+  { event: 'lamp_delta', round: 1, lamp: '匠灯', text: '核对签署人与权责边界…' },
+  { event: 'lamp_done', round: 1, lamp: '匠灯', verdict: '✅通过', detail: '签署人与权责边界一致。', latencyMs: 1210 },
+  { event: 'lamp_start', round: 1, lamp: '戒灯', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 1, lamp: '戒灯', text: '逐条核对过程留痕…' },
+  { event: 'lamp_done', round: 1, lamp: '戒灯', verdict: '✅通过', detail: '留痕完整、可追溯。', latencyMs: 960 },
   { event: 'round_done', round: 1, verdict: '⚡有条件' },
 
   // ★★ 回炉（契约变更 #2）：R2 要求界面按「第 N 轮」分段、**不合并成一条流水**
   { event: 'round_start', round: 2, reason: '⚡有条件回炉' },
-  { event: 'lamp_start', round: 2, lamp: '主体核验', agent: '主体核验方' },
-  { event: 'lamp_delta', round: 2, lamp: '主体核验', text: '补件已收到，重新核验…' },
-  { event: 'lamp_done', round: 2, lamp: '主体核验', verdict: '✅通过', detail: '补件核验通过。', latencyMs: 1420 },
-  { event: 'lamp_start', round: 2, lamp: '权责确认', agent: '权责确认方' },
-  { event: 'lamp_delta', round: 2, lamp: '权责确认', text: '复核权责边界（第 2 轮）…' },
-  { event: 'lamp_done', round: 2, lamp: '权责确认', verdict: '✅通过', detail: '复核通过。', latencyMs: 880 },
-  { event: 'lamp_start', round: 2, lamp: '留痕完整性', agent: '留痕审计方' },
-  { event: 'lamp_delta', round: 2, lamp: '留痕完整性', text: '复核留痕（第 2 轮）…' },
-  { event: 'lamp_done', round: 2, lamp: '留痕完整性', verdict: '✅通过', detail: '复核通过。', latencyMs: 740 },
+  { event: 'lamp_start', round: 2, lamp: '智灯', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 2, lamp: '智灯', text: '补件已收到，重新核验…' },
+  { event: 'lamp_done', round: 2, lamp: '智灯', verdict: '✅通过', detail: '补件核验通过。', latencyMs: 1420 },
+  { event: 'lamp_start', round: 2, lamp: '匠灯', agent: '权责确认方' },
+  { event: 'lamp_delta', round: 2, lamp: '匠灯', text: '复核权责边界（第 2 轮）…' },
+  { event: 'lamp_done', round: 2, lamp: '匠灯', verdict: '✅通过', detail: '复核通过。', latencyMs: 880 },
+  { event: 'lamp_start', round: 2, lamp: '戒灯', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 2, lamp: '戒灯', text: '复核留痕（第 2 轮）…' },
+  { event: 'lamp_done', round: 2, lamp: '戒灯', verdict: '✅通过', detail: '复核通过。', latencyMs: 740 },
   { event: 'round_done', round: 2, verdict: '✅通过' },
 
   {
@@ -286,9 +350,9 @@ const RUN_OPENING_AUDIT: SceneRunEvent[] = [
     verdict: '✅通过',
     conditions: ['补件已核验（第 2 轮）'],
     round: 2,
-    participatedDims: ['主体核验', '权责确认', '留痕完整性'],
+    participatedDims: ['智灯', '匠灯', '戒灯'],
     // ★ 契约 #4：报告**不能**给出"审全了"的错觉 ⇒ 这一项必须在报告里可见
-    skippedDims: ['利益冲突筛查'],
+    skippedDims: ['仁灯'],
   },
   { event: 'usage', tokensIn: 12840, tokensOut: 3160, credits: 12, balanceAfter: 488 },
   { event: 'done', finishReason: 'completed' },
@@ -296,22 +360,22 @@ const RUN_OPENING_AUDIT: SceneRunEvent[] = [
 
 /** ② 预约核验 · 需外部预约 —— ★ 覆盖 ❌驳回（abort） */
 const RUN_RESERVATION: SceneRunEvent[] = [
-  { event: 'start', requestId: 'req-mock-0002', scene: 'reservation-audit', lamps: ['主体核验', '留痕完整性'], serverTime: AT },
+  { event: 'start', requestId: 'req-mock-0002', scene: 'reservation-audit', lamps: ['智灯', '戒灯'], serverTime: AT },
   { event: 'round_start', round: 1, reason: '首轮' },
-  { event: 'lamp_start', round: 1, lamp: '主体核验', agent: '主体核验方' },
-  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '核验预约单与主体信息…' },
-  { event: 'lamp_done', round: 1, lamp: '主体核验', verdict: '❌驳回', detail: '预约单主体与申请主体不一致。', latencyMs: 1560 },
-  { event: 'lamp_start', round: 1, lamp: '留痕完整性', agent: '留痕审计方' },
-  { event: 'lamp_delta', round: 1, lamp: '留痕完整性', text: '中止前留痕已封存。' },
-  { event: 'lamp_done', round: 1, lamp: '留痕完整性', verdict: '❌驳回', detail: '随主判定一并中止。', latencyMs: 520 },
+  { event: 'lamp_start', round: 1, lamp: '智灯', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '智灯', text: '核验预约单与主体信息…' },
+  { event: 'lamp_done', round: 1, lamp: '智灯', verdict: '❌驳回', detail: '预约单主体与申请主体不一致。', latencyMs: 1560 },
+  { event: 'lamp_start', round: 1, lamp: '戒灯', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 1, lamp: '戒灯', text: '中止前留痕已封存。' },
+  { event: 'lamp_done', round: 1, lamp: '戒灯', verdict: '❌驳回', detail: '随主判定一并中止。', latencyMs: 520 },
   { event: 'round_done', round: 1, verdict: '❌驳回' },
   {
     event: 'summary',
     verdict: '❌驳回',
     conditions: [],
     round: 1,
-    participatedDims: ['主体核验', '留痕完整性'],
-    skippedDims: ['利益冲突筛查'],
+    participatedDims: ['智灯', '戒灯'],
+    skippedDims: ['仁灯'],
   },
   { event: 'usage', tokensIn: 5240, tokensOut: 1180, credits: 5, balanceAfter: 483 },
   { event: 'done', finishReason: 'aborted' },
@@ -319,21 +383,21 @@ const RUN_RESERVATION: SceneRunEvent[] = [
 
 /** ③ 资料预检 —— ★ 覆盖 ⛔拒收（不收费） */
 const RUN_PRECHECK: SceneRunEvent[] = [
-  { event: 'start', requestId: 'req-mock-0003', scene: 'material-precheck', lamps: ['材料齐备性', '留痕完整性'], serverTime: AT },
+  { event: 'start', requestId: 'req-mock-0003', scene: 'material-precheck', lamps: ['智灯', '戒灯'], serverTime: AT },
   { event: 'round_start', round: 1, reason: '首轮' },
-  { event: 'lamp_start', round: 1, lamp: '材料齐备性', agent: '主体核验方' },
-  { event: 'lamp_delta', round: 1, lamp: '材料齐备性', text: '逐项核对进件材料清单…' },
-  { event: 'lamp_done', round: 1, lamp: '材料齐备性', verdict: '✅通过', detail: '材料齐备。', latencyMs: 640 },
-  { event: 'lamp_start', round: 1, lamp: '留痕完整性', agent: '留痕审计方' },
-  { event: 'lamp_delta', round: 1, lamp: '留痕完整性', text: '检查留痕链…发现断点。' },
-  { event: 'lamp_done', round: 1, lamp: '留痕完整性', verdict: '⛔拒收', detail: '留痕链存在断点，不予受理。', latencyMs: 700 },
+  { event: 'lamp_start', round: 1, lamp: '智灯', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '智灯', text: '逐项核对进件材料清单…' },
+  { event: 'lamp_done', round: 1, lamp: '智灯', verdict: '✅通过', detail: '材料齐备。', latencyMs: 640 },
+  { event: 'lamp_start', round: 1, lamp: '戒灯', agent: '留痕审计方' },
+  { event: 'lamp_delta', round: 1, lamp: '戒灯', text: '检查留痕链…发现断点。' },
+  { event: 'lamp_done', round: 1, lamp: '戒灯', verdict: '⛔拒收', detail: '留痕链存在断点，不予受理。', latencyMs: 700 },
   { event: 'round_done', round: 1, verdict: '⛔拒收' },
   {
     event: 'summary',
     verdict: '⛔拒收',
     conditions: [],
     round: 1,
-    participatedDims: ['材料齐备性', '留痕完整性'],
+    participatedDims: ['智灯', '戒灯'],
     skippedDims: [],
   },
   // ★ 契约：「⛔拒收 ⇒ 不收费」⇒ credits = 0，且余额不动。
@@ -346,13 +410,13 @@ const RUN_PRECHECK: SceneRunEvent[] = [
  * 用途：界面处于 `running`，可演示 R5「断开 = 已停止接收（不写已取消）」。
  */
 const RUN_LIVE: SceneRunEvent[] = [
-  { event: 'start', requestId: 'req-mock-0004', scene: 'opening-audit-live', lamps: ['主体核验', '权责确认', '留痕完整性'], serverTime: AT },
+  { event: 'start', requestId: 'req-mock-0004', scene: 'opening-audit-live', lamps: ['智灯', '匠灯', '戒灯'], serverTime: AT },
   { event: 'round_start', round: 1, reason: '首轮' },
-  { event: 'lamp_start', round: 1, lamp: '主体核验', agent: '主体核验方' },
-  { event: 'lamp_delta', round: 1, lamp: '主体核验', text: '比对营业执照与主体信息…' },
-  { event: 'lamp_done', round: 1, lamp: '主体核验', verdict: '✅通过', detail: '主体信息一致。', latencyMs: 1320 },
-  { event: 'lamp_start', round: 1, lamp: '权责确认', agent: '权责确认方' },
-  { event: 'lamp_delta', round: 1, lamp: '权责确认', text: '核对签署人与权责边界…' },
+  { event: 'lamp_start', round: 1, lamp: '智灯', agent: '主体核验方' },
+  { event: 'lamp_delta', round: 1, lamp: '智灯', text: '比对营业执照与主体信息…' },
+  { event: 'lamp_done', round: 1, lamp: '智灯', verdict: '✅通过', detail: '主体信息一致。', latencyMs: 1320 },
+  { event: 'lamp_start', round: 1, lamp: '匠灯', agent: '权责确认方' },
+  { event: 'lamp_delta', round: 1, lamp: '匠灯', text: '核对签署人与权责边界…' },
   // ← 事件到此为止：仍在 running
 ]
 

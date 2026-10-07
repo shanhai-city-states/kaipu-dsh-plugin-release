@@ -59,12 +59,35 @@ import type {
   AccountView,
   AgentView,
   CapabilitiesPayload,
+  OpenShopDirQuery,
+  OpenShopDirResult,
+  ReadShopTextQuery,
+  ReadShopTextResult,
   RemoteErr,
   RemoteResult,
+  RemoveShopFileQuery,
   SceneRunEvent,
   ScenesPayload,
+  ShopFilesPayload,
   StatusPayload,
+  WriteShopFilesQuery,
+  WriteShopFilesResult,
 } from '@shanhai/kaipu-contract'
+
+// ★ 铺子资料（本地文件层）：**不打包、不发 HTTP** 的纯本机实现。
+//   与上面那批网络端点性质不同 —— 它在 `shop-files.ts` 里自成一层，
+//   本文件只负责把它接到 wire 上（注册端点 + 把结果折进统一信封）。
+import {
+  SHOP_SUBDIRS,
+  ensureShop,
+  isShopSubdir,
+  listShopFiles as listShopDir,
+  openShopDir as openShopDirOf,
+  readShopTextFile as readShopText,
+  removeShopFile as removeShopEntry,
+  writeShopFiles as writeShopEntries,
+  type ShopResult,
+} from './shop-files.js'
 
 /* ── 本文件自带的最小形状：刻意不引 `node:` / `@types/node` / DOM lib ──
  * host 侧 tsconfig 是 `"lib": ["ES2022"]` + `"types": []`（**故意的**，防误用 window）。
@@ -338,8 +361,8 @@ export class KaipuRemoteService extends TypertRemoteService {
    *     DSH 源码原话：`Browser transports omit this method; API Gateway owns their WebSocket mux.`
    *   · 页面里能用的是 `ctx.remote.<namespace>.<method>(query, signal)`（返回 `AsyncIterable`），
    *     但要先有那个 namespace —— **而它不会自动来**：
-   *     DSH 的 `packages/api/remotes/src/client/index.ts` 是一份**硬编码的内部包清单**
-   *     （逐个 `import '@deepseek-ai/dsh-api-job-controller/remote'` 再 `ctx.remote.$mount(...)`），
+   *     DSH 侧装配 namespace 的那份清单是**硬编码的内部包清单**
+   *     （逐个 `import '@deepseek-ai/dsh-xxx/remote'` 再 `ctx.remote.$mount(...)`），
    *     **第三方插件不在其中**。
    *   · 自挂载要自造 `InvocationDescriptor`（含全局 id / codec / 参数表）——
    *     那是**构建期代码生成**的产物，而本仓的定位恰恰是"零构建产物"。
@@ -620,6 +643,152 @@ export class KaipuRemoteService extends TypertRemoteService {
   async capabilities(query: EmptyQuery, signal?: CancelSignal): Promise<RemoteResult<CapabilitiesPayload>> {
     void query
     return this.authedGet<CapabilitiesPayload>('/capabilities', signal)
+  }
+
+  /* ═══════════════ 四之二、铺子资料（**本机文件**，不走网） ═══════════════
+
+   * ★★ 这一批与上面那批的性质**根本不同**，别混着看：
+   *   · 上面那批：把服务端的响应搬回来（要令牌、要 baseUrl、会超时）
+   *   · 这一批：读写**本机一个目录**（不发请求、不需要接入、断网照常可用）
+   *   ⇒ 所以它们**不看 `this.connected`** —— "没接入服务端"从来不是
+   *     "自己不能存东西"的理由。把两者绑在一起是一类很常见的错。
+   *
+   * ★ 这一批的"铺子"由 `this.accountId` 派生（接入身份 ⇒ 目录名）：
+   *   换一个接入地址，就是一个物理上不同的目录，天然不串味。
+   *   未配置时它有个非空兜底（见 `accountId` getter），所以这一层**永远可用**。
+   */
+
+  /** 把本地层的结果折进 wire 的统一信封 */
+  private wrapShop<T>(r: ShopResult<T>): RemoteResult<T> {
+    return r.ok
+      ? { ok: true, data: r.value }
+      : // ★ `kind:'error'` 而不是 `'denied'`：这是**本机操作失败**（含"文件名不合法"
+        //   这类用户可纠正的原因），不是"服务端拒绝了你的身份"。两者在界面上该有不同出路。
+        { ok: false, kind: 'error', code: r.code, error: r.error }
+  }
+
+  /**
+   * `kaipu/listShopFiles` —— 三个抽屉一次列全（外加数据根，供界面如实展示）。
+   * ★ 一次全给而不是按抽屉逐个查：只有三个抽屉，用户一眼看完比三次往返强。
+   */
+  @Remote('listShopFiles')
+  async listShopFiles(query: EmptyQuery, signal?: CancelSignal): Promise<RemoteResult<ShopFilesPayload>> {
+    void query
+    void signal
+    const accountId = this.accountId
+
+    const ensured = ensureShop(accountId)
+    if (!ensured.ok) {
+      // ★ 本地不可用 ⇒ **如实说**，且把 root 一起给出去（用户仍能自己去那个目录看）
+      return {
+        ok: true,
+        data: {
+          root: '',
+          shopKey: '',
+          subdirs: SHOP_SUBDIRS,
+          files: [],
+          unavailable: ensured.error,
+        },
+      }
+    }
+
+    const files: ShopFilesPayload['files'] = []
+    for (const sub of SHOP_SUBDIRS) {
+      const r = listShopDir(accountId, sub)
+      if (!r.ok) {
+        return {
+          ok: true,
+          data: {
+            root: ensured.value.root,
+            shopKey: ensured.value.shopKey,
+            subdirs: SHOP_SUBDIRS,
+            files,
+            unavailable: `${sub}：${r.error}`,
+          },
+        }
+      }
+      files.push(...r.value)
+    }
+
+    return {
+      ok: true,
+      data: {
+        root: ensured.value.root,
+        shopKey: ensured.value.shopKey,
+        subdirs: SHOP_SUBDIRS,
+        files,
+      },
+    }
+  }
+
+  /** `kaipu/writeShopFiles` —— 拖放进来的文件落盘（内容 base64） */
+  @Remote('writeShopFiles')
+  async writeShopFiles(
+    query: WriteShopFilesQuery,
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<WriteShopFilesResult>> {
+    void signal
+    if (!isShopSubdir(query?.sub)) {
+      return { ok: false, kind: 'error', code: 'bad-subdir', error: '没有这个抽屉' }
+    }
+    const list = Array.isArray(query.files) ? query.files : []
+    if (list.length === 0) {
+      return { ok: false, kind: 'error', code: 'empty', error: '没有收到文件' }
+    }
+    return this.wrapShop(writeShopEntries(this.accountId, query.sub, list))
+  }
+
+  /** `kaipu/removeShopFile` —— 删一个文件（★ 一个动作对应一个文件） */
+  @Remote('removeShopFile')
+  async removeShopFile(
+    query: RemoveShopFileQuery,
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{ name: string }>> {
+    void signal
+    if (!isShopSubdir(query?.sub)) {
+      return { ok: false, kind: 'error', code: 'bad-subdir', error: '没有这个抽屉' }
+    }
+    const r = removeShopEntry(this.accountId, query.sub, String(query.name ?? ''))
+    return r.ok ? { ok: true, data: { name: String(query.name ?? '') } } : this.wrapShop(r)
+  }
+
+  /** `kaipu/readShopTextFile` —— 读回文本（供"填进待审内容"） */
+  @Remote('readShopTextFile')
+  async readShopTextFile(
+    query: ReadShopTextQuery,
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<ReadShopTextResult>> {
+    void signal
+    if (!isShopSubdir(query?.sub)) {
+      return { ok: false, kind: 'error', code: 'bad-subdir', error: '没有这个抽屉' }
+    }
+    return this.wrapShop(readShopText(this.accountId, query.sub, String(query.name ?? '')))
+  }
+
+  /**
+   * `kaipu/openShopDir` —— 在系统文件管理器里打开铺子资料目录（2026-10-06）。
+   *
+   * ★★ 参数**只有 `sub`（可选枚举）**，**没有 `path`** —— 路径由 host 侧自己算。
+   *   这是比先例（003 的 `openPath` 收路径再收敛）**更严**的一处：
+   *   外面**根本传不进任意路径**，穿越 / 越界在设计上就不存在。
+   *
+   * ★ 与其它铺子资料端点同口径：**不看 `this.connected`** —— 本机操作，
+   *   未接入服务端时照常可用。
+   */
+  @Remote('openShopDir')
+  async openShopDir(
+    query: OpenShopDirQuery,
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<OpenShopDirResult>> {
+    // ★ 与其它铺子资料端点同口径：本机操作，`signal` 不参与判断 ——
+    //   `void` 掉，保持签名形态与兄弟端点一致（参数名必须能被正则反射）
+    void signal
+    // ★ wire 上来的一律当**不可信**：先用 `isShopSubdir` 收敛，再交给本地层
+    const raw = typeof query?.sub === 'string' ? query.sub : ''
+    if (raw !== '' && !isShopSubdir(raw)) {
+      return { ok: false, kind: 'error', code: 'bad-subdir', error: '没有这个抽屉' }
+    }
+    return this.wrapShop(openShopDirOf(this.accountId, raw === '' ? undefined : raw))
   }
 
   /* ═══════════════ 五、★ 流式端点（SSE · 契约 §3.4） ═══════════════

@@ -12,13 +12,13 @@
  * **2026-10-05 在真环境里逐条验证，这条路对第三方插件不通**：
  *
  *   ① `connection.rpc.call`（我们一直在用的）是**一元**的 ——
- *      它 POST 一次等一个 `server-response`（源码 `dsh-client-connection/src/client/rpc.ts`），
+ *      它 POST 一次等一个 `server-response`（见连接层的一元 RPC 实现），
  *      装不下多帧。
  *   ② 唯一的非一元入口 `connection.rpc.open` **在浏览器端不存在**。源码注释原文：
  *      `Browser transports omit this method; API Gateway owns their WebSocket mux.`
  *   ③ 页面里那条路 `ctx.remote.<ns>.<method>()` **需要 namespace 被装配**，
- *      而做装配的 `packages/api/remotes/src/client/index.ts` 是一份
- *      **硬编码的内部包清单**（逐个 `import '@deepseek-ai/dsh-xxx/remote'` 再 `$mount`）
+ *      而做装配的那份清单是**硬编码的内部包清单**
+ *      （逐个 `import '@deepseek-ai/dsh-xxx/remote'` 再 `$mount`）
  *      —— **第三方插件不在其中**。实测印证：`ctx.remote` 拿到了，键是
  *      `[ctx,name,ownerCtx,connection,namespaces,hostFacts,streams,events,mutations]`，
  *      **里面没有 `kaipu`**。

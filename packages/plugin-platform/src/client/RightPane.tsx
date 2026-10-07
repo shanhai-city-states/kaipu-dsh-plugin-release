@@ -5,7 +5,7 @@
  *
  *   [R2] 按「**第 N 轮**」**分段**（不合并成一条流水）—— 回炉必须看得见
  *   [R3] 四类判定可区分且可见（实底徽标，见 theme.ts）
- *   [R4] ★ dims 裁剪后，尾部**固定**显示「本次参与维度 / 未参与维度 / 裁剪依据」，
+ *   [R4] ★ dims 裁剪后，尾部**固定**显示「本次参与审核面 / 未参与审核面 / 裁剪依据」，
  *        且**不得做成可折叠的次要信息**。
  *        ★ 2026-10-05 起本栏**允许折叠**（"一页预览"：折轮次过程），
  *          但**那两块口径永远不进折叠** —— 判据沿它们的**祖先链**断言
@@ -17,11 +17,20 @@
  * ★ 另一条来自契约的"不许做的事"：`usage` 是**唯一可信计费口径**，
  *   这一栏**只显示**它，不做任何二次计算（不"估算"、不"按 token 折算"）。
  */
-import { useState, type ReactElement } from 'react'
-import type { SceneCard } from '@shanhai/kaipu-contract'
-import { ERROR_CODES, hasUiText, translateError } from '@shanhai/kaipu-contract'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import type {
+  ReadShopTextResult,
+  SceneCard,
+  ShopFileEntry,
+  ShopFilesPayload,
+  ShopSubdir,
+  WriteShopFilesResult,
+} from '@shanhai/kaipu-contract'
+import { ERROR_CODES, SHOP_SUBDIRS, hasUiText, translateError } from '@shanhai/kaipu-contract'
+import { ENDPOINTS, callKaipu } from './bridge.js'
 import { CONSTRAINTS } from './copy.js'
 import { ErrorSurface } from './ErrorSurface.js'
+import { currentConnection } from './live.js'
 import { seatChangesOf, errorDetailOf, type SeatChangeRecord } from './mock/data.js'
 import {
   DIMS_FOOTER,
@@ -79,6 +88,12 @@ export interface RightPaneProps {
    */
   lead: string | null
   /**
+   * ★ 来自铺子资料的「填入待审内容」信号。
+   *   `seq` 递增 ⇒ **每次都算一次新填入**（两次填同一份文件时文本没变，
+   *   只认文本就永远不会触发第二次）。
+   */
+  fill: { text: string; name: string; seq: number } | null
+  /**
    * ★★ 左栏若不可见，**为什么**（`null` = 可见）。见 `PlatformPanel` 的 `leftHidden`。
    *
    * 为什么空态需要知道这件事：挑场景的入口**不在右边**。而"左栏不在"有**两种**
@@ -105,6 +120,7 @@ export function RightPane({
   onClearError,
   lead,
   leftHidden,
+  fill,
 }: RightPaneProps): ReactElement {
   // ★ 空态也要能回答"去哪儿挑场景" ⇒ 把原因带下去
   if (scene === null) return <NoScenePicked lead={lead} leftHidden={leftHidden} />
@@ -181,6 +197,7 @@ export function RightPane({
               running={running}
               sceneLabel={scene.label}
               noneInbound={inbound === 0}
+              fill={fill}
             />
           )
           : <Note>该场景尚未运行。</Note>
@@ -223,16 +240,35 @@ function StartRunForm({
   running,
   sceneLabel,
   noneInbound,
+  fill,
 }: {
   onStart: (input: RunInput) => void
   running: boolean
   sceneLabel: string
   /** ★ 该场景**所有**维度都未接入执行方。不是故障，但要说清跑起来大概会看到什么 */
   noneInbound: boolean
+  /** 来自铺子资料的填入信号（见 `RightPaneProps.fill`） */
+  fill: { text: string; name: string; seq: number } | null
 }): ReactElement {
   const [target, setTarget] = useState('')
   const [content, setContent] = useState('')
   const ready = content.trim() !== '' && !running
+
+  /**
+   * ★★ 从铺子资料填入待审内容 —— 依赖的是 `seq`（**事件**），不是 `text`（**值**）。
+   *
+   * 为什么必须这样：用户可能连着两次用**同一份**文件 —— 文本逐字没变，
+   * 若拿文本当依赖，第二次就不会触发，而用户会觉得"点了没反应"。
+   *
+   * ★ 只写 `content`，**不碰 `target`**：`target` 是"这一场审的是什么"的名字，
+   *   由用户自己起；文件名未必等于他想给这一场起的名字，
+   *   顺手覆盖它 = 替他做了一个他没做的决定。
+   */
+  useEffect(() => {
+    if (fill === null) return
+    setContent(fill.text)
+  }, [fill])
+
 
   const inputStyle = {
     width: '100%',
@@ -250,13 +286,13 @@ function StartRunForm({
   return (
     <section data-kaipu-start="1" style={{ marginTop: 14 }}>
       <div style={{ fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
-        该场景尚未运行。填好要审的东西，再发起 —— 跑起来后这里会逐个维度显示进展。
+        该场景尚未运行。填好要审的东西，再发起 —— 跑起来后这里会逐个审核面显示进展。
       </div>
 
       {/* ★ 如实预告：全部待接入 ≠ 跑不了，但结论大概率是「未接入」。不说清就是让人白等 */}
       {noneInbound && (
         <div style={{ marginTop: 8, fontSize: FS.small, color: '#b45309', lineHeight: LH.normal }}>
-          这一场的维度目前都还没有接入执行方。现在也能发起，但结论大概率是「未接入」（不是故障）。
+          这一场的审核面目前都还没有接入执行方。现在也能发起，但结论大概率是「未接入」（不是故障）。
         </div>
       )}
 
@@ -346,12 +382,12 @@ function NoScenePicked({
         {guide}
       </div>
       <div style={{ marginTop: 8, color: C.dim }}>
-        一场场景就是一次固定的会商流程：审哪几个维度、最多回炉几轮。
+        一场场景就是一次固定的会商流程：审哪几个审核面、最多回炉几轮。
       </div>
       <div style={{ marginTop: 10, color: C.dim }}>选好之后，右边从上往下看：</div>
       <ol style={{ margin: '6px 0 0', paddingLeft: 22 }}>
-        <li>「第 N 轮」—— 每轮里每个维度各给一个判定，回炉会另起一轮；</li>
-        <li>「本次结论」—— 含 ★「未参与维度」，它说明这一趟没审哪些；</li>
+        <li>「第 N 轮」—— 每轮里每个审核面各给一个判定，回炉会另起一轮；</li>
+        <li>「本次结论」—— 含 ★「未参与审核面」，它说明这一趟没审哪些；</li>
         <li>「角色位变更记录」—— 谁在什么时候换了位子、为什么。</li>
       </ol>
     </div>
@@ -578,13 +614,26 @@ function ZeroInbound({ scene }: { scene: SceneCard }): ReactElement {
         lineHeight: LH.normal,
       }}
     >
-      <div>该场景的 {scene.lamps.length} 个维度全部未接入执行方 —— 界面显「待接入」。</div>
+      <div>该场景的 {scene.lamps.length} 个审核面全部未接入执行方 —— 界面显「待接入」。</div>
       <div style={{ color: C.dim, fontSize: FS.small, marginTop: 3 }}>
         这不是故障：场地不内置任何「必须有的」执行方。接入执行方后本场景即可运行； 在此之前，场地本身仍然可用（可查看、可配置）。
       </div>
     </div>
   )
 }
+
+/* ───────── B 组「运行事实」**不在这里**（2026-10-06 · 古茶 013 / 008）─────────
+ *
+ * 本文件渲染的整块 DOM 就是 `data-kaipu-run` —— 运行视图的**判据边界**
+ * （见 `PlatformPanel` 的注释）。而 B 组是**新增的展示内容**。
+ *
+ * ⇒ 008 §1.2 **D-D3**：「**新增锚点必须在 `data-kaipu-run` 之外**（`data-kaipu-process`）」
+ *   ⇒ 它渲染在 `PlatformPanel.tsx` 的 `ProcessFacts`，**物理落在运行视图之外**。
+ *
+ * ★ 为什么不靠"读文本时排除"（那是我方第一版做法，已废弃）：
+ *   排除是**减法**，减法只在"探针记得减"时成立 —— 换一个人写判据、或换一个探针，
+ *   污染立刻回来。**先隔离，再展示**（回函原文）说的就是别把正确性押在判据的自律上。
+ */
 
 /* ─────────────────────── 逐轮分段（R2）─────────────────────── */
 
@@ -594,11 +643,11 @@ function ZeroInbound({ scene }: { scene: SceneCard }): ReactElement {
  * ★★ 折叠的**边界**（为"一页预览"加的，逐条对应契约）：
  *
  *   折进去的：**每个维度的过程内容**（`lamp_delta` 流式文本 + `detail` + 耗时行）
- *   留在外面的：**轮次号 · reason（回炉原因）· 本轮判定 · 各维度判定缩略**
+ *   留在外面的：**轮次号 · reason（回炉原因）· 本轮判定 · 各审核面判定缩略**
  *
  *   为什么这样切 —— 契约有两条硬约束，折错了就违约：
  *     · **R2**「回炉**必须看得见**」⇒ 折起来后 `第 2 轮 · ⚡有条件回炉` 仍在标题行上，看得见；
- *     · **R3**「四类判定**可区分且可见**」⇒ 判定徽标与**各维度判定缩略**都留在标题行，
+ *     · **R3**「四类判定**可区分且可见**」⇒ 判定徽标与**各审核面判定缩略**都留在标题行，
  *       折起来也一眼看出"谁过了谁没过"。**把判定折进去 = 让人必须点开才知道结论 = 不可见。**
  *
  *   ★ `<details>` **非受控**（不传 `open`）—— 两个原因：
@@ -608,10 +657,32 @@ function ZeroInbound({ scene }: { scene: SceneCard }): ReactElement {
  *         同理，探针里 `d.open = true` 设上去就保持，不会被 React 重置。）
  */
 function RoundBlock({ round }: { round: RoundView }): ReactElement {
-  /** 各维度判定的**缩略串** —— 折起来也要能一眼看出这一轮的结论分布 */
+  /** 各审核面判定的**缩略串** —— 折起来也要能一眼看出这一轮的结论分布 */
   const decided = round.lamps.filter((l) => l.verdict !== null)
+
+  /**
+   * ★★ **默认展开，但保持"非受控"**（2026-10-06 · 古茶 013「A 组默认展开」）
+   *
+   * 为什么**不能**直接写 `<details open>`：
+   *   React 会把 `open` 当**受控属性**、**每次渲染都设回去** ⇒ 用户（或探针）
+   *   把它折上之后，**下一个 SSE 事件到达就被重新弹开**。
+   *   本组件每 ≈300ms 就随轮询增量重渲染一次 ⇒ 症状会非常明显（折不动）。
+   *
+   * 用 ref + **空依赖** useEffect ⇒ 只在**挂载那一瞬**设一次，之后交给浏览器管：
+   *   · 新出现的轮次 ⇒ 默认可见（这就是 A 组的诉求）
+   *   · 用户折上 ⇒ **留得住**（重渲染不弹回）
+   *   · 探针 `collapseAll()` 仍能把它折上 ⇒「折叠边界」那组断言照旧成立
+   *     （其中「折起来时判定仍可见」是 R3 的关键落点，不能因此失效）
+   */
+  const ref = useRef<HTMLDetailsElement | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el !== null) el.open = true
+  }, [])
+
   return (
     <details
+      ref={ref}
       data-kaipu-round={round.round}
       style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}
     >
@@ -647,6 +718,19 @@ function RoundBlock({ round }: { round: RoundView }): ReactElement {
           </span>
         )}
       </summary>
+      {/*
+        ★ A 组的过程内容**留在运行视图内** —— 它不是"新增展示区"：
+          这些内容本来就在这块 DOM 里、只是折着；而探针读运行视图文本时
+          **本来就会 `expandIn()` 把所有 details 展开**（见 run-view-probe.mjs 顶部）
+          ⇒ 展开与否**不改变**它读到什么，因此**不构成新增的污染面**。
+
+        ⇒ 按 008 §1.2 的 **D-D3**「**新增锚点**必须在 `data-kaipu-run` 之外」，
+          这里**不再挂** `data-kaipu-process` —— 那个锚点归**新增的展示区**
+          （`RunFacts`，已移到运行视图**之外**，见 `PlatformPanel`）。
+
+        ⚠️ 别反过来把这块当"排除区"：② 段的「待接入」那类词就长在灯行里
+          （`LampRow`），把过程区排除掉会**误伤真断言**。
+      */}
       <div style={{ marginTop: 6, borderLeft: `1px solid ${C.border}`, paddingLeft: 12 }}>
         {round.lamps.map((l) => (
           <LampRow key={`${round.round}\u0000${l.lamp}`} lamp={l} />
@@ -682,7 +766,7 @@ function LampRow({ lamp }: { lamp: LampView }): ReactElement {
   )
 }
 
-/* ───────────── 报告体：维度口径（R4）+ 用量 ───────────── */
+/* ───────────── 报告体：审核面口径（R4）+ 用量 ───────────── */
 
 function SummaryBlock({ summary, finishReason }: { summary: SummaryView; finishReason: string | null }): ReactElement {
   return (
@@ -701,12 +785,12 @@ function SummaryBlock({ summary, finishReason }: { summary: SummaryView; finishR
       {/*
         ★★ R4：**固定显示**，不做折叠。
         理由（契约原文）：报告**不能给出「审全了」的错觉** ——
-        把「未参与维度」收进折叠区，等于让人默认"全审了"。
+        把「未参与审核面」收进折叠区，等于让人默认"全审了"。
 
         ★★ 但"固定显示"的前提是**服务端真的给了**（`dimsReported`）。
           2026-10-05 实测：服务端的 `summary` **没有** `participatedDims` / `skippedDims`
           ⇒ 那时若照旧渲染，两行都会显示「（无）」——
-          **那是把"没给"画成了"没有未参与的维度"，正好撞上 R4 要防的错觉。**
+          **那是把"没给"画成了"没有未参与审核面"，正好撞上 R4 要防的错觉。**
           ⇒ 缺字段时改成**如实说不确定**（下面 `dimsReported === false` 那一支）。
       */}
       <div style={{ marginTop: 12, padding: '10px 12px', background: C.soft, fontSize: FS.base, lineHeight: LH.loose }}>
@@ -718,7 +802,7 @@ function SummaryBlock({ summary, finishReason }: { summary: SummaryView; finishR
           </>
         ) : (
           <div data-kaipu-dims-missing="1" style={{ color: '#b45309' }}>
-            服务端这次没有给维度信息，因此「未参与维度」无从判断。
+            服务端这次没有给审核面信息，因此「未参与审核面」无从判断。
             这份结论不足以说明「该审的都审了」—— 请以服务端报告为准。
           </div>
         )}
