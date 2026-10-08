@@ -58,7 +58,7 @@ export function parseSseFrame(frame: string): SseFrame | null {
  * 契约 §3.4 的**十个**事件名。★ **不在表里的帧一律不产出**（fail-closed）。
  *
  * ★ 2026-10-06 补 `'error'`（差异单 B 组）：契约 §3.4 的示例里**一直有** `event: error`，
- *   是我方这张表漏了它 ⇒ 后果是 error 帧被下游**转成抛出**，
+ *   是本仓这张表漏了它 ⇒ 后果是 error 帧被下游**转成抛出**，
  *   把"运行中收到一条错误"表达成了"**这次运行挂了**"（两回事，见 `frameToEvent` 注释）。
  */
 export const SSE_KNOWN: ReadonlySet<string> = new Set([

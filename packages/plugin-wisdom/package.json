@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shanhai-city-states/kaipu-dsh-plugin.git",
+    "url": "git+https://github.com/shanhai-city-states/kaipu-dsh-plugin-release.git",
     "directory": "packages/plugin-wisdom"
   },
   "icon": "icon.svg",

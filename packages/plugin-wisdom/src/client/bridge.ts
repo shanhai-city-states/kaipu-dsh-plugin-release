@@ -227,10 +227,10 @@ export async function callKaipu<T>(
     //      —— 典型：场地插件未安装/未加载成功 ⇒ 这里归 gateway/not_found ⇒ `stale`，
     //      出路文案指"查插件装载"。**这是本 catch 块要处理的那一种。**
     //   ② **URL 拼串错**（如报文里出现 `/api/kaipu/status` —— `api` 是通道名、
-    //      `kaipu` 是命名空间，**都不该出现在 HTTP URL 里**）⇒ 那是**我方客户端 bug**，
+    //      `kaipu` 是命名空间，**都不该出现在 HTTP URL 里**）⇒ 那是**本仓客户端 bug**，
     //      症状同样是 404，但出路是"改 baseUrl/拼串"，**不是查插件**。
     //   ⇒ 分不清就按 ① 报（fail-closed：宁可提示"查装载"，也不谎报"接上了"）；
-    //     若发现 detail 里带 `/api/` 段（②的指纹），说明是我方拼串问题，别赖服务端。
+    //     若发现 detail 里带 `/api/` 段（②的指纹），说明是本仓拼串问题，别赖服务端。
     //
     //   真机验收抓到的形状（2026-10-06）：
     //   connection client 把网关 404 抛成 "transport failure for /api/kaipu/status: HTTP 404"。

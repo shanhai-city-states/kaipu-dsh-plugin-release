@@ -78,6 +78,13 @@ export interface RightPaneProps {
   onFireError: (code: string) => void
   onClearError: () => void
   /**
+   * ★ 跳回「铺子资料」页签（真服务端路径下，运行视图里给一个返回入口）。
+   *   与顶部页签是**同一动作**的两处入口：页签负责"全局切"，这里负责"填完东西顺手回去取更多"。
+   *   为什么必要：从铺子资料「填入待审内容」会把人带**过来**（见 PlatformPanel.placeFill），
+   *   那么"带过来之后想再取一份"就该有路回去，否则单程。
+   */
+  onGoShop: () => void
+  /**
    * ★ 空态时**代替**那句通用引导的说明（`null` = 用默认引导）。
    *
    * 为什么要它：`scene === null` 有**三种完全不同的原因**，用户要做的事也不同 ——
@@ -93,6 +100,14 @@ export interface RightPaneProps {
    *   只认文本就永远不会触发第二次）。
    */
   fill: { text: string; name: string; seq: number } | null
+  /**
+   * ★ 从铺子资料点「开始运行」过来的一次性信号（`0` = 没有这一趟）。
+   *   见 `PlatformPanel.focusSeq`：跨页之后要把**发起区本身**送到视野中间，
+   *   不是"切回操作台"就算到了。
+   */
+  focusSeq: number
+  /** 信号已消费（清零）—— 它是**一次性**的，留着会反复把人拖过来 */
+  onFocusConsumed: () => void
   /**
    * ★★ 左栏若不可见，**为什么**（`null` = 可见）。见 `PlatformPanel` 的 `leftHidden`。
    *
@@ -118,9 +133,12 @@ export function RightPane({
   errorCode,
   onFireError,
   onClearError,
+  onGoShop,
   lead,
   leftHidden,
   fill,
+  focusSeq,
+  onFocusConsumed,
 }: RightPaneProps): ReactElement {
   // ★ 空态也要能回答"去哪儿挑场景" ⇒ 把原因带下去
   if (scene === null) return <NoScenePicked lead={lead} leftHidden={leftHidden} />
@@ -197,7 +215,10 @@ export function RightPane({
               running={running}
               sceneLabel={scene.label}
               noneInbound={inbound === 0}
+              onGoShop={onGoShop}
               fill={fill}
+              focusSeq={focusSeq}
+              onFocusConsumed={onFocusConsumed}
             />
           )
           : <Note>该场景尚未运行。</Note>
@@ -228,6 +249,95 @@ export function RightPane({
 /* ─────────────────── 发起运行（真服务端路径）─────────────────── */
 
 /**
+ * 往上找**真正在滚动**的那个容器。
+ *
+ * ★ 为什么"往上找"而不是拿某个写死的 ref：主滚动容器属于装配层
+ *   （`PlatformPanel` 里那块 `overflowY: 'auto'`），发起区自己够不着；
+ *   写死 ref 就要把 ref 一路传下来，多一层套管就多一处会断的地方。
+ * ★ 判据是"`overflowY` 可滚 **且** scrollHeight 真超出 clientHeight" ——
+ *   只看 `overflow` 会挑出一个"样式写着能滚、其实内容没超"的祖先，滚了等于没滚。
+ */
+function nearestScroller(el: HTMLElement): HTMLElement | null {
+  let p = el.parentElement
+  while (p !== null) {
+    const oy = getComputedStyle(p).overflowY
+    if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 1) return p
+    p = p.parentElement
+  }
+  return null
+}
+
+/** 让 `el` 在容器 `box` 里**居中**所需的 scrollTop */
+function centerTop(box: HTMLElement, el: HTMLElement): number {
+  const b = box.getBoundingClientRect()
+  const e = el.getBoundingClientRect()
+  // ★ 元素比容器还高时"居中"没意义（上下沿都在视野外）⇒ 退回到"顶对齐"，至少头在这里
+  const delta = e.height >= b.height ? e.top - b.top : e.top - b.top - (b.height - e.height) / 2
+  return Math.max(0, Math.min(box.scrollHeight - box.clientHeight, box.scrollTop + delta))
+}
+
+/**
+ * ★★ 平滑滚到 `want`，并**只在"没起步"时**补一次瞬移 —— 返回兜底定时器句柄。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★★ 为什么兜底判据是"**位置变没变**"，不是"**到没到目标**"
+ * ══════════════════════════════════════════════════════════════════
+ * 两种判据都写着"400ms 后补一枪"，但语义完全不同：
+ *
+ *   · 「**没到目标**就补」⇒ 用户在这 400ms 里**自己滚了**，就把他**拽回**目标位置。
+ *     它在 `101`（跨页切过来居中）那个场景没问题 —— 刚切页，用户不可能同时在自己滚。
+ *   · 「**没起步**就补」⇒ 只有当"滚动位置与发起时**一模一样**"才补。
+ *     那说明平滑那一路**压根没起步**（本仓老账：**页面不可见时平滑滚动是空操作，且不报错**）；
+ *     只要位置动过一点（无论去的是目标还是用户自己的方向）就不插手。
+ *
+ * ⇒ 本函数现在也服务于「**点开某一轮**」这种**高频、用户正在读**的场景（`104`）：
+ *   那里"抢用户滚动"的代价大得多（他可能正滚着往下看第 2 轮）。
+ *   ⇒ 统一用"没起步就补"，两处都受益；`101` 原来的语义**被这条严格覆盖**（它那边同样满足）。
+ *
+ * ★ `onSettle` 在两种结局后都会回调（"已经到位"与"补完瞬移"）—— 调用方据此消费一次性信号。
+ */
+function smoothScrollTo(box: HTMLElement, want: number, onSettle?: () => void): number | null {
+  const start = box.scrollTop
+  if (Math.abs(want - start) <= 1) {
+    onSettle?.()
+    return null
+  }
+  box.scrollTo({ top: want, behavior: 'smooth' })
+  return window.setTimeout(() => {
+    if (Math.abs(box.scrollTop - start) <= 1) box.scrollTop = want
+    onSettle?.()
+  }, 400)
+}
+
+/**
+ * ★★ 「展开之后把被展开的东西落到视野中央」的**门控阈值**（`104`）。
+ *
+ * 语义：**只有当"展开后确有内容在视野外（> 这个像素数）"才滚**；否则一动不动。
+ *
+ * ★★ 为什么必须有门控（实测反例，不是洁癖）：
+ *   同一轮次块，容器 `scrollTop=268` 时它**只差 13px 就全看得见**，
+ *   而"居中"要跳 **220px** —— **用户点一下，页面猛挪，什么都没多看到**。
+ *   ★ 要害是：**居中要跳的距离与"你还有多少看不见"无关**（另一个样本：差 108px 却跳 315px）。
+ *   ★ 它与 `100` 里给"自动收缩"判**不做**的那条代价同族（位置不稳定 ⇒ 想再点第二次得重新找），
+ *     只是量级更大（那边 347px，这边最大 817px）。
+ *
+ * ★ 取值 24px ≈ 半行中文（`FS.base` 14 × 行高 1.8 ≈ 25）——
+ *   "差半行以上才算真看不见"，差半行以内不值得动页面。
+ */
+const EXPAND_CENTER_MIN_HIDDEN = 24
+
+/**
+ * 「上一次点击 summary」的**有效期**（毫秒）—— 窗口内到来的 `toggle` 才算"用户点的"。
+ *
+ * ★ 取值 300ms 的依据：点击与 `toggle` 派发之间是**同一轮任务队列**（浏览器在默认动作
+ *   改变 `open` 后排队派发），实测在几十毫秒内 ⇒ 300ms 余量充足。
+ * ★ 取太长的代价：把"用户上一下点过的残留"当成这一次（误滚）；
+ *   取太短的代价：`toggle` 还没派发到、窗口就过期了（该滚的没滚）。
+ *   两头都不好，所以取"远大于实际间隔、远小于人的下一次动作"。
+ */
+const USER_CLICK_WINDOW_MS = 300
+
+/**
  * ★ 为什么"发起运行"要有输入框，而不是一个按钮直接跑：
  *   契约 §3.4 的 `content` 是**待审内容** —— 没有它，这一场审的就是空。
  *   给一个能填的表单是**诚实**的；给一个直接跑的按钮会把
@@ -241,6 +351,9 @@ function StartRunForm({
   sceneLabel,
   noneInbound,
   fill,
+  onGoShop,
+  focusSeq,
+  onFocusConsumed,
 }: {
   onStart: (input: RunInput) => void
   running: boolean
@@ -249,10 +362,18 @@ function StartRunForm({
   noneInbound: boolean
   /** 来自铺子资料的填入信号（见 `RightPaneProps.fill`） */
   fill: { text: string; name: string; seq: number } | null
+  /** 跳回「铺子资料」页签（运行视图里的返回入口） */
+  onGoShop: () => void
+  /** 一次性信号：有人从铺子资料点「开始运行」过来 ⇒ 把自己滚到视野中间 */
+  focusSeq: number
+  onFocusConsumed: () => void
 }): ReactElement {
   const [target, setTarget] = useState('')
   const [content, setContent] = useState('')
   const ready = content.trim() !== '' && !running
+  const boxRef = useRef<HTMLElement | null>(null)
+  /** 居中滚动的兜底定时器（★ 为什么不放 effect cleanup —— 见下面那段注释） */
+  const scrollTimer = useRef<number | null>(null)
 
   /**
    * ★★ 从铺子资料填入待审内容 —— 依赖的是 `seq`（**事件**），不是 `text`（**值**）。
@@ -269,6 +390,41 @@ function StartRunForm({
     setContent(fill.text)
   }, [fill])
 
+  /**
+   * ★★ 从铺子资料点「开始运行」过来 ⇒ 把自己滚到**视野正中间**（2026-10-08 · 101）。
+   *
+   * 为什么必须滚：这一栏上面压着「这场谁来审 / 要过哪几面」那一整块，
+   *   发起区常常在第一屏之外 ⇒ 只切页签，人到了却看不见它（"点了没反应"体感）。
+   *
+   * ★★ 为什么**不是** `scrollIntoView`：它会连带滚动**外层窗口**（宿主页面），
+   *   把宿主自己的布局也拽动 —— 这一层不该碰别人的滚动位置。
+   *   ⇒ 只动**自己那个**滚动容器的 `scrollTop`（`nearestScroller` 认出来的）。
+   *
+   * ★★ 延时兜底这条路径**不能用 effect 自己的 cleanup 收** —— 那是个坑：
+   *   消费信号会改 `focusSeq` ⇒ effect 重跑 ⇒ cleanup 先执行 ⇒ **把兜底定时器当场掐掉**
+   *   （只剩平滑那一路，而它恰恰是可能一动不动的那一路）。
+   *   ⇒ 定时器存 ref，只在**本组件真的卸载**时清（下面那个空依赖的 effect）。
+   *   ★ 滚动本身走共用的 `smoothScrollTo`（`104` 起两处共用，兜底判据统一为"**没起步**就补"）。
+   */
+  useEffect(() => {
+    if (focusSeq === 0) return
+    const el = boxRef.current
+    const box = el === null ? null : nearestScroller(el)
+    // 没有可滚的容器 ⇒ 它本来就在视野里，没有"目标位"可去；信号照样算已消费
+    if (el === null || box === null) {
+      onFocusConsumed()
+      return
+    }
+    scrollTimer.current = smoothScrollTo(box, centerTop(box, el), onFocusConsumed)
+  }, [focusSeq, onFocusConsumed])
+
+  /** 卸载时把还没落的定时器收掉（★ 只收卸载这一次，不参与上面那条链路） */
+  useEffect(
+    () => () => {
+      if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+    },
+    [],
+  )
 
   const inputStyle = {
     width: '100%',
@@ -284,10 +440,33 @@ function StartRunForm({
   }
 
   return (
-    <section data-kaipu-start="1" style={{ marginTop: 14 }}>
+    <section ref={boxRef} data-kaipu-start="1" style={{ marginTop: 14 }}>
       <div style={{ fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
         该场景尚未运行。填好要审的东西，再发起 —— 跑起来后这里会逐个审核面显示进展。
       </div>
+
+      {/* ★ 来自铺子资料的已填入内容 —— 居中呈现（类似抽屉的"带进来的东西"）。
+          下面是它落进的可编辑输入框（契约 §3.4 的 content）：卡片是"你带来了什么"，
+          文本框是"还能改"。两处一致，不二选一。 */}
+      {fill !== null && (
+        <div
+          data-kaipu-fill-card="1"
+          style={{
+            marginTop: 10,
+            padding: '10px 12px',
+            border: `1px solid ${C.border}`,
+            borderRadius: 6,
+            background: C.soft,
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: FS.small, color: C.dim }}>已从铺子资料带入待审内容</div>
+          <div style={{ marginTop: 3, fontSize: FS.base, color: C.text, wordBreak: 'break-all' }}>{fill.name}</div>
+          <div style={{ marginTop: 4, fontSize: FS.small, color: C.dim, maxHeight: 46, overflow: 'hidden', lineHeight: LH.normal }}>
+            {fill.text.length > 120 ? `${fill.text.slice(0, 120)}…` : fill.text}
+          </div>
+        </div>
+      )}
 
       {/* ★ 如实预告：全部待接入 ≠ 跑不了，但结论大概率是「未接入」。不说清就是让人白等 */}
       {noneInbound && (
@@ -318,24 +497,43 @@ function StartRunForm({
         />
       </label>
 
-      <button
-        type="button"
-        disabled={!ready}
-        onClick={() => onStart({ target: target.trim(), content })}
-        style={{
-          marginTop: 8,
-          fontSize: FS.small,
-          padding: '5px 14px',
-          border: `1px solid ${C.border}`,
-          borderRadius: 4,
-          background: ready ? C.soft : 'transparent',
-          color: ready ? 'inherit' : C.dim,
-          cursor: ready ? 'pointer' : 'not-allowed',
-          font: 'inherit',
-        }}
-      >
-        {running ? '正在跑…' : '开始运行'}
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() => onStart({ target: target.trim(), content })}
+          style={{
+            fontSize: FS.small,
+            padding: '5px 14px',
+            border: `1px solid ${C.border}`,
+            borderRadius: 4,
+            background: ready ? C.soft : 'transparent',
+            color: ready ? 'inherit' : C.dim,
+            cursor: ready ? 'pointer' : 'not-allowed',
+            font: 'inherit',
+          }}
+        >
+          {running ? '正在跑…' : '开始运行'}
+        </button>
+        {/* ★ 返回铺子资料：与顶部页签同源的"顺手回去取更多"入口 */}
+        <button
+          type="button"
+          data-kaipu-goshop="1"
+          onClick={onGoShop}
+          style={{
+            fontSize: FS.small,
+            padding: '5px 14px',
+            border: `1px solid ${C.border}`,
+            borderRadius: 4,
+            background: 'transparent',
+            color: C.dim,
+            cursor: 'pointer',
+            font: 'inherit',
+          }}
+        >
+          铺子资料
+        </button>
+      </div>
     </section>
   )
 }
@@ -359,15 +557,25 @@ function NoScenePicked({
     return <div style={{ padding: 20, fontSize: FS.base, lineHeight: LH.loose }}>{lead}</div>
   }
   /**
-   * ★★ 指引必须**指得着**（2026-10-05 修）。
+   * ★★ 指引必须**指得着**（2026-10-05 修；2026-10-08 再修一次）。
    *
    * 原来写死"先从左边挑一场「场景」"—— 但左栏可能**被用户收起**、或被窄容器**挤掉**，
    * 那两种情况下左边**什么都没有**：用户照着做只会扑空，
    * 然后怀疑是自己不会用（**界面说了不成立的话，比不说更糟**）。
    * ★ 三种情况**出路不同**，所以必须分开说：
    *   · 可见     ⇒ 指左栏
-   *   · 用户收起 ⇒ 指顶部那个按钮（它在）
-   *   · 容器太窄 ⇒ 指"把窗口拉宽"（**不能**指按钮 —— 窄屏下那个按钮不存在）
+   *   · 用户收起 ⇒ 指顶部那条分隔线上的把手（它在）
+   *   · 容器太窄 ⇒ 指顶部那条「场景」折叠条（它在）
+   *
+   * ★★ 改的那一条（`'narrow'`）：原文是「把窗口拉宽一些」——
+   *   那是把**功能缺失说成用户限制**：窄屏下用户本来就该能干活，
+   *   让他去拉窗口 = 承认"这儿你用不了"。
+   *   ⇒ 现在窄屏有 `NarrowScenePicker` 兜着，指引就**指得着**了。
+   *   ★ 顺带说清一个容易误判的点：这条文案**在窄屏下几乎不会出现** ——
+   *     `selected` 会自动选中第一场，`scene !== null` ⇒ 走不到空态。
+   *     它是"场景列表为空 / 切数据源的一瞬"的兜底。但**兜底文案也必须是真的**：
+   *     写一句"去拉宽窗口"，在真出现的那一次就是**假话**。
+   *
    * `data-kaipu-lead` 是判据锚点：让"指引与左栏状态一致"这件事**可被断言**。
    */
   const guide =
@@ -375,27 +583,37 @@ function NoScenePicked({
       ? '先从左边挑一场「场景」'
       : leftHidden === 'collapsed'
         ? '点顶部的「展开场景栏」，再挑一场「场景」'
-        : '窗口太窄，场景栏放不下 —— 把窗口拉宽一些，再挑一场「场景」'
+        : '窗口太窄放不下场景栏 —— 点顶部的「场景」，再挑一场'
   return (
     <div style={{ padding: 20, fontSize: FS.base, lineHeight: LH.loose }}>
-      <div data-kaipu-lead={leftHidden ?? 'visible'} style={{ fontSize: FS.heading }}>
+      {/* ★ 定案 · 空态引导一句说清三动作（选场 → 放东西 → 拿报告），不含术语。
+          ★ 独立锚点 `data-kaipu-gist`：与 `[data-kaipu-lead]`（去哪儿挑场景）分开断言，
+            不打乱那条"能翻转"的判据（见探针 ⑨ 段）。
+          ★ 2026-10-08 按定案稿对齐**标点**：原落版是"…审一审，审完…"（一逗到底），
+            定案稿是"…审一审。审完…"（**两句**）—— 断句本身在说"三步"：
+            前半 = 前两个动作（选场 + 放东西），后半 = 第三个动作（拿报告）。
+            ⇒ 一字未增删，只改句读；探针同步为断完整句（见 ⑨ 段）。 */}
+      <div data-kaipu-gist="1" style={{ fontSize: FS.heading, lineHeight: LH.normal }}>
+        选一场，把你手头的东西放进来审一审。审完给你一份带签的报告。
+      </div>
+      <div data-kaipu-lead={leftHidden ?? 'visible'} style={{ marginTop: 10, color: C.dim }}>
         {guide}
       </div>
-      <div style={{ marginTop: 8, color: C.dim }}>
-        一场场景就是一次固定的会商流程：审哪几个审核面、最多回炉几轮。
-      </div>
-      <div style={{ marginTop: 10, color: C.dim }}>选好之后，右边从上往下看：</div>
-      <ol style={{ margin: '6px 0 0', paddingLeft: 22 }}>
-        <li>「第 N 轮」—— 每轮里每个审核面各给一个判定，回炉会另起一轮；</li>
-        <li>「本次结论」—— 含 ★「未参与审核面」，它说明这一趟没审哪些；</li>
-        <li>「角色位变更记录」—— 谁在什么时候换了位子、为什么。</li>
-      </ol>
     </div>
   )
 }
 
-/* ─────────────────────── 约束 ①：未签名 ─────────────────────── */
-
+/* ─────────────────────── 约束 ①：未签名 ───────────────────────
+ *
+ * ★★ 2026-10-08 改版：**红框 → 暖金提示框**。
+ *
+ * 旧版是 `border/左边线` 全红 + 红字，形如「报错台」；而"未签名"只是
+ * **还没接入签名服务**这一正常态，不是故障。⇒ 视觉改暖金（左侧线 + 米色底），
+ * 文案改「预告」语气（见 `copy.ts` 的 `unsignedReport*` 注释）。
+ * 约束义务**没丢**：仍醒目显示"当前还不能对外出具"，只是不再像在指责用户。
+ * ★ 配色走固定暖金色（不随宿主主题变量）：与旧版红框同策略——
+ *   锚点 `data-kaipu-unsigned="1"` 保留，探针可继续认。
+ */
 function UnsignedBanner(): ReactElement {
   return (
     <div
@@ -403,12 +621,12 @@ function UnsignedBanner(): ReactElement {
       style={{
         marginTop: 12,
         padding: '10px 12px',
-        border: '1px solid #dc2626',
-        borderLeft: '4px solid #dc2626',
-        background: 'rgba(220,38,38,0.08)',
+        border: '1px solid #d8b863',
+        borderLeft: '4px solid #c69a3c',
+        background: 'rgba(214,180,92,0.12)',
       }}
     >
-      <div style={{ fontSize: FS.base, fontWeight: 600, color: '#dc2626' }}>{CONSTRAINTS.unsignedReport}</div>
+      <div style={{ fontSize: FS.base, fontWeight: 600, color: '#9c7a2e' }}>{CONSTRAINTS.unsignedReport}</div>
       <div style={{ fontSize: FS.small, color: C.dim, marginTop: 4, lineHeight: LH.normal }}>
         {CONSTRAINTS.unsignedReportWhy}
       </div>
@@ -460,7 +678,7 @@ function RunErrorsBlock({ errors }: { errors: readonly RunErrorView[] }): ReactE
             <span>{text}</span>
             {!known && (
               <span data-kaipu-unlisted-code={e.code} style={{ fontSize: FS.tag, color: C.dim, marginLeft: 6 }}>
-                （这条的说明还没收录，已按服务端原话显示；我方会报给对方补，不自行代写）
+                （这条的说明还没收录，已按服务端原话显示；本仓会报给对方补，不自行代写）
               </span>
             )}
           </div>
@@ -614,25 +832,41 @@ function ZeroInbound({ scene }: { scene: SceneCard }): ReactElement {
         lineHeight: LH.normal,
       }}
     >
-      <div>该场景的 {scene.lamps.length} 个审核面全部未接入执行方 —— 界面显「待接入」。</div>
-      <div style={{ color: C.dim, fontSize: FS.small, marginTop: 3 }}>
-        这不是故障：场地不内置任何「必须有的」执行方。接入执行方后本场景即可运行； 在此之前，场地本身仍然可用（可查看、可配置）。
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+        <span>该场景的 {scene.lamps.length} 个审核面全部待接入执行方。</span>
+        {/*
+          ★★ 2026-10-08 改版：「这不是故障…」的辩解**收进「?」悬停**。
+          事实句（上面那行）照常可见；解释句移到 `title`，鼠标悬停才显示——
+          页面不再像在自我辩护，需要的人仍能找到答案。
+        */}
+        <span
+          title="这不是故障：场地不内置任何「必须有的」执行方。接入执行方后本场景即可运行；在此之前，场地本身仍然可用（可查看、可配置）。"
+          aria-label="为什么不是故障"
+          style={{
+            fontSize: FS.tag,
+            color: C.dim,
+            cursor: 'help',
+            borderBottom: `1px dotted ${C.dim}`,
+          }}
+        >
+          ?
+        </span>
       </div>
     </div>
   )
 }
 
-/* ───────── B 组「运行事实」**不在这里**（2026-10-06 · 古茶 013 / 008）─────────
+/* ───────── B 组「运行事实」**不在这里**（2026-10-06）─────────
  *
  * 本文件渲染的整块 DOM 就是 `data-kaipu-run` —— 运行视图的**判据边界**
  * （见 `PlatformPanel` 的注释）。而 B 组是**新增的展示内容**。
  *
- * ⇒ 008 §1.2 **D-D3**：「**新增锚点必须在 `data-kaipu-run` 之外**（`data-kaipu-process`）」
+ * ⇒ 那节口径：「**新增锚点必须在 `data-kaipu-run` 之外**（`data-kaipu-process`）」
  *   ⇒ 它渲染在 `PlatformPanel.tsx` 的 `ProcessFacts`，**物理落在运行视图之外**。
  *
- * ★ 为什么不靠"读文本时排除"（那是我方第一版做法，已废弃）：
+ * ★ 为什么不靠"读文本时排除"（那是早期版本做法，已废弃）：
  *   排除是**减法**，减法只在"探针记得减"时成立 —— 换一个人写判据、或换一个探针，
- *   污染立刻回来。**先隔离，再展示**（回函原文）说的就是别把正确性押在判据的自律上。
+ *   污染立刻回来。**先隔离，再展示**（复核意见原文）说的就是别把正确性押在判据的自律上。
  */
 
 /* ─────────────────────── 逐轮分段（R2）─────────────────────── */
@@ -661,7 +895,7 @@ function RoundBlock({ round }: { round: RoundView }): ReactElement {
   const decided = round.lamps.filter((l) => l.verdict !== null)
 
   /**
-   * ★★ **默认展开，但保持"非受控"**（2026-10-06 · 古茶 013「A 组默认展开」）
+   * ★★ **默认展开，但保持"非受控"**（2026-10-06「A 组默认展开」）
    *
    * 为什么**不能**直接写 `<details open>`：
    *   React 会把 `open` 当**受控属性**、**每次渲染都设回去** ⇒ 用户（或探针）
@@ -675,19 +909,82 @@ function RoundBlock({ round }: { round: RoundView }): ReactElement {
    *     （其中「折起来时判定仍可见」是 R3 的关键落点，不能因此失效）
    */
   const ref = useRef<HTMLDetailsElement | null>(null)
+  /**
+   * ★★ 「这一下是人点的」的时间戳 —— `toggle` 回调据此判断该不该滚（见 `onToggle` 守则 ②）。
+   *   `0` = 从没点过 ⇒ 任何程序化开合都不会被当成用户操作。
+   */
+  const clickedAt = useRef(0)
+  /** 展开后居中的兜底定时器（同 `StartRunForm`：存 ref、只在卸载时清） */
+  const scrollTimer = useRef<number | null>(null)
   useEffect(() => {
     const el = ref.current
     if (el !== null) el.open = true
   }, [])
 
+  /**
+   * ★★ 「点开这一轮 ⇒ 把它落到视野中间」（2026-10-08 · 104 落地）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 它修的是什么（实测，不是观感）
+   * ══════════════════════════════════════════════════════════════════
+   *   一轮展开态 315px / 折叠态 43px ⇒ 展开出来 **+272px**。
+   *   而用户往往是**在这一轮标题停在容器底部时**点开它
+   *   （实测起始 `scrollTop=0` 时块有 **281px 在视野外，全在下边**）
+   *   ⇒ **展开出来的内容一个像素都看不见**，且现状 `scrollTop 0 → 0`（一动不动）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★★ 三条守则（每条都对着一个会出事的场景）
+   * ══════════════════════════════════════════════════════════════════
+   *   ① **折叠不滚**：折叠是内容变少，不会造成"看不见"；这时滚反而把用户推离他正在读的位置。
+   *   ② ★★ **只有"用户点的"才滚** —— 见下面 `clickedAt` 那段的理由（这条最要紧）。
+   *   ③ ★★ **门控**：块已经基本在视野里（视野外 ≤ `EXPAND_CENTER_MIN_HIDDEN`）就一动不动。
+   *      理由见那个常量的注释（实测反例：只差 13px 却要跳 220px）。
+   */
+  const onToggle = (e: React.SyntheticEvent<HTMLDetailsElement>): void => {
+    const el = e.currentTarget
+    if (!el.open) return                                   // ①
+    if (Date.now() - clickedAt.current > USER_CLICK_WINDOW_MS) return   // ②
+    const box = nearestScroller(el)
+    if (box === null) return
+    const b = box.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    const hidden = Math.max(0, b.top - r.top) + Math.max(0, r.bottom - b.bottom)
+    if (hidden <= EXPAND_CENTER_MIN_HIDDEN) return         // ③
+    scrollTimer.current = smoothScrollTo(box, centerTop(box, el))
+  }
+  /** 卸载时把还没落的兜底定时器收掉（与 `StartRunForm` 同款做法） */
+  useEffect(
+    () => () => {
+      if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+    },
+    [],
+  )
+
   return (
     <details
       ref={ref}
       data-kaipu-round={round.round}
+      onToggle={onToggle}
       style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}
     >
       {/* ★ 不用 flex：`<summary>` 上写 `display:flex` 会把默认的三角 marker 干掉 */}
-      <summary style={{ cursor: 'pointer', padding: '2px 0', lineHeight: LH.loose }}>
+      {/*
+        ★★ `onClick` 是**守则 ② 的落点**：只有"这一下是人点的"才允许下面的 `onToggle` 去滚。
+        为什么非要区分（挂 `toggle` 事件本身就够了吗）：
+          · **挂载时**本组件会 `el.open = true`（保 A 组"默认展开"，见上面）—— 那也派发 `toggle`；
+          · **探针**到处 `d.open = true`（`expandIn` / `expandAll`）—— 同样派发 `toggle`。
+          ⇒ 不区分的话，**每出现一轮新轮次、每次探针铺前态，页面都会自己滚一下** ——
+            用户没点任何东西，视野却被挪走（"页面自己在动"是最难接受的一类行为）。
+        ★ 为什么用**时间窗**而不只是一个布尔标志：布尔标志遇到"点了 summary 但 open 没变"
+          （极小概率）会**悬挂**成 true，之后第一次程序化开合就被误判成用户点击。
+          时间窗（`USER_CLICK_WINDOW_MS`）让悬挂的标志自动过期 —— 一行代价，去掉一整类边缘情况。
+        ★ 为什么不用 `event.isTrusted`：`el.open = x` 触发的 `toggle` 是**浏览器内部派发**的，
+          `isTrusted` **同样是 true** ⇒ 区分不了（实测过）。
+      */}
+      <summary
+        onClick={() => { clickedAt.current = Date.now() }}
+        style={{ cursor: 'pointer', padding: '2px 0', lineHeight: LH.loose }}
+      >
         <span style={{ fontSize: FS.title }}>第 {round.round} 轮</span>
         {/* ★ 回炉在这里可见（R2）：第 2 轮的 reason 就是服务端给的「⚡有条件回炉」 */}
         <span style={{ fontSize: FS.small, color: C.dim, marginLeft: 10 }}>{round.reason}</span>
@@ -724,7 +1021,7 @@ function RoundBlock({ round }: { round: RoundView }): ReactElement {
           **本来就会 `expandIn()` 把所有 details 展开**（见 run-view-probe.mjs 顶部）
           ⇒ 展开与否**不改变**它读到什么，因此**不构成新增的污染面**。
 
-        ⇒ 按 008 §1.2 的 **D-D3**「**新增锚点**必须在 `data-kaipu-run` 之外」，
+        ⇒ 按那节口径「**新增锚点**必须在 `data-kaipu-run` 之外」，
           这里**不再挂** `data-kaipu-process` —— 那个锚点归**新增的展示区**
           （`RunFacts`，已移到运行视图**之外**，见 `PlatformPanel`）。
 

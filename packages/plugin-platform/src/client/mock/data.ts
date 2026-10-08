@@ -29,13 +29,13 @@
  *
  * ── ★★ 2026-10-07：灯名字段已对齐契约 v1.4（本文件最重要的一次改动）────────
  *
- * **权威来源**：`083-interface-contract-v1.4-20261007.md`（sha256 `f1211713…` · 1,448 行）
+ * **权威来源**：契约 v1.4（sha256 `f1211713…` · 1,448 行）
  *   §3.1 `role: "匠灯"` / `lamp: "匠灯"` · §3.3 `lamps: ["智灯","匠灯","戒灯","仁灯"]`
  *   · §3.4 SSE `start.lamps` / `lamp_start.lamp` / `dims` 同值域。
  *
  * **为什么必须改**（原来填的是「主体核验」这类**自编维度名**）：
  *   ① **事实错误**：`lamps[].lamp` / `agents[].role` 的真值是**灯名**。
- *      工坊 2026-10-07 实测 `GET /scenes` / `start.lamps` 均返灯名。
+ *      2026-10-07 实测 `GET /scenes` / `start.lamps` 均返灯名。
  *   ② **这条本来就在撒谎**：`live.ts:214` 用 `agents.find(x => x.role === raw)`
  *      把 `role` 与 lamp 名精确匹配 —— 而旧 mock 里 `role` 是 `'执行'`/`'审计'`、
  *      `lamp` 是 `'主体核验'`，**根本匹配不上**。旧数据下这条兜底路径**恒不命中**。
@@ -57,7 +57,7 @@
  *
  *   ★ **只取四灯**，不引入第五个名字：v1.4 §3.3 的**内置**多灯场景
  *     (`multi-dim-review`) 就是 `["智灯","匠灯","戒灯","仁灯"]` 四盏。
- *     **我方不发明内置场景里没有的取值**（少做比多做好）。
+ *     **本仓不发明内置场景里没有的取值**（少做比多做好）。
  *
  *   ★ **哪些保持自编**（裁定(a) 的"内容自编"那一半）：
  *     `agentName` / `seatHolders[].holderName` / `MOCK_SEAT_CHANGES` 的 from·to
@@ -81,7 +81,7 @@ export const MOCK_AGENTS: AgentCard[] = [
     slug: 'subject-verifier',
     name: '主体核验方',
     // ★ 契约 v1.4 §3.1：`role` 的值域 = **灯名**（示例 `"role": "匠灯", "lamp": "匠灯"`），
-    //   不是"执行/审计"这类**我方自编的角色词**。
+    //   不是"执行/审计"这类**本仓自编的角色词**。
     //   ⇒ 它同时是 `live.ts` 老形状兜底（`role === lamp` 匹配）的**唯一依据**，
     //     填错不会报错，只会**静默失配**。
     role: '智灯',
@@ -173,22 +173,34 @@ export const MOCK_SCENES: SceneCard[] = [
     version: '1.1',
     lamps: [
       // ★ 四盏灯的顺序与 v1.4 §3.3 内置场景 `["智灯","匠灯","戒灯","仁灯"]` **逐字一致**
-      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方' },
-      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
+      // ★★ 2026-10-08 补 `duty`/`dutyNote` —— **这两个字段是契约 v1.5 §3.3 已有的**
+      //    （本仓类型与 mock 此前都没跟上，属"契约有、本仓缺"）。职责值**逐字取契约样例**，
+      //    不自己编：契约注明「`duty` 权威源 = 官网 `.t-role`」。
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方', duty: '拆局推演', dutyNote: '看眼前的路怎么走' },
+      { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方', duty: '工程落地与系统维护', dutyNote: '把图纸砌成城墙' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方', duty: '风险推演与预警', dutyNote: '先看哪里会塌' },
       // ★★ `agentId: null` ⇒ **该灯尚未接入执行方** ⇒ 界面显「待接入」。
       //    这是「场地零内置可跑」的用户可见面，**当一等公民做**，不是异常态。
-      { lamp: '仁灯', agentId: null, agentName: null },
+      { lamp: '仁灯', agentId: null, agentName: null, duty: '人味校准', dutyNote: '这条路，人走得下去吗' },
     ],
     loopPolicy: { maxLoop: 2, maxGlobalLoops: 4 },
     requiresExternal: false,
     // ★ 形状按契约 v1.3 §23.3（**数组**，每项 {seat, holderType, holderId, holderName}）
     //   —— 原先是「对象 + 三个固定键」的早期推测，契约落纸后改回契约形状。
+    // ★★ 2026-10-08 补至 **4 项**：契约 v1.5 §23.3 明写「`seatHolders` **已落地（各场景 4 项）**」
+    //    ⇒ 本仓原 2 项**与现状不符**，这里补 management / signature。
+    // ★ 同时订正 `holderType` 值域：`builtin` = 平台内建的**备选承担方**（智囊团/第三方审计/管理方）；
+    //    `platform` = **平台自身提供的服务位 —— 契约注明"当前仅签名位"**
+    //    ⇒ `execution` / `audit` 原写 `platform` **用错档**，改回 `builtin`。
     seatHolders: [
-      { seat: 'execution', holderType: 'platform', holderId: 'ag-1001', holderName: '主体核验方' },
-      { seat: 'audit', holderType: 'platform', holderId: 'ag-1003', holderName: '留痕审计方' },
+      { seat: 'execution', holderType: 'builtin', holderId: 'ag-1001', holderName: '主体核验方' },
+      { seat: 'audit', holderType: 'builtin', holderId: 'ag-1003', holderName: '留痕审计方' },
+      // ★ 管理位取**契约 `seats.json` 的默认值**（「山海管理方（候选）」是**默认/示例**，
+      //   不是固定值 —— 2026-10-08 明确：管理位可以是项目主持人，也可以是委托方自己）。
+      { seat: 'management', holderType: 'builtin', holderId: 'shanhai-mgmt', holderName: '山海管理方（候选）' },
+      { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
     ],
-    description: '标准开铺审计：四维会商，最高 2 轮回炉。',
+    description: '标准开铺审计：四个审核面会商，最高 2 轮回炉。',
     category: 'standard_review',
   },
   {
@@ -196,12 +208,22 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '复核演练 · 全场未接入',
     version: '0.9',
     lamps: [
-      { lamp: '智灯', agentId: null, agentName: null },
-      { lamp: '匠灯', agentId: null, agentName: null },
-      { lamp: '戒灯', agentId: null, agentName: null },
+      { lamp: '智灯', agentId: null, agentName: null, duty: '拆局推演', dutyNote: '看眼前的路怎么走' },
+      { lamp: '匠灯', agentId: null, agentName: null, duty: '工程落地与系统维护', dutyNote: '把图纸砌成城墙' },
+      { lamp: '戒灯', agentId: null, agentName: null, duty: '风险推演与预警', dutyNote: '先看哪里会塌' },
     ],
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
     requiresExternal: false,
+    // ★★ 2026-10-08 补 4 项（契约 v1.5 §23.3「各场景 4 项」）。
+    //   ★ 这一场是「场地零内置可跑」的可见面 ⇒ 三个可替换位**全 `none`**（真的没人），
+    //     唯独**签名位是平台自身服务**（`platform`）—— 它不依赖任何执行方接入，
+    //     这正是"场地本身仍可用"的落点。
+    seatHolders: [
+      { seat: 'execution', holderType: 'none', holderId: '', holderName: '（未指派）' },
+      { seat: 'audit', holderType: 'none', holderId: '', holderName: '（未指派）' },
+      { seat: 'management', holderType: 'none', holderId: '', holderName: '（未指派）' },
+      { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
+    ],
     description: '★ 场地零内置可跑的用户可见面：一个执行方都没有时，界面全是「待接入」；场地本身仍可用。',
     category: 'daily_selfcheck',
   },
@@ -210,20 +232,22 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '预约核验 · 需外部预约',
     version: '1.0',
     lamps: [
-      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
-      { lamp: '仁灯', agentId: null, agentName: null },
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方', duty: '拆局推演', dutyNote: '看眼前的路怎么走' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方', duty: '风险推演与预警', dutyNote: '先看哪里会塌' },
+      { lamp: '仁灯', agentId: null, agentName: null, duty: '人味校准', dutyNote: '这条路，人走得下去吗' },
     ],
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 2 },
     // true ⇒ `run` 需带 `reservationId`；无有效预约 ⇒ 409 not_checked_in
     requiresExternal: true,
     seatHolders: [
-      { seat: 'execution', holderType: 'platform', holderId: 'ag-1001', holderName: '主体核验方' },
-      { seat: 'audit', holderType: 'platform', holderId: 'ag-1003', holderName: '留痕审计方' },
+      { seat: 'execution', holderType: 'builtin', holderId: 'ag-1001', holderName: '主体核验方' },
+      { seat: 'audit', holderType: 'builtin', holderId: 'ag-1003', holderName: '留痕审计方' },
       // ★ `holderType: 'none'` ⇒ **该执行位无人**（契约 §23.3 三值之一）——
       //   与"待接入"同源但落在**执行位**这一层（原先 mock 写的是字符串「（未指派）」，
       //   那是把"没人"编码进了名字里；契约给了它一个**类型值**，就该用它）。
       { seat: 'management', holderType: 'none', holderId: '', holderName: '（未指派）' },
+      // ★★ 2026-10-08 补第 4 项（契约 v1.5 §23.3「各场景 4 项」）
+      { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
     ],
     description: '带外部预约的核验场景：运行前须有有效预约。',
     category: 'standard_review',
@@ -235,11 +259,22 @@ export const MOCK_SCENES: SceneCard[] = [
     lamps: [
       // ★ 这一场的执行方是「主体核验方」(ag-1001) 与「留痕审计方」(ag-1003) ——
       //   按全局映射分别是**智灯**与**戒灯**（灯名跟着 agent 走，不跟着场景走）。
-      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方', duty: '拆局推演', dutyNote: '看眼前的路怎么走' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方', duty: '风险推演与预警', dutyNote: '先看哪里会塌' },
     ],
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
     requiresExternal: false,
+    // ★★ 2026-10-08 补 4 项（契约 v1.5 §23.3「各场景 4 项」）。
+    //   ★★ 管理位**刻意用 `external` + 客户方的人** —— 2026-10-08 明确：
+    //      「管理位不一定姓山海，可以是项目主持人，也可以是委托方自己」。
+    //      ⇒ 演示数据要**把这个形态真的演出来**，否则界面上永远只看得到平台默认值，
+    //        那条口径就只落在文档里、落不到屏幕上。
+    seatHolders: [
+      { seat: 'execution', holderType: 'builtin', holderId: 'ag-1001', holderName: '主体核验方' },
+      { seat: 'audit', holderType: 'builtin', holderId: 'ag-1003', holderName: '留痕审计方' },
+      { seat: 'management', holderType: 'external', holderId: 'client-pm-1', holderName: '项目主持人' },
+      { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
+    ],
     description: '进件前的资料预检：不齐直接拒收，不收费。',
     category: 'daily_selfcheck',
   },
@@ -248,14 +283,21 @@ export const MOCK_SCENES: SceneCard[] = [
     label: '开铺审计 · 进行中',
     version: '1.1',
     lamps: [
-      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方' },
-      { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方' },
-      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方' },
+      { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方', duty: '拆局推演', dutyNote: '看眼前的路怎么走' },
+      { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方', duty: '工程落地与系统维护', dutyNote: '把图纸砌成城墙' },
+      { lamp: '戒灯', agentId: 'ag-1003', agentName: '留痕审计方', duty: '风险推演与预警', dutyNote: '先看哪里会塌' },
     ],
     loopPolicy: { maxLoop: 2, maxGlobalLoops: 4 },
     requiresExternal: false,
+    // ★★ 2026-10-08 补 4 项（契约 v1.5 §23.3「各场景 4 项」）—— 与 `opening-audit` 同一场景的快照
+    seatHolders: [
+      { seat: 'execution', holderType: 'builtin', holderId: 'ag-1001', holderName: '主体核验方' },
+      { seat: 'audit', holderType: 'builtin', holderId: 'ag-1003', holderName: '留痕审计方' },
+      { seat: 'management', holderType: 'builtin', holderId: 'shanhai-mgmt', holderName: '山海管理方（候选）' },
+      { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
+    ],
     description: '同一场景的"跑到一半"快照：用于演示客户端断开时的措辞。',
-    // ★★ **刻意留空** —— 契约 #17「未归类不藏」：有场景却没归类 ⇒ 界面必须
+    // ★★ **刻意留空** —— 「未归类不藏」：有场景却没归类 ⇒ 界面必须
     //    **单列「未归类」如实展示**。留空一个就是为了让这条被演示到、被断言到。
     category: '',
   },
@@ -310,12 +352,12 @@ export const MOCK_SCENE_RECOMMENDATIONS: SceneRecommendation[] = [
  *   start → (round_start → lamp_start/lamp_delta×N/lamp_done → round_done)+ → summary → usage → done
  *
  * ★ `start.lamps` = **本次实际参与**的维度（`dims` 裁剪后的结果）——
- *   所以被裁掉的那一维**不出现在这里**，它只会出现在 `summary.skippedDims`。
+ *   所以被裁掉的那**一个审核面**不出现在这里，它只会出现在 `summary.skippedDims`。
  */
 
 const AT = '2026-10-05T12:00:00+08:00'
 
-/** ① 开铺审计 · 标准 —— ★ 两轮（第 2 轮是回炉）+ 一维被裁剪 + 一维待接入 */
+/** ① 开铺审计 · 标准 —— ★ 两轮（第 2 轮是回炉）+ 一个审核面被裁剪 + 一个待接入 */
 const RUN_OPENING_AUDIT: SceneRunEvent[] = [
   { event: 'start', requestId: 'req-mock-0001', scene: 'opening-audit', lamps: ['智灯', '匠灯', '戒灯'], serverTime: AT },
 
@@ -351,7 +393,7 @@ const RUN_OPENING_AUDIT: SceneRunEvent[] = [
     conditions: ['补件已核验（第 2 轮）'],
     round: 2,
     participatedDims: ['智灯', '匠灯', '戒灯'],
-    // ★ 契约 #4：报告**不能**给出"审全了"的错觉 ⇒ 这一项必须在报告里可见
+    // ★ 报告**不能**给出"审全了"的错觉 ⇒ 这一项必须在报告里可见
     skippedDims: ['仁灯'],
   },
   { event: 'usage', tokensIn: 12840, tokensOut: 3160, credits: 12, balanceAfter: 488 },

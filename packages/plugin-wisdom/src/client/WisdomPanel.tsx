@@ -157,7 +157,7 @@ function StatusBand({ snap, sum }: { snap: Loaded; sum: LampSummary }): ReactEle
    ② 灯位一览（核心区）
    ══════════════════════════════════════════════════════════════════ */
 
-/** 网格形状（发起人 2026-10-06 定：一组 5 个灯位一行，预留大概 4-5 组 ⇒ 取上沿 5 行；要调改这两个常量即可） */
+/** 网格形状 */
 const LAMP_COLS = 5
 const LAMP_ROWS = 5
 
@@ -186,7 +186,7 @@ function LampSection({ lamps, loading }: { lamps: readonly LampSeat[]; loading: 
 /**
  * 灯位网格：**真灯位在前，占位补足到 `LAMP_COLS × LAMP_ROWS`**。
  *
- * ★★ 占位（`ReservedSlot`）是发起人点名的"预留灯位"—— 它把「位子给你留着了」
+ * ★★ 占位（`ReservedSlot`）是决策人点名的"预留灯位"—— 它把「位子给你留着了」
  *   从一句话变成**看得见的格子**。但它必须与真灯位**在判据层可分**：
  *   真灯位挂 `data-kaipu-wisdom-lamp`，占位挂 `data-kaipu-wisdom-slot="reserved"`
  *   —— 探针（`wisdom-view-probe.mjs`）数的是前者，占位混进去会把
@@ -222,7 +222,7 @@ function LampGrid({ lamps }: { lamps: readonly LampSeat[] }): ReactElement {
  * ★★ 状态文案**故意不区分 `vacant` / `registered`**（两者都显「待接入」）：
  *   区分发生在**状态带的汇总层** —— 见 `StatusBand` 与 `live.ts` 的 `LampState` 注释。
  *
- * ★★ 状态**紧贴灯名**（发起人 2026-10-06：别甩到行尾）——
+ * ★★ 状态**紧贴灯名**——
  *   原一行式布局里状态用 `marginLeft:auto` 推到最右，灯一多名字与状态就分离了；
  *   卡片式天然上下相邻，这个问题消失。
  */
@@ -348,7 +348,7 @@ function lampAria(seat: LampSeat): string {
  * **不是"我们还没装好"（那是我们的问题），而是"位子给你留着了"（这是场地的承诺）**。
  * 对齐总体定位：**"场地"是我们做的，"谁来"是客户定的。**
  *
- * ⚠️ **Q4 的纠结已落地**（Q4 归发起人拍，选了"两句分开说"的写法 ——
+ * ⚠️ **Q4 的纠结已落地**（Q4 归决策人拍，选了"两句分开说"的写法 ——
  *   即下面前两句；因为那既是诚实的、也是正向的）。
  *   ★ 但这里**没有**写第三句"内置谋士（山海智囊团）也在这个位子上，尚未入场"。
  *     为什么不写：**Q2 还没答**（5 条灯是否共享同一 host Agent）。

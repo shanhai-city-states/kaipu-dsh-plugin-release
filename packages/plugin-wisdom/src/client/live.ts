@@ -408,9 +408,9 @@ export async function loadLive(signal?: AbortSignal): Promise<Snapshot> {
     // ★ 这一步失败最常见的原因**不是**服务端挂了，而是**场地插件不在场**（端点未注册）
     if (!('business' in st) && looksLikeMissingEndpoint(st.error)) {
       // ★ 但 404 有两个来源（见 bridge.ts 与**服务端指南 v2 §三「404 有两种」**）：
-      //   先看是否带"我方拼串"指纹 —— 报文里出现 `/api/<ns>/…` 段，或宿主网关那句
+      //   先看是否带"本仓拼串"指纹 —— 报文里出现 `/api/<ns>/…` 段，或宿主网关那句
       //   「路径不存在: …」（`api` 是通道名、`kaipu` 是命名空间，**都不该进 HTTP URL**），
-      //   那是我方接入地址/拼串的问题，出路**不是**查插件装载。如实分开说。
+      //   那是本仓接入地址/拼串的问题，出路**不是**查插件装载。如实分开说。
       const ownBug = /\/api\//.test(st.error.detail) || /路径不存在/.test(st.error.detail)
       return offlineSnapshot(
         'stale',

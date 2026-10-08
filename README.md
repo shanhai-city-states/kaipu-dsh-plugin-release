@@ -108,6 +108,30 @@ dsh plugin --profile <your-profile> list
 
 ---
 
+## 二、补 · 依赖解析的两条留意
+
+> 本节的由来：源码里引用「根 README §二·补 留意1」处（`src/remote/service.ts`），
+> 说明依赖解析有一处**不明显但会致命**的约束。此处补全，供后续维护与复核对照。
+
+### 留意 1 · 契约层是**构建期**依赖，不随用户机
+
+`@shanhai/kaipu-contract` 是**构建期**依赖，**不在用户机上**。
+
+- **host half 不经打包**（tsc 直出 `lib/index.js`），它的裸 `import` 必须能在**用户机的 profile** 里解析得到；
+- ⇒ 若 host half 直接 `import` 契约层 ⇒ 发布出去就是一条**解析不到的裸 import**（用户端直接挂）；
+- ⇒ 因此 host half **只 `import type`**（类型会被 tsc 擦除，不产生运行时依赖）；
+- **运行时值**（错误翻译、常量表等）留在 **client half** —— client bundle 打包时已把契约层内联。
+
+**判据**：改 host half 的 import 时，只允许 `import type`；任何运行时值一律走 client half。
+
+### 留意 2 · `pnpm install` 需要契约包就位
+
+两包的 `package.json` 声明了 `@shanhai/kaipu-contract`，`pnpm install` 会按 workspace 解析它。
+**若该包不在工作区内**，install 会以 `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` 失败。
+⇒ 构建前请确认契约层在工作区可见（**发布面的依赖形态另见发布流程说明**）。
+
+---
+
 ## 许可
 
 MIT

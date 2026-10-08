@@ -186,7 +186,7 @@ export interface RunSceneQuery {
   requestId?: string
   target?: string
   content?: string
-  /** 裁剪参与灯次（承 `run_when`） */
+  /** 裁剪参与灯序号（承 `run_when`） */
   dims?: string[]
   /** P2 起用（外部 Agent 进场） */
   externalAgents?: { agentId: string; seat: string }[]
@@ -769,7 +769,7 @@ export class KaipuRemoteService extends TypertRemoteService {
    * `kaipu/openShopDir` —— 在系统文件管理器里打开铺子资料目录（2026-10-06）。
    *
    * ★★ 参数**只有 `sub`（可选枚举）**，**没有 `path`** —— 路径由 host 侧自己算。
-   *   这是比先例（003 的 `openPath` 收路径再收敛）**更严**的一处：
+   *   这是比先例（早先那处 `openPath` 收路径再收敛）**更严**的一处：
    *   外面**根本传不进任意路径**，穿越 / 越界在设计上就不存在。
    *
    * ★ 与其它铺子资料端点同口径：**不看 `this.connected`** —— 本机操作，
@@ -811,10 +811,10 @@ export class KaipuRemoteService extends TypertRemoteService {
    *      所以这不是防御性洁癖，是**实测会遇到的形态**。
    *
    * ★ 未闭环项（如实记，不假装）：契约 §3.4 的 `error` 事件**不在**
-   *   `SceneRunEvent` 判别联合里（我方契约包 `sse.ts` 缺这一支）。
+   *   `SceneRunEvent` 判别联合里（本仓契约包 `sse.ts` 缺这一支）。
    *   ⇒ 本端点把 `error` 帧**转成抛出**（带服务端原文 message），客户端 catch 后
    *     如实显示"运行中断 + 服务端说明"，**不冒充成功**。
-   *   ⇒ 待办：把 `error` 补进契约包类型（改的是"我方类型漏了契约已有的事件"，
+   *   ⇒ 待办：把 `error` 补进契约包类型（改的是"本仓类型漏了契约已有的事件"，
    *     不是单方改形状），并让 reducer / 界面按 `code` 走 §8.2 文案表。
    */
 
@@ -883,7 +883,7 @@ export class KaipuRemoteService extends TypertRemoteService {
    * 后台把服务端的 SSE 读干，事件累积进会话。
    * ★ 出错**记进 `error` 而不是丢**：客户端轮询时要如实看到"为什么没跑完"。
    * ★ 即使客户端已不再轮询，本泵也会**把这一场读完** ——
-   *   服务端仍在算完并落 `lamp_runs`（契约 R5），我方不该提前松手。
+   *   服务端仍在算完并落 `lamp_runs`（契约 R5），本仓不该提前松手。
    */
   private async pump(runId: string, query: RunSceneQuery): Promise<void> {
     const rec = this.runs.get(runId)

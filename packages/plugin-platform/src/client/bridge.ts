@@ -86,7 +86,7 @@ export const ENDPOINTS = {
   /**
    * ★ 在系统文件管理器里打开铺子目录（2026-10-06）。
    *   ★★ 参数**只有 `sub`（可选枚举）**、**没有 `path`** —— 路径由 host 自己算，
-   *   外面传不进任意路径（比先例 003 `openPath` 更严）。理由见 host 侧
+   *   外面传不进任意路径（比早先那处 `openPath` 更严）。理由见 host 侧
    *   `shop-files.ts` 的 `openShopDir` 长注。
    */
   openShopDir: 'openShopDir',

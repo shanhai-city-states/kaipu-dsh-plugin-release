@@ -27,12 +27,12 @@
  *
  * ② ★★ **`scenes[].lamps` 已于 2026-10-06 升格为对象数组**（对方按契约 §23.3 落地）。
  *      对方**同时**给 `lampNames`（老形状 · 逐字相同）⇒ 老读法不必改。
- *      **我方处理**：类型写成**联合**（两种都吃），并在 `mapLamps` 里**归一化** ——
+ *      **本仓处理**：类型写成**联合**（两种都吃），并在 `mapLamps` 里**归一化** ——
  *      把"占位 / 待接入"一律收敛成 `agentId: null`，界面层只认这一种表达。
  *      ★ 权威字段是 `lamps[].agentId` ＋ `/agents[].status`，
  *        **不再靠 role 猜**（旧实现那样猜，见 `mapLamps` 注释里那段教训）。
  *
- * ③ **`categories[]` 多带 `scenes` / `count`**（我方契约类型里没有这两个字段）。
+ * ③ **`categories[]` 多带 `scenes` / `count`**（本仓契约类型里没有这两个字段）。
  *    ⇒ 宿主侧 `CategoryView` 已按实测形状声明；传到 `LeftPane` 时按可选字段消费。
  */
 import type { AgentCard, SceneCard, SceneCategory, SceneLamp, SceneRecommendation } from '@shanhai/kaipu-contract'
@@ -116,6 +116,54 @@ export interface Snapshot {
   recommendations: SceneRecommendation[]
   /** 铺子身份（live 才有）：`/me` 的 name / plan / features */
   account: { name: string; plan: string; features: Record<string, boolean>; creditsNote: string | null } | null
+  /**
+   * ★ 流程清单的**缓存状态**（2026-10-07 新增 · 对应该验收项：缓存策略生效）
+   *
+   * ★★ 为什么要有它：v2 要求「首次全量拉，之后用响应顶层 `updatedAt` 比对 ——
+   *   不同则重拉，相同则用缓存」。**不做/做没做**必须能被看见，
+   *   否则"缓存策略生效"就是一句无法核的话。
+   *
+   * ⚠️ **实测现状（2026-10-07）**：服务端**尚未下发 `updatedAt`** ⇒ `basis === 'absent'`。
+   *   此时**退化为每次全量拉取**，且**必须如实标出来** ——
+   *   见 `SnapshotCache.basis` 的三值注释。
+   */
+  cache: SnapshotCache
+}
+
+/**
+ * 缓存状态。★ **三值分开表达**，因为"没走缓存"有**三种完全不同的原因**：
+ *   ① `basis: 'absent'` —— **依据字段都没有**（`updatedAt` 未落）⇒ 机制不生效
+ *   ② `basis: 'updatedAt'` + `hit: false` —— 依据在、但**值变了** ⇒ 正在重拉
+ *   ③ `basis: 'updatedAt'` + `hit: true` —— 依据在、值没变 ⇒ 走缓存
+ *
+ * ★ 为什么不用一个 `boolean cacheHit`：那样会把 ① 和 ② 混成一句"没命中"，
+ *   而用户/判据要问的是"**为什么**没命中" —— 是"服务端还没给依据"还是"清单真变了"。
+ */
+export interface SnapshotCache {
+  hit: boolean
+  /**
+   * ★★ **四值**，每一值对应一种不同的处境（别压成 boolean）：
+   *   · `'updatedAt'` —— 依据在（走正常比对）
+   *   · `'absent'`    —— ★ **服务端还没给依据** ⇒ 退化为全量拉（**这是个待办**，对方落了就变）
+   *   · `'n/a'`       —— ★ **本快照不来自己服务端**（演示数据 / 未接入）⇒ 机制**不适用**（不会变）
+   *   · `null`        —— 还没取过（初始态）
+   * ★ 为什么把 `absent` 与 `n/a` 分开：两者在界面上都是"没走缓存"，
+   *   但一个是"**等对方**"、一个是"**本来就没这回事**" ——
+   *   混在一起会让后来人**对着演示态去追服务端**（追一个不存在的东西）。
+   */
+  basis: 'updatedAt' | 'absent' | 'n/a' | null
+  /** 本次响应里的 `updatedAt`（`basis === 'absent'` 时为 `null`） */
+  updatedAt: string | null
+  /**
+   * ★★ 依据在、`updatedAt` 也没变，但**仍然没用缓存**的原因（`null` = 没有这回事）。
+   *
+   * 为什么会有这种情况：场景卡片里嵌着**执行方名**（`lamps[].agentName`），
+   * 而执行方是**另一个接口**（`/agents`）来的 ⇒ **场景清单没变、执行方变了**时，
+   * 若直接复用旧卡片，会显示**过期的执行方名**。
+   * ⇒ 所以命中缓存**还要加一道**：执行方签名也得一致。
+   * ★ 这条是我对自己写的"防它偷懒"：**缓存不许拿新鲜度换正确性**。
+   */
+  staleReason: string | null
 }
 
 /** 演示数据快照（面板的"设计评审"模式） */
@@ -129,6 +177,14 @@ export function mockSnapshot(): Snapshot {
     scenes: [...MOCK_SCENES],
     categories: MOCK_SCENE_CATEGORIES.map((c) => ({ ...c })),
     recommendations: MOCK_SCENE_RECOMMENDATIONS.map((r) => ({ ...r })),
+    /**
+     * ★ 演示数据**不走服务端** ⇒ 缓存机制在此**不适用**。
+     * ★ 但**不能**把它标成 `basis: 'absent'` —— 那会把两种东西混为一谈：
+     *   · `absent` = **服务端还没给依据**（是个待办，会变）
+     *   · 这里的 `null` = **本快照根本不来自己服务端**（是设计如此，不会变）
+     * ⇒ 用 `'n/a'` 单独表达第三态，免得将来有人看着演示态的 `absent` 去追服务端。
+     */
+    cache: { hit: false, basis: 'n/a', updatedAt: null, staleReason: '演示数据不过网，缓存机制不适用' },
     account: null,
   }
 }
@@ -136,7 +192,7 @@ export function mockSnapshot(): Snapshot {
 /* ══════════════════════════════════════════════════════════════════
    三、形状映射（服务端实测形状 → 面板/契约形状）
 
-   ★★ 纪律（2026-10-06 立 · 来源是我方自己踩的一个 bug · 已被对方采纳为方法论）：
+   ★★ 纪律（2026-10-06 立 · 来源是本仓自己踩的一个 bug · 已被对方采纳为方法论）：
 
      「**兼容读法能防崩，不能防错** —— 凡提供兼容/兜底路径的字段，
        必须同时给一条『**陌生形状必须报错**』的判据。」
@@ -201,7 +257,7 @@ function mapLamps(lamps: SceneLampsWire, agents: readonly AgentView[]): SceneLam
       const id = raw.agentId ?? null
       const a = id === null ? undefined : byId.get(id)
       // 查不到该 id ⇒ 按待接入（**fail-closed**：宁可说"还没接入"，
-      // 不可说"已接入" —— 后者会让人以为这一维已经审过了）
+      // 不可说"已接入" —— 后者会让人以为这一个审核面已经审过了）
       const vacant = id === null || a === undefined || a.status === 'pending'
       return {
         lamp: raw.lamp,
@@ -330,6 +386,23 @@ const p = (r: BridgeResult<unknown>): string =>
   r.ok === true ? '' : 'business' in r ? r.business.message : r.error.detail
 
 /**
+ * ★★ 流程清单的**上一次成功结果**（缓存本体）· 2026-10-07 新增
+ *
+ * 存在**模块作用域**：一次会话里面板会反复取快照（切场景、重连、点刷新…），
+ *   缓存的寿命应当**跟着会话**，不该跟着某一次调用。
+ * ⚠️ 它是**内存态**（刷新页面即空）—— 这正合适：v2 要求的是"同一会话内不重复重建"，
+ *   **不是**持久化缓存（持久化会带来"跨版本读到旧形状"的新风险，本仓吃过这类的亏）。
+ */
+let scenesCache: {
+  updatedAt: string
+  /** ★ 执行方签名 —— 命中缓存还要求它一致（理由见 `SnapshotCache.staleReason` 注释） */
+  agentsSig: string
+  scenes: SceneCard[]
+  categories: SceneCategory[]
+  recommendations: SceneRecommendation[]
+} | null = null
+
+/**
  * ★★ 连不上时**返回"空 + 原因"，绝不填演示数据**。
  *
  * 这条是 2026-10-05 被 `live-probe --expect=unreachable` **当场抓到的真缺陷**：
@@ -348,6 +421,13 @@ function offlineSnapshot(
   label: string,
   reason: string,
 ): Snapshot {
+  /**
+   * ★★ **连不上 ⇒ 把流程缓存作废**（2026-10-07 加 · 与上面那条同源：宁可重拉，不可过期）。
+   * 为什么必须在这里清（而不是在调用方）：本函数是**所有失败分支的唯一出口** ——
+   *   清在这里，就**不可能漏**；清在调用方，就总有一天漏一处。
+   * ★ 这正是"**把纪律放在唯一的必经之道上**"。
+   */
+  scenesCache = null
   return {
     kind,
     label,
@@ -357,8 +437,63 @@ function offlineSnapshot(
     scenes: [],
     categories: [],
     recommendations: [],
+    /**
+     * ★ 读不到服务端 ⇒ 缓存状态也是空（`basis: null`）。
+     * ★★ 并**顺手清掉流程缓存** —— 这一条**要紧**：
+     *   若不清，下次恢复连接时可能拿"断网前的缓存"去比对一个**中间已经变过的清单**
+     *   （我们没看见那段变化）⇒ 会**静默显示过期清单**。
+     *   ⇒ **连不上时把缓存作废**，是"宁可重拉，不可过期"。
+     */
+    cache: { hit: false, basis: null, updatedAt: null, staleReason: null },
     account: null,
   }
+}
+
+/**
+ * ★★ 流程清单缓存的**判定**（纯函数 · 2026-10-07）
+ *
+ * ★★ 为什么抽成纯函数：这套判定的**真实触发条件今天根本到不了** ——
+ *   服务端还没下发 `updatedAt` ⇒ 线上永远走 `basis: 'absent'` 那一支。
+ *   ⇒ 若把逻辑埋在 `liveFromServer` 里，**"命中缓存"这条路径将永远没人验过**，
+ *     等对方落了 `updatedAt` 那天，第一次真跑就是它在线上第一次执行。
+ *   ★ 这违反本仓纪律：**"该判的东西变了"要能被判**，而不能靠"它看起来对"。
+ *   ⇒ 抽出来 ⇒ 四支都能被**独立喂入**验一遍（`tools/probe/scene-cache-test.mjs`）。
+ *
+ * @param input.updatedAt  本次响应顶层 `updatedAt`（`null` = 服务端没给）
+ * @param input.agentsSig  本次执行方清单的签名
+ * @param input.cached     上次成功的缓存（`null` = 没有）
+ * @returns 决定：`hit` 表示**复用 cached 的三份清单**；`store` 表示**要不要写入缓存**
+ */
+export function decideSceneCache(input: {
+  updatedAt: string | null
+  agentsSig: string
+  cached: { updatedAt: string; agentsSig: string } | null
+}): { hit: boolean; basis: SnapshotCache['basis']; staleReason: string | null; store: boolean } {
+  const { updatedAt, agentsSig, cached } = input
+
+  // ── ① 依据缺失 ⇒ 机制不生效 ⇒ 全量重建，且**不写缓存**（写了也无从比对）──
+  if (updatedAt === null) {
+    return { hit: false, basis: 'absent', staleReason: null, store: false }
+  }
+  // 首次（没有可比的缓存）⇒ 重建 + 存档
+  if (cached === null) {
+    return { hit: false, basis: 'updatedAt', staleReason: null, store: true }
+  }
+  // ── ② 依据变了 ⇒ 重建 + 刷新存档 ──
+  if (cached.updatedAt !== updatedAt) {
+    return { hit: false, basis: 'updatedAt', staleReason: null, store: true }
+  }
+  // ── ★ 依据没变，但执行方变了 ⇒ **不许命中**（卡片里的执行方名会过期）──
+  if (cached.agentsSig !== agentsSig) {
+    return {
+      hit: false,
+      basis: 'updatedAt',
+      staleReason: '流程清单未变，但执行方清单变了 —— 卡片里的执行方名会过期，故重建',
+      store: true,
+    }
+  }
+  // ── ③ 依据没变、执行方也没变 ⇒ 命中 ──
+  return { hit: true, basis: 'updatedAt', staleReason: null, store: false }
 }
 
 /** 读真服务端。**任何一步失败都如实返回，不回落到 mock**（见上） */
@@ -415,6 +550,54 @@ export async function loadLive(signal?: AbortSignal): Promise<Snapshot> {
   if (ag.ok !== true) return offlineSnapshot('unreachable', '读执行方失败', p(ag))
 
   const agents = ag.data.agents ?? []
+  /**
+   * ★★ 流程清单的缓存判定（2026-10-07 · 对应该验收项）
+   *
+   * 规则（照 v2 §4.1 的字面）：**首次全量拉**；之后拿响应顶层 `updatedAt` 比对，
+   *   **不同则重拉、相同则用缓存**。
+   *
+   * ⚠️ 一个必须讲清的前提：**没有 `ETag` ⇒ 无法免掉这次请求**
+   *   （v2 明确"不做 ETag / Cache-Control，顶层 `updatedAt` 足够"）。
+   *   ⇒ 所以这里的"用缓存"= **复用已构造好的卡片**（省掉重建与下游重渲染），
+   *     **不是**省掉网络请求 —— 这一点不能含糊，否则会被理解成"离线也能用"。
+   */
+  const rawUpdatedAt = (sc.data as { updatedAt?: unknown }).updatedAt
+  const updatedAt = typeof rawUpdatedAt === 'string' && rawUpdatedAt !== '' ? rawUpdatedAt : null
+  const agentsSig = agents.map((a) => `${a.id}|${a.name}|${a.status}`).join(',')
+
+  // ★ 判定交给纯函数（可被独立验；见 decideSceneCache 的注释）
+  const decision = decideSceneCache({ updatedAt, agentsSig, cached: scenesCache })
+
+  let scenes: SceneCard[]
+  let categories: SceneCategory[]
+  let recommendations: SceneRecommendation[]
+
+  if (decision.hit && scenesCache !== null) {
+    // ── ③ 命中 ⇒ 复用缓存的三份清单 ──
+    scenes = scenesCache.scenes
+    categories = scenesCache.categories
+    recommendations = scenesCache.recommendations
+  } else {
+    // ── ①/②/执行方变了 ⇒ 全量重建 ──
+    scenes = (sc.data.scenes ?? []).map((s) => toSceneCard(s, agents))
+    categories = toCategories(sc.data.categories ?? [])
+    recommendations = toRecommendations(sc.data.recommendations ?? [])
+    // ★ 依据缺失时**不写缓存**（`store === false`）—— 没有比对依据的存档是**假缓存**
+    if (decision.store && updatedAt !== null) {
+      scenesCache = { updatedAt, agentsSig, scenes, categories, recommendations }
+    } else if (updatedAt === null) {
+      // ★ 依据都没了 ⇒ 旧缓存**不可信**（我们无从知道它之后变没变过）⇒ 作废
+      scenesCache = null
+    }
+  }
+
+  const cacheState: SnapshotCache = {
+    hit: decision.hit,
+    basis: decision.basis,
+    updatedAt,
+    staleReason: decision.staleReason,
+  }
+
   return {
     kind: 'live',
     label: '真服务端',
@@ -430,9 +613,10 @@ export async function loadLive(signal?: AbortSignal): Promise<Snapshot> {
       authError: null,
     },
     agents: agents.map(toAgentCard),
-    scenes: (sc.data.scenes ?? []).map((s) => toSceneCard(s, agents)),
-    categories: toCategories(sc.data.categories ?? []),
-    recommendations: toRecommendations(sc.data.recommendations ?? []),
+    scenes,
+    categories,
+    recommendations,
+    cache: cacheState,
     account:
       me.ok === true
         ? {

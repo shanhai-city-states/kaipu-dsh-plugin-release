@@ -76,6 +76,20 @@ export interface ShopShelfProps {
   /** 把一份文本交出去（供"填入待审内容"）。`null` = 当前没有可填的落点 */
   onFill: ((text: string, name: string) => void) | null
   /**
+   * ★ 去「操作台」发起这一场（`null` = 现在没有可发起的场次）。
+   *
+   * ★★ 为什么它必须在这一页（2026-10-08 · 101）：
+   *   从铺子资料「填入待审内容」会把人**送到操作台**（`PlatformPanel.placeFill`
+   *   里 `setView('console')`），而操作台那侧只给了一个"回铺子资料"的按钮
+   *   ⇒ 这是**单程**：去了回不来，回来要绕顶部页签，绕两次之后就没人绕了。
+   *   ⇒ 两边各给一个入口：**这一头的动词是"开始运行"，那一头的动词是"取资料"**。
+   *
+   * ★ `null` 的口径与 `onFill` 一致：**没有落点就不给按钮**。
+   *   演示模式没有可跑的服务端（`onStart === null`），那一刻给一颗"开始运行"
+   *   就是把"没东西可跑"伪装成"能跑" —— 与这一层一贯的"不给跑不了的按钮"同口径。
+   */
+  onGoRun: (() => void) | null
+  /**
    * 折叠状态**由装配层持有**（2026-10-07 加）。
    *
    * ★ 为什么抬上去：面板**顶部**现在也有一个入口（「铺子资料 ↓」= 展开 + 滚到底）。
@@ -94,7 +108,12 @@ export interface ShopShelfProps {
  * ★★ 三个抽屉**一次性全列**（一次调用拿全部，不是三次往返）：
  *   抽屉只有三个，用户一眼看完比"点一下等一次"强。
  */
-export function ShopShelf({ onFill, open, onToggleOpen }: ShopShelfProps): ReactElement {
+export function ShopShelf({
+  onFill,
+  onGoRun,
+  open,
+  onToggleOpen,
+}: ShopShelfProps): ReactElement {
   const [payload, setPayload] = useState<ShopFilesPayload | null>(null)
   /** 读失败的原因（★ 与"读到了但是空的"必须分开表达） */
   const [loadErr, setLoadErr] = useState<string | null>(null)
@@ -104,6 +123,8 @@ export function ShopShelf({ onFill, open, onToggleOpen }: ShopShelfProps): React
   const [note, setNote] = useState<string | null>(null)
   /** 当前被拖到哪个抽屉上方（高亮用） */
   const [over, setOver] = useState<ShopSubdir | null>(null)
+  /** 「开始运行」按钮的悬停态（inline style 写不了 `:hover`，用它换色） */
+  const [runHover, setRunHover] = useState(false)
   /* ★ 折叠状态**不在这里** —— 它由装配层持有（见 ShopShelfProps.open 的注释）。
      这里只留"正在忙什么/提示什么"这类**本块私有**的状态。 */
 
@@ -240,7 +261,7 @@ export function ShopShelf({ onFill, open, onToggleOpen }: ShopShelfProps): React
   /* ── 读不到时：**如实说**，且不摆出"空抽屉"的样子骗人 ── */
   if (loadErr !== null) {
     return (
-      <section data-kaipu-shop="1" style={{ marginTop: 16, fontSize: FS.small, lineHeight: LH.normal }}>
+      <section data-kaipu-shop="1" style={{ marginTop: 16, padding: '0 14px', fontSize: FS.small, lineHeight: LH.normal }}>
         <div style={{ color: C.dim }}>铺子资料</div>
         <div style={{ marginTop: 4, color: '#b45309' }}>这一块暂时读不了：{loadErr}</div>
       </section>
@@ -248,7 +269,7 @@ export function ShopShelf({ onFill, open, onToggleOpen }: ShopShelfProps): React
   }
 
   return (
-    <section data-kaipu-shop="1" style={{ marginTop: 16, fontSize: FS.small, lineHeight: LH.normal }}>
+    <section data-kaipu-shop="1" style={{ marginTop: 16, padding: '0 14px', fontSize: FS.small, lineHeight: LH.normal }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span style={{ color: C.dim }}>铺子资料</span>
         <button
@@ -282,11 +303,59 @@ export function ShopShelf({ onFill, open, onToggleOpen }: ShopShelfProps): React
         这三个抽屉就是「你自己的资料」——它们存在本机，不随插件装卸而消失。
       </div>
 
+      {/* ★★ 「回操作台发起」的一步（2026-10-08 · 101）—— **回路的另一半**。
+          ★ 为什么摆在**抽屉外面**（`open` 那个分支之外）：
+            收起抽屉的人同样想去发起一场；"放东西"与"发出去"是两件事，
+            没道理连"发出去"一起收起来（同 SP-identity 那条：入口不跟着内容收）。
+          ★ 为什么动词是「开始运行」：它在这一页**指向别处**（去操作台），
+            措辞必须和那边的按钮**同一个词**，否则用户会以为这是另一件事。 */}
+      {onGoRun !== null && (
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ color: C.dim }}>东西放好了就：</span>
+          <button
+            type="button"
+            // ★ 锚点（判据用）：101 的跨页回路要验"点一下真的把发起区送到中间"。
+            data-kaipu-shop-run="1"
+            onClick={onGoRun}
+            onMouseEnter={() => setRunHover(true)}
+            onMouseLeave={() => setRunHover(false)}
+            style={{
+              fontSize: FS.small,
+              padding: '4px 14px',
+              borderRadius: 6,
+              // ★★ 暖金「灯火」用色 —— **与 SeatLampPanel 的「点亮第一盏灯」逐字同一套**
+              //   （`#C8881F` 描边 / `rgba(200,136,31,0.12)` 底 / `#A66A12` 字，见 `DESIGN.md` §5）。
+              //   ★ 为什么不另调一个色：同一个面板里"暖金"已经锚定为**可以开始做事**的意思，
+              //     再造一个相近色只会让人以为它们是两种状态（本项目踩过："同一件事两处各说各话"）。
+              //   ★ 为什么加个 `▸`：这一页有三个抽屉、一行说明、一串小按钮，
+              //     纯文字按钮在这一堆里**没有落点**；一个随开始/停止语境通用的三角
+              //     足以让人一眼看到"这一步是往前走的"，又不至于像彩色大按钮那样抢戏。
+              border: `1px solid ${runHover ? '#A66A12' : '#C8881F'}`,
+              background: runHover ? 'rgba(200,136,31,0.20)' : 'rgba(200,136,31,0.12)',
+              color: '#A66A12',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'background 120ms ease, border-color 120ms ease',
+              // ⚠️⚠️ `font` 是**简写属性**，会把上面写好的 `fontSize` / `fontWeight`
+              //   **一并重置**。本项目原来把它写在字号字重**之后** ⇒ 那两行全部失效
+              //   （2026-10-08 用 CDP 读 computed style 当场读到 `fontWeight: 400`，
+              //     而代码里写的是 600 —— 光看代码永远发现不了）。
+              //   ⇒ 简写放**最后**，再补上想加的覆盖。
+              font: 'inherit',
+              fontWeight: 600,
+            }}
+          >
+            ▸ 开始运行
+          </button>
+          <span style={{ color: C.dim }}>（回到操作台，发起区会在正中间）</span>
+        </div>
+      )}
+
       {!open ? null : (
         <>
           {/* ★ 如实展示数据根 —— 用户能**自己去打开**这个目录。
               ★ 2026-10-06 补「打开目录」：路径能看见还不够，得能一键走进去。
-                （003 有同款能力，做法与安全口径见 host 侧 `shop-files.ts` 的 `openShopDir`。） */}
+                （做法与安全口径见 host 侧 `shop-files.ts` 的 `openShopDir`。） */}
           {payload !== null && payload.root !== '' && (
             <div style={{ marginTop: 4, color: C.dim, wordBreak: 'break-all' }}>
               存在本机：{payload.root}

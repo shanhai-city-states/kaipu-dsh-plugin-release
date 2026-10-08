@@ -21,7 +21,7 @@
  *     · **空分类不出** ⇒ 按响应渲染，不自己判空；
  *     · **未归类不藏** ⇒ 有场景却没归类，**单列「未归类」如实展示**。
  */
-import type { ReactNode, ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type ReactElement } from 'react'
 import type { AgentCard, SceneCard, SceneCategory, SceneRecommendation } from '@shanhai/kaipu-contract'
 import { C, FS } from './theme.js'
 
@@ -32,6 +32,69 @@ export interface LeftPaneProps {
   recommendations: readonly SceneRecommendation[]
   selected: string | null
   onSelect: (scene: string) => void
+  /**
+   * ★★ 这一块**渲染在哪儿**（2026-10-08）—— 决定根节点挂哪个判据锚点。
+   *
+   *   · `'left'`（默认）= 宽屏左栏 ⇒ `data-kaipu-left`
+   *   · `'picker'`      = 窄屏顶部的「场景」折叠条 ⇒ `data-kaipu-scene-picker-body`
+   *
+   * ★★ 为什么**不能共用一个锚点**（这不是洁癖，是判据正确性问题）：
+   *   探针要断一条**反向**断言 ——「窄屏下左栏不在（`[data-kaipu-left]` 为 null）」，
+   *   它是"窄屏确实折了左栏"的证明。若窄屏那份也挂 `data-kaipu-left`，
+   *   这条断言就**永远为假**（恒红）；而如果谁图省事把它改成 `>= 1`，
+   *   它就变成**恒真** —— 两种都不再是判据。
+   *   ⇒ 位置是**两个不同的东西**，锚点就该是两个不同的名字。
+   *
+   * ★ 复用同一个组件而不是各写一套：一块内容两处渲染，
+   *   免得"窄屏那份"慢慢长歪（少一个推荐位、少一个「待接入 N」都没人发现）。
+   */
+  where?: 'left' | 'picker'
+  /**
+   * ★★ 把「场景」这块**提到最前**（2026-10-08）。
+   *
+   * 只给**窄屏折叠条**用（`NarrowScenePicker` 传 `true`），宽屏**不动**：
+   *   · 窄屏那条折叠条的本职就是"选场景"（它为什么存在，见"窄屏入口"那次）。
+   *     而实测（100）：框高 320 / 内容高 585，**场景列表起点 341px > 框高**
+   *     ⇒ 点开折叠条，"要选的东西整个在第一屏之外" —— 得先滚过执行方与推荐位。
+   *   · 宽屏**不改**：那里左栏常驻、内容高 659 < 视口 769（富余 110，本来不用滚），
+   *     而「该怎么选」是**选的依据**，移到最后就变成"选完才看到" ——
+   *     那是取舍不是优化（对应章节 反方已如实摆给决策人）。
+   * ⇒ 同一份内容、**两种顺序**，由这一位开关决定；行为差异写在这里，不靠读的人猜。
+   */
+  sceneFirst?: boolean
+}
+
+/**
+ * 「当前是哪一场」—— 收起态下的**唯一**坐标（2026-10-08）。
+ *
+ * ★★ 原文：「选完自动收起之后，当前选中项要留在折叠条上可见。不能选完就消失。」
+ *   ⇒ 这件事在**两个地方**都要成立（这正是本条要求"宽屏也一致"的落法）：
+ *     · 窄屏 ⇒ 折叠条的 `summary`（收起时只看得到这一行）
+ *     · 宽屏 ⇒ 左栏「场景」小节标题行（分类可能被折叠，光靠行高亮不够稳）
+ *
+ * ★★ 两处**共用同一个锚点** `data-kaipu-scene-current` —— 这次是**对的**，
+ *   与 `where` 那两条锚点为什么必须分开并不矛盾：
+ *     · `data-kaipu-left` / `data-kaipu-scene-picker-body` 争的是"**左栏在不在**"
+ *       （反向断言要断"窄屏下它不在"）⇒ 共用必假。
+ *     · 本锚点争的是"**当前所选有没有被显示出来**"，而两处**永远不会同时在页面上**
+ *       （窄屏不渲染左栏、宽屏不渲染折叠条）⇒ 任何宽度下它恰好出现**一次**，
+ *       判据只需读"那一个"，反而更干净。
+ *   ★ 这条区别（"同时存在与否"）才是判断"能不能共用锚点"的依据，
+ *     不是"锚点名字看起来像不像"。
+ */
+export function SceneCurrent({
+  scenes,
+  selected,
+}: {
+  scenes: readonly SceneCard[]
+  selected: string | null
+}): ReactElement {
+  const current = scenes.find((s) => s.scene === selected) ?? null
+  return (
+    <span data-kaipu-scene-current="1" style={{ color: C.text }}>
+      {current === null ? '（未选）' : current.label}
+    </span>
+  )
 }
 
 /**
@@ -85,74 +148,84 @@ export function LeftPane({
   recommendations,
   selected,
   onSelect,
+  where = 'left',
+  sceneFirst = false,
 }: LeftPaneProps): ReactElement {
   const { groups, unclassified } = groupScenes(scenes, categories)
 
-  return (
-    // ★ `data-kaipu-left` = 左栏的**判据锚点**。
-    //   为什么不靠文案断言（2026-10-05 修 `panel-probe` 时立的教训）：
-    //   探针原来找的是字符串「场景 / 运行记录」—— 那是**旧版面板的文案**，
-    //   面板改版后判据**却一直没人发现**（它只是在报"左栏未渲染"，
-    //   看起来像界面坏了，实际是判据自己过期了）。
-    //   ⇒ 锚在**结构**上，文案怎么改都不会误报。
-    <div data-kaipu-left="1" style={{ padding: '12px 0 18px' }}>
-      {/*
-        ★ 这句副标题要**同时说清三态**（2026-10-05 修）：
-          原来只说"灰色的表示被有意关掉了"，而契约 v1.3 §23.4 后多了 `pending`（占地未接入）——
-          不说清它，用户看到「待接入」会不知道那是不是故障。
-      */}
-      <SectionTitle hint="被接进这场戏的审方。标「待接入」的还没人接，灰掉的是被关掉了。">执行方</SectionTitle>
+  /**
+   * ── 三块各自成块，再按 `sceneFirst` 决定顺序（2026-10-08 · 107「方案 D」）──
+   * ★ 为什么拆成变量而不是写三遍 JSX：写三遍就是**三份内容**，改一处必漏另一处。
+   *   这里拆的是**顺序与容器**，内容只有一份。
+   */
+  const agentsBlock = (
+    <PaneBlock
+      id="agents"
+      title="执行方"
+      icon="📂"
+      hint="被接进这场戏的审方。标「待接入」的还没人接，灰掉的是被关掉了。"
+      // ★ 收起态也要能一眼看出"有几家"（同 `103` 的「收起点写着当前是哪一场」）
+      aside={<span style={{ color: C.dim }}>（{agents.length}）</span>}
+      defaultOpen={false}
+    >
       {agents.map((a) => (
         <AgentRow key={a.id} agent={a} />
       ))}
+    </PaneBlock>
+  )
 
-      {/* ★ 推荐位：**说「适合什么场合」，不说「热门」** —— 后者需要统计依据 */}
-      {recommendations.length > 0 && (
-        <div
-          data-kaipu-recommend="1"
-          style={{ padding: '12px 14px 2px', borderTop: `1px solid ${C.border}` }}
-        >
-          <div style={{ fontSize: FS.tag, letterSpacing: 0.8, color: C.dim, textTransform: 'uppercase' }}>
-            该怎么选
-          </div>
-          {recommendations.map((r) => (
-            <div key={r.key} style={{ marginTop: 4 }}>
-              <div style={{ fontSize: FS.small }}>{r.label}</div>
-              <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.6 }}>
-                适合：{r.when}
-              </div>
+  /* ★ 推荐位：**说「适合什么场合」，不说「热门」** —— 后者需要统计依据 */
+  const recommendBlock = recommendations.length > 0 && (
+    <PaneBlock
+      id="recommend"
+      title="该怎么选"
+      icon="📂"
+      hint="按场合推荐。选之前看一眼，就不用逐个点开猜。"
+      aside={<span style={{ color: C.dim }}>（{recommendations.length}）</span>}
+      defaultOpen={false}
+    >
+      {/* ★ `data-kaipu-recommend` 保留在这一层（判据认它；换父级不改锚点名） */}
+      <div data-kaipu-recommend="1" style={{ padding: '0 14px 4px' }}>
+        {recommendations.map((r) => (
+          <div key={r.key} style={{ marginTop: 4 }}>
+            <div style={{ fontSize: FS.small }}>{r.label}</div>
+            <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.6 }}>
+              适合：{r.when}
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
+    </PaneBlock>
+  )
 
-      <SectionTitle hint="选一场，右侧看它的运行与结论。" divider>场景</SectionTitle>
+  const scenesBlock = (
+    <PaneBlock
+      id="scenes"
+      title="场景"
+      icon="📂"
+      hint="选一场，右侧看它的运行与结论。"
+      /**
+       * ★★ 宽屏：在「场景」标题行显示**当前是哪一场**（§一"确保宽屏也一致"）。
+       *   ★ 为什么仅 `where === 'left'`：窄屏那份由折叠条 `summary` 显示
+       *     （`SceneCurrent` 的注释里写了"两处永远不会同时出现"）——
+       *     展开区里再显示一次就是同一句话在同一屏出现两遍。
+       */
+      aside={where === 'left' ? <SceneCurrent scenes={scenes} selected={selected} /> : undefined}
+      /**
+       * ★★ **场景块默认展开**（`107` 方案 D）——
+       *   它是左栏的本职（"选一场"）；另两块收起是为了**把空间让给它**。
+       */
+      defaultOpen
+    >
 
       {groups.map((g, gi) => (
-        /**
-         * ★ 分类可折叠（为"一页预览"后加），**与右栏逐轮同款**：
-         *   折进去的 = 具体场景行；**留在外面的** = 分类名 · `intent`（客户视角的一句话）· 场景数。
-         *   ⇒ 折起来仍能一眼看出"有哪些场合、各自是干嘛的"，点开才看具体场景。
-         * ★ `<details>` 同样**非受控**：用户展开后，数据刷新不会把它弹回去。
-         *
-         * ★ `gi > 0` 才画上分隔线（"分组之间加条线"）：
-         *   首条分类不画 —— 它紧跟在「场景」小节标题下，那里已经靠留白分开了；
-         *   每条都画的话，小节标题底下会多一条**没有意义的线**。
-         */
-        <details
+        <CategoryGroup
           key={g.key}
-          data-kaipu-category={g.key}
-          style={{ padding: 0, ...(gi > 0 ? { borderTop: `1px solid ${C.border}` } : {}) }}
-        >
-          <summary style={{ padding: '8px 14px 4px', cursor: 'pointer', lineHeight: 1.7 }}>
-            <span style={{ fontSize: FS.tag, color: C.text }}>{g.label}</span>
-            <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>{g.intent}</span>
-            <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>（{g.scenes.length}）</span>
-          </summary>
-          {g.scenes.map((s) => (
-            <SceneRow key={s.scene} scene={s} active={s.scene === selected} onSelect={onSelect} />
-          ))}
-        </details>
+          group={g}
+          first={gi === 0}
+          selected={selected}
+          onSelect={onSelect}
+        />
       ))}
 
       {/*
@@ -166,16 +239,19 @@ export function LeftPane({
         <div data-kaipu-category="__unclassified__" style={{ borderTop: `1px solid ${C.border}` }}>
           <div style={{ padding: '8px 14px 4px' }}>
             <div style={{ fontSize: FS.tag, color: C.text }}>
+              <span aria-hidden="true" style={{ marginRight: 5 }}>
+                📂
+              </span>
               未归类
               {/*
                 ★ 那句"如实列出，不藏"**收进悬停提示**（2026-10-05 瘦身）。
-                  它是对**契约 #17** 的交代（给评审看的），不是给客户看的信息 ——
+                  它是对**「未归类不藏」约定**的交代（给评审看的），不是给客户看的信息 ——
                   而"没藏"这件事，**场景列在这里本身就是证明**，不需要再写一句声明。
-                  ★ 组名与场景行**一个字没动**（契约 #17 是"未归类不藏"，
+                  ★ 组名与场景行**一个字没动**（约定的「未归类不藏」，
                     判据断的也是组名在场 ⇒ 只收声明，不动内容）。
               */}
               <span
-                title="契约 #17「未归类不藏」：还没归到某个场合的场景，如实列出，不塞进别的组。"
+                title="未归类不藏：还没归到某个场合的场景，如实列出，不塞进别的组。"
                 aria-hidden="true"
                 style={{ marginLeft: 6, color: C.faint, cursor: 'help' }}
               >
@@ -188,7 +264,193 @@ export function LeftPane({
           ))}
         </div>
       )}
+    </PaneBlock>
+  )
+
+  return (
+    // ★ `data-kaipu-left` = 左栏的**判据锚点**。
+    //   为什么不靠文案断言（2026-10-05 修 `panel-probe` 时立的教训）：
+    //   探针原来找的是字符串「场景 / 运行记录」—— 那是**旧版面板的文案**，
+    //   面板改版后判据**却一直没人发现**（它只是在报"左栏未渲染"，
+    //   看起来像界面坏了，实际是判据自己过期了）。
+    //   ⇒ 锚在**结构**上，文案怎么改都不会误报。
+    //   ★★ 窄屏那份（`where='picker'`）**不挂这个锚点**，改挂
+    //      `data-kaipu-scene-picker-body` —— 理由见 Props 里那一段（判据正确性）。
+    <div
+      {...(where === 'picker' ? { 'data-kaipu-scene-picker-body': '1' } : { 'data-kaipu-left': '1' })}
+      style={{ padding: '12px 0 18px' }}
+    >
+      {/**
+        * ★★ 顺序（`107` 方案 D）：
+        *   · 宽屏：**执行方 → 该怎么选 → 场景**（保持原顺序 —— 场景块默认展开，
+        *     收起的参考两块在上面，等于"参考在上、主体在下"，读起来是"先看背景、再看要选的"）
+        *   · 窄屏：`sceneFirst` ⇒ **场景在最前**（定案：这个框的本职就是选场景）
+        */}
+      {sceneFirst ? (
+        <>
+          {scenesBlock}
+          {agentsBlock}
+          {recommendBlock}
+        </>
+      ) : (
+        <>
+          {agentsBlock}
+          {recommendBlock}
+          {scenesBlock}
+        </>
+      )}
     </div>
+  )
+}
+
+/**
+ * ★★ **三块折叠容器**（2026-10-08 · `107` · 方案 D）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 它解决什么（实测支撑，不是观感）
+ * ══════════════════════════════════════════════════════════════════
+ *   左栏三块 = 执行方(235) + 该怎么选(111) + 场景(299+分类)。
+ *   「想看全部场景」（分类全展开）时内容高 **909px**，而常见窗高下可用只有 649~869
+ *   ⇒ **任何常见窗口都要滚**（连 1000 高的窗口也要滚 40px）。
+ *   把参考两块收成标题行 ⇒ 内容高 **618px** ⇒ 窗高 ≥740 就不用滚。
+ *
+ * ★★ 为什么"可多开"而不是"互斥单开"（同一批实测）：
+ *   · 互斥：点开一块 ⇒ 另一块**被收走**，场景标题还**上移 112px**（想回头看要重新点回来）
+ *   · 多开：点开一块 ⇒ 另一块只是**往下挪**，**内容仍在原位**
+ *   ⇒ 收益完全相同（都拿到 618px），但互斥多付"位置跳动 + 内容消失"。
+ *
+ * ★★ 三条实现要点（每条都对着一处会出事的场景）：
+ *   ① **顺序：块在前、分类在后** —— 场景块里**还有一层**分类折叠。
+ *      若分类默认收起，手风琴下"看场景"要**两次点击**（先点块、再点分类）。
+ *      本方案把分类改成**默认展开**（见下面 `CategoryGroup`），首屏 0 次点击就能选场。
+ *   ② **`open` 走 state（受控）** ，但**只在用户动作里改**（`onToggle`）——
+ *      这样"数据刷新不会把它弹回去"这条性质**仍然成立**（state 不受数据变化影响）。
+ *      ★ 与 `103` 窄屏折叠条同款做法。
+ *   ③ **`data-kaipu-sect` 锚点不动**：标题仍是 `SectionTitle`，只是被搬进 `<summary>`。
+ *      判据认的是这个名字 ⇒ 换父级不改锚点名（本仓纪律：锚点锚结构，不锚层级）。
+ */
+function PaneBlock({
+  id,
+  title,
+  hint,
+  icon,
+  aside,
+  defaultOpen,
+  divider = false,
+  children,
+}: {
+  id: 'agents' | 'recommend' | 'scenes'
+  title: string
+  hint: string
+  /** ★ `exactOptionalPropertyTypes` 下要显式允许 `undefined`（否则"传了个 undefined"都过不了） */
+  icon?: string | undefined
+  aside?: ReactNode
+  defaultOpen: boolean
+  divider?: boolean
+  children: ReactNode
+}): ReactElement {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <details
+      data-kaipu-block={id}
+      open={open}
+      // ★ 只在用户动作里改 state（见上面要点 ②）；程序化赋值也会到这里，但值相同 ⇒ 无副作用
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      style={{
+        padding: 0,
+        ...(divider ? { borderTop: `1px solid ${C.border}` } : {}),
+      }}
+    >
+      {/*
+        ★ `listStyle:'none'` 抹掉浏览器默认的三角 —— 我们自绘一个 ▸/▾（在 `SectionTitle` 里），
+          因为它能**跟着 open 翻转**（默认 marker 的位置/大小不受我们控制）。
+      */}
+      <summary style={{ listStyle: 'none', cursor: 'pointer' }}>
+        <SectionTitle icon={icon} hint={hint} aside={aside} chevron={open ? '▾' : '▸'}>
+          {title}
+        </SectionTitle>
+      </summary>
+      {children}
+    </details>
+  )
+}
+
+/**
+ * **场景分类一组**（2026-10-08 · `107` 从 `LeftPane` 里抽出来 —— 因为要挂 hook）。
+ *
+ * ★★ 为什么抽组件：它需要 `ref` + 挂载时设一次 `open`（见下），而 hook **不能写在 map 循环里**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★★ 默认**展开**（`107` 改 · 原来是默认收起）
+ * ══════════════════════════════════════════════════════════════════
+ *   实测（107）：3 个分类默认收起 ⇒ **5 个场景行里只有 2 个可见**
+ *   ⇒ 左栏的本职是"选一场"，而"要选的那些场"**一半藏在折叠里**，要先点分类。
+ *   ★ 空间本来就够：场景块可用 618px（`107` 方案 D 下），放得下"分类全展开"的内容。
+ *   ⇒ 与 `107` 的三块折叠配合：**外层三块可折（参考收起）＋ 内层分类默认展开**，
+ *     首屏 0 次点击就能直接选场。
+ *
+ * ★★ 为什么用 `ref` + **空依赖** effect 设 `open`（而不是写 `<details open>`）：
+ *   写 `open` 属性会被 React 当**受控属性**、**每次渲染都设回去** ⇒
+ *   用户手动折上之后，下一个数据刷新就把它弹开（本仓 `RoundBlock` 那条注释记过同款坑）。
+ *   空依赖 effect ⇒ 只在**挂载那一瞬**设一次，之后交给浏览器；
+ *   `key` 稳定（`g.key`）⇒ 数据刷新复用同一节点 ⇒ **用户折上的状态留得住**。
+ *
+ * ★ 分类**可折叠**这件事本身保留（它是"一页预览"的能力，不是缺陷）：
+ *   折起来仍能看到 分类名 · `intent`（客户视角的一句话）· 数量。
+ */
+function CategoryGroup({
+  group,
+  first,
+  selected,
+  onSelect,
+}: {
+  group: { key: string; label: string; intent: string; scenes: SceneCard[] }
+  first: boolean
+  selected: string | null
+  onSelect: (scene: string) => void
+}): ReactElement {
+  const ref = useRef<HTMLDetailsElement | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el !== null) el.open = true
+  }, [])
+  return (
+    /**
+     * ★★ V3（2026-10-07 曾指出"日常自查与标准审查之间多了一根横线"）：
+     *   **撤掉分类之间的分隔线，改用留白。**
+     *
+     * 为什么撤（实测读数，不是感觉）：
+     *   真服务端数据下「场景」区只有 **2 个分类**、每个 1 个场景
+     *   ⇒ 这一区里同时存在 **3 条横线**（小节标题那条 + 分类间那条 + 未归类那条），
+     *     而横线要隔开的内容总共才 4 行 —— **线比内容还密**。
+     *   ⇒ 分隔线是"组多到肉眼分不开"时才需要的工具；这里组少，留白足够。
+     *   ★ 只撤**分类之间**那条：`未归类` 上方那条**保留** ——
+     *     两者性质不同：前者隔"同类兄弟"，后者隔"分类区 vs 非分类区"（是个语义边界）。
+     *
+     * ★ `first ? 0 : 4` 的 marginTop：首条分类不加上间距（它紧跟「场景」块标题，
+     *   那里已有留白），其余分类之间留一格 —— 这就是"撤线改留白"的落点。
+     */
+    <details
+      ref={ref}
+      data-kaipu-category={group.key}
+      style={{ padding: 0, ...(first ? {} : { marginTop: 4 }) }}
+    >
+      <summary style={{ padding: '8px 14px 4px', cursor: 'pointer', lineHeight: 1.7 }}>
+        {/*
+          ★★ V3：分类名 `C.text` → `C.dim`。
+          实测原状是**倒挂**的：分类名（rgb(15,17,21) 近黑）比小节标题（rgb(138,138,138) 灰）
+          **更亮**，两者又同为 12px ⇒ 扫读时"分类"压过"场景"这一区名。
+          ⇒ 分类是**组名**（结构），不是内容 ⇒ 降到与 intent/计数 同一色阶，
+            整条 summary 一起"退到背景"，让场景行与小节标题站在前面。
+        */}
+        <span style={{ fontSize: FS.tag, color: C.dim }}>{group.label}</span>
+        <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>{group.intent}</span>
+        <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>（{group.scenes.length}）</span>
+      </summary>
+      {group.scenes.map((s) => (
+        <SceneRow key={s.scene} scene={s} active={s.scene === selected} onSelect={onSelect} />
+      ))}
+    </details>
   )
 }
 
@@ -206,23 +468,99 @@ function SectionTitle({
   children,
   hint,
   divider = false,
+  icon,
+  aside,
+  chevron,
 }: {
   children: string
   hint: string
   divider?: boolean
+  /**
+   * ★★ UI-V2（2026-10-07 曾提议）：标题前的**视觉锚点**。
+   *
+   * 为什么加：曾反馈"界面不够清晰"。左栏 260px 里堆了多种标题级元素
+   * （执行方 / 该怎么选 / 场景 / 分类名 / 未归类），而它们**字号字色几乎一样**
+   * ⇒ 扫读时没有一个"这里是新的一区"的落点。
+   *
+   * ★ 但要说清它**解决什么、不解决什么**（免得当成万能药）：
+   *   · 解决：**标题 vs 正文**的分界（符号是比字重更省空间的锚点）
+   *   · **不解决**：标题**彼此之间**的分级 —— 每个标题都挂同一个符号，
+   *     它们仍然一样重。分级得靠**字号/字色/缩进**。
+   * ★ 用**字符**不用图标组件：面板挂在宿主容器里，不引入字体/图标依赖；
+   *   且 `aria-hidden` 掉 —— 屏幕阅读器念"符号 + 场景"是噪音，它只需要"场景"。
+   */
+  icon?: string | undefined
+  /**
+   * ★ 标题行**右侧**的附加信息（2026-10-08 "当前是哪一场"）。
+   *
+   * 为什么不并进 `children`：`children` 同时是判据锚点 `data-kaipu-sect` 的**值**
+   *   （探针按小节名找块）⇒ 往里塞动态内容会让"场景"这个小节名变成"场景 开铺审计 · 标准"，
+   *   锚点当场失效。⇒ 分成两处，值只留在 `children`。
+   */
+  aside?: ReactNode
+  /**
+   * ★ 折叠指示符（`107`）：`▾` 展开 / `▸` 收起。
+   *   ★ 为什么自绘而不用 `<summary>` 的默认三角：默认 marker 的**大小与位置不受我们控制**，
+   *     而自绘的能跟着 `open` **翻转**（受控 state ⇒ 能反映真实开合）。
+   *   ★ 放在**最右**（`marginLeft: 'auto'`）：左栏 260px 里标题行还有"当前是哪一场"这类内容，
+   *     指示符贴右边才不跟内容抢位置。
+   *   ★ `aria-hidden`：屏幕阅读器会念 `<summary>` 自身的展开状态，再念一个符号是噪音。
+   */
+  chevron?: string
 }): ReactElement {
   return (
     <div
       // ★ 判据锚点：让"小节标题是否带分隔线"可以被断言到，
       //   而不必靠 `> div > div` 这种**层级选择器**（层级一改锚点就飘，2026-10-05 踩过）。
+      //   ★ V2 加符号时**没有动它** —— 锚点是给判据用的，不能跟着样式走。
       data-kaipu-sect={children}
       style={{
         padding: '12px 14px 6px',
         ...(divider ? { borderTop: `1px solid ${C.border}` } : {}),
       }}
     >
-      <div style={{ fontSize: FS.tag, letterSpacing: 0.8, color: C.dim, textTransform: 'uppercase' }}>
-        {children}
+      {/*
+        ★★ V3：小节标题**加强**（12px 灰常规 → 13px 近黑半粗），把层级扳正。
+        实测原状倒挂：小节标题 12px/rgb(138,138,138) < 分类名 12px/rgb(15,17,21)
+        < 场景行 15px/rgb(15,17,21) ⇒ **越往里字越大越黑**，最外面的区名最弱。
+        ⇒ 现在三级单调：小节标题(13/600/近黑) > 分类名(12/400/灰) > 场景行(15/400/近黑)。
+        ★ 场景行仍比小节标题**字号大** —— 这是**有意**的：它是可点选的内容主体，
+          该最醒目；层级由**字重 + 色阶**承担，不由字号单独承担。
+      */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          fontSize: FS.small,
+          letterSpacing: 0.8,
+          color: C.text,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+        }}
+      >
+        <span style={{ minWidth: 0 }}>
+          {icon !== undefined && (
+            <span aria-hidden="true" style={{ marginRight: 5, letterSpacing: 0 }}>
+              {icon}
+            </span>
+          )}
+          {children}
+        </span>
+        {/*
+          ★ 附加信息走**正文档**（13px/常规/近黑），不带 `letterSpacing`/`uppercase` ——
+            它是内容不是标题。★ 长场景名要能断行：`overflowWrap` 兜住（窄屏 260px 也会走到）。
+        */}
+        {aside !== undefined && (
+          <span style={{ minWidth: 0, fontSize: FS.small, fontWeight: 400, letterSpacing: 0, overflowWrap: 'break-word' }}>
+            {aside}
+          </span>
+        )}
+        {chevron !== undefined && (
+          <span aria-hidden="true" style={{ marginLeft: 'auto', color: C.faint, letterSpacing: 0, flex: '0 0 auto' }}>
+            {chevron}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 2, lineHeight: 1.6 }}>{hint}</div>
     </div>
@@ -370,7 +708,13 @@ function SceneRow({
     >
       <div style={{ fontSize: FS.title }}>{scene.label}</div>
       <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
-        <Chip>{scene.lamps.length} 维</Chip>
+        {/*
+          ★★ 2026-10-08：文案 `N 维` → `N 个审核面`。
+          依据是**已定裁定**「界面文案：维度 → 审核面」—— 这个词在这里**漏改**了
+          。
+          ★ 只改**界面文案**：数据侧的 `lamp` 值域、`role:"综合维度"` 那类**真值不动**。
+        */}
+        <Chip>{scene.lamps.length} 个审核面</Chip>
         {pending > 0 && <Chip tone="#d97706">待接入 {pending}</Chip>}
         {scene.requiresExternal && <Chip tone="#6d28d9">需预约</Chip>}
       </div>
