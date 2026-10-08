@@ -5,7 +5,7 @@
   "license": "MIT",
   "//license": "MIT —— 发布面每个 package.json 都必须带 license 字段（自检脚本会校验）。",
   "type": "module",
-  "description": "山海·开铺 · 插件仓 —— 场地插件（主推）+ 智囊团插件 + 契约层；Tauri 壳为可选零门槛分发形态",
+  "description": "山海·开铺 —— 为 DeepSeek Harness 提供「开铺」场地：多人会商审校，全程留痕。含场地插件与可选的智囊团插件。",
   "engines": {
     "node": ">=22"
   },
