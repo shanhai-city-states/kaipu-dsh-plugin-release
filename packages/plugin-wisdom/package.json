@@ -71,15 +71,19 @@
       "data.local"
     ],
     "//surfaces": "只声明真的用到的，供人审阅（**不是**运行时门禁）。",
-    "//compat": "⚠️ 分发侧目前没有官方兼容闸门：官方闸门只认 @deepseek-ai/dsh / @deepseek-ai/dsh-* 的 peer，而我们不 import 任何 dsh-* 包。"
+    "//compat": "⚠️ 分发侧目前没有官方兼容闸门：官方闸门只认 @deepseek-ai/dsh / @deepseek-ai/dsh-* 的 peer，而我们不 import 任何 dsh-* 包。",
+    "devContract": {
+      "//": "★★ 构建期依赖：@shanhai/kaipu-contract 是【内部契约包，不随本仓发布】。此处用**人读字段**声明，不放进 devDependencies —— 放进依赖表会让全仓 pnpm install 失败（ERR_PNPM_WORKSPACE_PKG_NOT_FOUND）。产物里相关代码已内联，运行时不需要它。",
+      "name": "@shanhai/kaipu-contract",
+      "scope": "build-time-only",
+      "published": false,
+      "note": "内部包，不对外发布；边界可见，但不参与依赖解析。"
+    }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "react": "^18.3.1"
   },
   "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react 由宿主 DSH 提供（peer）；契约包是构建期依赖，已内联进产物，故放 devDependencies。",
-  "//contract": "★★ @shanhai/kaipu-contract 是【内部契约包 —— 不随本仓发布】。此处**刻意保留**这条声明：它是「我们声明它存在、但它不在这」的唯一显式标记 —— 删掉它，边界反而模糊。（产物里相关代码已内联，运行时不需要它。）",
-  "devDependencies": {
-    "@shanhai/kaipu-contract": "workspace:*"
-  }
+  "//contract": "★★ @shanhai/kaipu-contract 是【内部契约包 —— 不随本仓发布】。此处**刻意保留**这条声明：它是「我们声明它存在、但它不在这」的唯一显式标记 —— 删掉它，边界反而模糊。（产物里相关代码已内联，运行时不需要它。）"
 }

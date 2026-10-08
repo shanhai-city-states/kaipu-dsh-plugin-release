@@ -124,11 +124,17 @@ dsh plugin --profile <your-profile> list
 
 **判据**：改 host half 的 import 时，只允许 `import type`；任何运行时值一律走 client half。
 
-### 留意 2 · `pnpm install` 需要契约包就位
+### 留意 2 · 契约包**不参与依赖解析**（故 `pnpm install` 可直接通过）
 
-两包的 `package.json` 声明了 `@shanhai/kaipu-contract`，`pnpm install` 会按 workspace 解析它。
-**若该包不在工作区内**，install 会以 `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` 失败。
-⇒ 构建前请确认契约层在工作区可见（**发布面的依赖形态另见发布流程说明**）。
+`@shanhai/kaipu-contract` 是**内部契约包，不随本仓发布**。它以**人读字段**声明在
+两包的 `kaipu.devContract` 里（见各 `package.json`），**不放进 `devDependencies`**。
+
+⇒ 因此 `pnpm install` **不会**去解析这个不存在的包，装依赖**直接通过**。
+
+**为什么不放进依赖表**：放进去会让全仓 `pnpm install` 以
+`ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` 硬失败 —— 而读者手上并没有这个内部包。
+放在 `kaipu.*` 人读字段里，边界**看得见**（读者知道有这么个内部契约包存在），
+但**不参与解析**（不阻塞安装）。产物里相关代码早已内联，运行时也不需要它。
 
 ---
 
