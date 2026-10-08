@@ -30,7 +30,7 @@ export function apply(ctx: HostContext, config: WisdomConfig = {}): void {
   ctx.logger?.info(
     `[${name}] 智囊团插件已加载 · 内置样品=${config.builtinSample === true ? '开' : '关'}`,
   )
-  // TODO(Step 4)：注册智囊团专属端点（灯组视图 / 会商记录）
+  // TODO：注册智囊团专属端点（灯组视图 / 会商记录）
   // ctx.remote?.register('shanhai/kaipu-wisdom', { listLampGroups, listConsultations })
   //
   // ★ 注意：**不**在这里做任何"场地必须依赖我"的事 —— 见 cordis.patch.yml 顶部。

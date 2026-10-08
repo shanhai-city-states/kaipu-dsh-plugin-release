@@ -11,7 +11,7 @@ export function PlatformPanelIcon(): ReactElement {
     createElement(
       'svg',
       { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true },
-      // 一盏灯 / 一个铺面的极简记号（Step 4 再定稿视觉）
+      // 一盏灯 / 一个铺面的极简记号（后续再定稿视觉）
       createElement('path', {
         d: 'M4 10h16M6 10v9h12v-9M9 19v-5h6v5',
         stroke: 'currentColor',

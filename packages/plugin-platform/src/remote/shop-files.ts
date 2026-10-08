@@ -112,7 +112,7 @@ interface BufferLike {
  *   `from` / `byteLength` 都是 `Buffer` 的**静态成员**，模块顶层没有它们。
  *   （2026-10-06 实测踩到：写成 `mod.from(...)` ⇒ 编译期全绿，**运行时才炸**，
  *     而且症状是"每个文件都写不进去" —— 看上去像"文件内容有问题"，方向全错。
- *     配套的隔离判据当场抓到，见 `tools/probe/shop-isolation-probe.mjs` D 组。）
+ *     配套的隔离判据当场抓到，见构建期本地判据层 D 组。）
  */
 interface BufferModuleLike {
   Buffer: {

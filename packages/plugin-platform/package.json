@@ -71,7 +71,7 @@
       "data.local"
     ],
     "//surfaces": "只声明真的用到的，供人审阅（**不是**运行时门禁 —— 官方没有作者声明式的能力门禁；市场的能力披露是脚本扫出来的，不是我们自己说的）。",
-    "//compat": "⚠️ 分发侧目前**没有**官方兼容闸门：官方闸门只认 peerDependencies 里名字为 @deepseek-ai/dsh / @deepseek-ai/dsh-* 的项，而我们不 import 任何 dsh-* 包。将来 Step 6 对接服务端一旦 import dsh-api-*，必须同步补 peer —— 那时官方闸门才真正生效。",
+    "//compat": "⚠️ 分发侧目前**没有**官方兼容闸门：官方闸门只认 peerDependencies 里名字为 @deepseek-ai/dsh / @deepseek-ai/dsh-* 的项，而我们不 import 任何 dsh-* 包。将来对接服务端一旦 import dsh-api-*，必须同步补 peer —— 那时官方闸门才真正生效。",
     "devContract": {
       "//": "★★ 构建期依赖：@shanhai/kaipu-contract 是【内部契约包，不随本仓发布】。此处用**人读字段**声明，不放进 devDependencies —— 放进依赖表会让全仓 pnpm install 失败（ERR_PNPM_WORKSPACE_PKG_NOT_FOUND）。产物里相关代码已内联，运行时不需要它。",
       "name": "@shanhai/kaipu-contract",

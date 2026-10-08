@@ -11,7 +11,7 @@ export function WisdomPanelIcon(): ReactElement {
     createElement(
       'svg',
       { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true },
-      // 三盏灯围坐会商（Step 4 再定稿视觉）
+      // 三盏灯围坐会商（后续再定稿视觉）
       createElement('circle', { cx: 12, cy: 6.5, r: 2, stroke: 'currentColor', strokeWidth: 1.6 }),
       createElement('circle', { cx: 6.5, cy: 16.5, r: 2, stroke: 'currentColor', strokeWidth: 1.6 }),
       createElement('circle', { cx: 17.5, cy: 16.5, r: 2, stroke: 'currentColor', strokeWidth: 1.6 }),

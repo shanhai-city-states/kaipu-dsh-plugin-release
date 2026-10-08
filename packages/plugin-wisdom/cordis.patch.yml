@@ -22,5 +22,5 @@
         # 内置智囊团的"样品间"姿态：客户没带自己的 Agent 时开箱即用。
         # ★ 客户带了自己的 Agent ⇒ 灯位可被顶替。
         builtinSample: true
-        # 灯组定义（Step 4 从服务端 /scenes 拉；此处仅示意本地兜底开关）
+        # 灯组定义（从服务端 /scenes 拉；此处仅示意本地兜底开关）
         lampGroups: []

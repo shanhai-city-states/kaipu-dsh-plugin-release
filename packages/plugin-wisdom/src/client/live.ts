@@ -17,9 +17,9 @@
  *   · `live`         真服务端，读到了
  *   · `unreachable`  想连真服务端但没连上（★ **如实说**，不换成演示数据）
  *   · `no_channel`   连通道都没取到（**环境问题**，与"服务端故障"是两件事）
- *   · `stale`        ★ **本轮新增** —— 见下
+ *   · `stale`        ★ **新增** —— 见下
  *
- * **★ 为什么还多一个 `stale`（这是本轮实测挖出来的，不是设计出来凑数的）**：
+ * **★ 为什么还多一个 `stale`（这是当前实测挖出来的，不是设计出来凑数的）**：
  *
  *   智囊团面板**依赖场地插件在场**（端点由场地插件注册，见 `bridge.ts` 文件头）。
  *   若场地插件被摘掉 / 未加载，网关上就没有 `kaipu/*` 这些端点 ⇒
@@ -348,12 +348,12 @@ const p = (r: BridgeResult<unknown>): string =>
  * ★★ 读不到 ⇒ 返回**空 + 原因**，**绝不填演示数据**。
  *
  * 这条是场地侧被 `live-probe --expect=unreachable` **当场抓到的真缺陷**
- * （第一版失败分支写 `{ ...mockSnapshot(), kind:'unreachable' }` ⇒
+ * （早期失败分支写 `{ ...mockSnapshot(), kind:'unreachable' }` ⇒
  *  界面出现最坏组合：**状态条说「未接入」，左边却摆着 5 个演示场景**）。
  * ⇒ 现在一律返回空列表，原因写在状态带里。
  *
  * ★ 另外：这里的文案是**上屏文本**，不许带 markdown 记号
- *   （场地侧第一版把 `**…**` 直接印在了界面上）。
+ *   （场地侧早期版本把 `**…**` 直接印在了界面上）。
  */
 function offlineSnapshot(kind: SourceKind, label: string, reason: string): Snapshot {
   return { kind, label, reason, lamps: [], scenes: [], server: null }
@@ -414,10 +414,10 @@ export async function loadLive(signal?: AbortSignal): Promise<Snapshot> {
       const ownBug = /\/api\//.test(st.error.detail) || /路径不存在/.test(st.error.detail)
       return offlineSnapshot(
         'stale',
-        '灯位数据读不到',
+        '审核面数据读不到',
         ownBug
           ? '接入地址不对 —— 数据通道没有被正确寻址（路径里混入了内部通道段），请核对「开铺」场地插件的接入地址配置。'
-          : '数据通道未就绪 —— 灯位数据由「开铺」场地插件提供，它可能未安装或未加载成功。',
+          : '数据通道未就绪 —— 审核面数据由「开铺」场地插件提供，它可能未安装或未加载成功。',
       )
     }
     return offlineSnapshot('unreachable', '未连上', p(st))
@@ -437,13 +437,13 @@ export async function loadLive(signal?: AbortSignal): Promise<Snapshot> {
   ])
   if (sc.ok !== true) {
     if (!('business' in sc) && looksLikeMissingEndpoint(sc.error)) {
-      return offlineSnapshot('stale', '灯位数据读不到', '读场景失败：数据通道未就绪。')
+      return offlineSnapshot('stale', '审核面数据读不到', '读场景失败：数据通道未就绪。')
     }
     return offlineSnapshot('unreachable', '读场景失败', p(sc))
   }
   if (ag.ok !== true) {
     if (!('business' in ag) && looksLikeMissingEndpoint(ag.error)) {
-      return offlineSnapshot('stale', '灯位数据读不到', '读执行方失败：数据通道未就绪。')
+      return offlineSnapshot('stale', '审核面数据读不到', '读执行方失败：数据通道未就绪。')
     }
     return offlineSnapshot('unreachable', '读执行方失败', p(ag))
   }
@@ -550,15 +550,15 @@ export function summarize(lamps: readonly LampSeat[]): LampSummary {
  * 形态：`已接入 · 5 灯位 · 5 已登记待启用`
  *   · 有 `ready` 时加 `N 在位`
  *   · 有 `vacant` 时加 `N 未登记`（**橙** —— 那是真的"还缺人"）
- *   · 全空（total=0 且 live）⇒ `暂无灯位`（★ 与"5 个待接入"**绝不同形**）
+ *   · 全空（total=0 且 live）⇒ `暂无审核面`（★ 与"5 个待接入"**绝不同形**）
  *
  * ★★ 为什么 `registered` 与 `vacant` **都要显**（不能只显一个）：
  *   裁定要求"内部区分"，那就要**两句话都在场**才有"区分"可言。
  *   只显一个 = 没区分。
  */
 export function summaryText(s: LampSummary): string {
-  if (s.total === 0) return '暂无灯位'
-  const parts: string[] = [`${s.total} 灯位`]
+  if (s.total === 0) return '暂无审核面'
+  const parts: string[] = [`${s.total} 个审核面`]
   if (s.ready > 0) parts.push(`${s.ready} 在位`)
   if (s.registered > 0) parts.push(`${s.registered} 已登记待启用`)
   if (s.vacant > 0) parts.push(`${s.vacant} 未登记`)
@@ -566,10 +566,10 @@ export function summaryText(s: LampSummary): string {
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   ★ 待确认（OPEN）—— 本轮**不擅自定**的点，记在这里免得忘
+   ★ 待确认（OPEN）—— 暂未定的点，记在这里免得忘
    ══════════════════════════════════════════════════════════════════
  *
- * · **`disabled` 的行文案**：本轮只裁了 `pending`。
+ * · **`disabled` 的行文案**：目前只裁了 `pending`。
  *   `disabled` 现在归入 `registered`，行文案同期显「待接入」，
  *   只在悬停提示里如实写「已停用」。
  *   ⇒ 若需要对它独立的行文案（如「已停用」），那是一次**新口径裁定**。

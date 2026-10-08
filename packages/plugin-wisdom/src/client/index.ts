@@ -8,7 +8,7 @@
  * ★ 面板成对注册：`main.key` == `sidebar.panellist.id`。
  * ★ list 座位**必须给 `id`**：漏了 ⇒ 整站白屏。
  *
- * ── ★★ 本轮（Step 4）新增：`connection` 注入 ────────────────────
+ * ── ★★ 新增：`connection` 注入 ────────────────────
  *
  * 智囊团面板要读灯位数据，走的是**宿主网关**（与场地侧同一条物理通道）。
  * 取 `connection` 的取法与场地侧**逐字一致**（宽松取两种形态、取不到不抛）。
@@ -38,7 +38,7 @@ interface ClientContext {
  *   · `slots`      —— 由 ui-renderer 提供（面板注册用）
  *   · `connection` —— 由 `@deepseek-ai/dsh-client-connection` 提供（**数据通道**）
  *
- * ⚠️ `connection` 是**新增**的（Step 1 骨架时没有）——
+ * ⚠️ `connection` 是**新增**的（骨架期没有）——
  *   ⇒ `package.json` 的 `dsh.client.inject`（**包名**词表）也要同步加
  *     `@deepseek-ai/dsh-client-connection`，**两处都要**（漏一处 = 取不到服务）。
  *     这是踩过的坑：两套词表填反了会卡在 "waiting for services"。

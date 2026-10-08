@@ -3,7 +3,7 @@ node_modules/
 .pnpm-store/
 dist/
 lib/
-# ★ 契约层的 **CJS 产物**（给 client bundle 内联用；ESM 那份在 lib/）
+# 契约层的 CJS 产物（构建期中间物；ESM 那份在 lib/）
 lib-cjs/
 *.tsbuildinfo
 
@@ -20,6 +20,6 @@ apps/shell/src-tauri/target/
 dev/
 
 # 本仓**刻意不提交**的东西（干净版纪律）
-#   · 任何密钥/凭据（模型 Key、agent_secret、签名私钥）
+#   · 任何密钥/凭据（模型 Key、服务端密钥、签名私钥）
 #   · 任何客户数据、种子数据
 #   · 任何内部绝对路径

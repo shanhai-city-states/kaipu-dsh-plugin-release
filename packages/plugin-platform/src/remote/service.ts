@@ -589,14 +589,14 @@ export class KaipuRemoteService extends TypertRemoteService {
     const h = await this.http('GET', '/health', undefined, signal)
     if (KaipuRemoteService.isErr(h)) return { ok: true, data: { ...base, authError: h.error } }
     if (h.status !== 200) {
-      return { ok: true, data: { ...base, authError: `存活探针 HTTP ${h.status}` } }
+      return { ok: true, data: { ...base, authError: `服务健康检查失败 HTTP ${h.status}` } }
     }
 
     let health: { version?: string; serverTime?: string; agentsLoaded?: number; tenants?: number } = {}
     try {
       health = JSON.parse(h.text) as typeof health
     } catch {
-      return { ok: true, data: { ...base, authError: '存活探针的响应读不懂' } }
+      return { ok: true, data: { ...base, authError: '服务健康检查失败的响应读不懂' } }
     }
 
     // 存活之外还探一次"能不能取到令牌"——这才是"接上了"的完整判据

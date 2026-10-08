@@ -13,7 +13,6 @@
 # ⚠️ 禁用宿主插件行前必读：
 #   「关掉一个 UI 元素」和「禁用一个插件行」是两件事 —— 后者会连同
 #   该插件**对外提供的 cordis 服务**一起撤掉，影响面远超预期。
-#   曾禁 `ui-workspace` ⇒ 15 个插件 Failed to initialize、整站白屏。
 #   ⇒ 禁用任何宿主行之前，先查清它是不是**服务提供者**（`super(ctx, 'xxx')`）。
 #   ⇒ 优先用「座位 priority 遮蔽」，**不要**整包禁用。
 #
@@ -24,7 +23,7 @@
     - id: shanhai-kaipu-platform
       name: '@shanhai/kaipu-platform'
       config:
-        # ── 场地能力开关（Step 2 起逐个打开）──────────────────────
+        # ── 场地能力开关（按需逐个打开）──────────────────────
         scenesCatalog: true      # 场景/Agent 目录面
         runView: true            # 运行视图（逐灯 + 判定路由）
         capabilityBoundary: true # 能力边界页

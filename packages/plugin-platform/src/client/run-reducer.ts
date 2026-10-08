@@ -13,15 +13,15 @@
  *
  * ★★ 三条契约硬约束（逐条对应 sse-events.json 的 renderRules）
  *
- *   [R1] 归组键 = **(round, lamp)**，不是 `lamp`。
+ *   归组键 = **(round, lamp)**，不是 `lamp`。
  *        `round_start`/`round_done` 给流程语义；每个 `lamp_*` **自带 round** 作兜底。
  *        ⇒ 即便漏接 `round_start`，也**不会**把第 2 轮的 delta 串进第 1 轮。
- *   [R2] 按「第 N 轮」**分段**，回炉可见 —— 不合并成一条流水。
- *   [R6] 轮数**由服务端 `loopPolicy` 决定，客户端不得推断**。
+ *   按「第 N 轮」**分段**，回炉可见 —— 不合并成一条流水。
+ *   轮数**由服务端 `loopPolicy` 决定，客户端不得推断**。
  *        ⇒ 本模块**只反映事件里说的**，永不自己造一个轮次
  *          （所以"兜底"只兜"分组"，不兜"编造第几轮"）。
  *
- * ★ 另有一条不属于本模块但必须记住：[R5] 断开 ≠ 取消。
+ * ★ 另有一条不属于本模块但必须记住：断开 ≠ 取消。
  *   断开只改**客户端的接收状态**（`status: 'stopped'`），
  *   服务端的最终判定仍以 `summary` 为准 —— 两者分开存，界面才不会说出"已取消"。
  */
@@ -182,7 +182,7 @@ export function reduceRun(events: readonly SceneRunEvent[], stopped = false): Ru
        * （触发背景：服务端 2026-10-05 补发了 `round_start`，但它的 data 是
        *  `{round, lamps}`，**没有** §3.4 里的 `reason` ⇒ 这条立刻显形。）
        */
-      reason: reason ?? (fromLampEvent ? '（未收到轮次开始事件）' : '（服务端未给本轮说明）'),
+      reason: reason ?? (fromLampEvent ? '（未收到轮次开始事件）' : '（服务端未给当前说明）'),
       // ★ 兜底分组才算 degraded；"收到了但没给说明"**不是** degraded，是服务端少给一个字段
       degraded: fromLampEvent,
       lamps: [],
@@ -357,7 +357,7 @@ export const STOPPED_EXPLAIN = '已停止接收 —— 服务端仍在算完并�
  *       mock 与服务端不一致（`live.ts` 就是靠 `role === 灯名` 精确匹配找执行方的）。
  *   ⇒ 判别的问法：**这句话是谁写的？** 我们写的 ⇒ 改；服务端给的 ⇒ 不动。
  *
- * ⚠️ 改这些字符串会**连带**改 `tools/probe/run-view-probe.mjs` 里几条锚文本的断言
+ * ⚠️ 改这些字符串会**连带**改构建期本地判据层里几条锚文本的断言
  *   （它们正是断"R4 尾部那两行在不在"）。那些断言是**有意锚文案**的 ——
  *   见该文件品牌名那条注释里对"什么时候该锚文案"的判别。
  */

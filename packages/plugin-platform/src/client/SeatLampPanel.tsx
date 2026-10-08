@@ -151,7 +151,7 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
       </div>
 
       {/* ── 灯栏：要过哪几面 ─────────────────────────────
-          ★★ 2026-10-08 改版：**把五盏灯真的画成五盏灯**（参考灯笼🏮）。
+          ★ 画法：**把五盏灯真的画成五盏灯**（参考灯笼🏮）。
           旧版是 5 行文字 + 橙色「待接入」，满屏像报错台；
           改成「灰灯=未接入 / 金灯=已接入」的灯阵，一眼看懂"还都没亮，等主人来点"。
           · 灯之下才是名字与状态；说明（duty/dutyNote）收进 `title` 悬停，不铺页面。
@@ -178,7 +178,7 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
               .filter(Boolean)
               .join(' ')
             // ★★ 2026-10-08 点题「参考灯笼🏮好看一些」：把圆点做成**小灯笼**。
-            //   画法对齐《山海城邦 · 视觉设计文档》（DESIGN.md §5）：
+            //   画法对齐内部视觉设计规范 §5：
             //   「圆角灯体 + 暖金径向光晕 + 朱砂灯帽 + 火苗」，色板取品牌四色：
             //     · 暖金 gold #C8881F —— 灯体 / 光晕
             //     · 朱砂 cinnabar #A8351A —— 灯帽（点睛）
@@ -267,7 +267,7 @@ function LightFirstButton(): ReactElement {
           width: '100%',
           padding: '8px 12px',
           borderRadius: 6,
-          // ★ 色对齐《山海城邦 · 视觉设计文档》暖金 gold #C8881F（"灯火"用色）
+          // ★ 色对齐内部视觉设计规范 暖金 gold #C8881F（"灯火"用色）
           border: '1px solid #C8881F',
           background: 'rgba(200,136,31,0.12)',
           color: '#A66A12',
