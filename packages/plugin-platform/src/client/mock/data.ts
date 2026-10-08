@@ -80,7 +80,7 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1001',
     slug: 'subject-verifier',
     name: '主体核验方',
-    // ★ 契约 v1.4 §3.1：`role` 的值域 = **灯名**（示例 `"role": "匠灯", "lamp": "匠灯"`），
+    // ★ 接口规范 §3.1：`role` 的值域 = **灯名**（示例 `"role": "匠灯", "lamp": "匠灯"`），
     //   不是"执行/审计"这类**本仓自编的角色词**。
     //   ⇒ 它同时是 `live.ts` 老形状兜底（`role === lamp` 匹配）的**唯一依据**，
     //     填错不会报错，只会**静默失配**。
