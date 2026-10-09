@@ -138,7 +138,7 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
           return (
             <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
               {/*
-                ★ 位名用 `dim`、承担方用 `text`：**人是主体，位是格子**（同左栏 V3 层级口径）。
+                ★ 位名用 `dim`、承担方用 `text`：**人是主体，位是格子**（同左栏层级口径）。
                 ★ 行末的「可改/不可改/🔒 锁死」是**纯展示政策标签**（见 `SEAT_EDITABLE` 注释）：
                   淡色文本、靠右（`marginLeft:auto`）、与灯栏「待接入」同款视觉，**不暗示可点**。
               */}
