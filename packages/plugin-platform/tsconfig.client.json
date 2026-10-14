@@ -1,6 +1,7 @@
 {
   "//": "client half —— ★ 这一侧才含 DOM lib 与 JSX（host 侧故意不含，见 tsconfig.json）",
   "//cjs": "★★ 关键设计：client half 编译成 **CommonJS**（不是 ESM）。这样 tsc 产物里就是标准的 `require()` / `exports.x =`，配套的打包脚本只需把相对 require 改指到同 bundle 内的局部变量，**不需要任何 ESM→CJS 的语法改写**（手写的 ESM 改写器是这里最大的脆弱点）。",
+  "//contract": "★★ 与 tsconfig.json 同一条理由（见那份的 //contract）：契约包不在本仓 node_modules 里，用 paths 显式指向。★ 这里只需**类型**：client 侧对契约的**运行值**导入（错误码表 / 子目录名 / 色调 …）会留在 tsc 产物里成为 `require('@shanhai/kaipu-contract')`，由 tools/build-client.mjs **内联**成 bundle 内模块（那是产物的一部分，用户机上不需要契约包）。",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
@@ -11,6 +12,9 @@
     "moduleResolution": "Node",
     "verbatimModuleSyntax": false,
     "types": ["react"],
+    "paths": {
+      "@shanhai/kaipu-contract": ["../contract/lib/index.d.ts"]
+    },
     "tsBuildInfoFile": "lib/.tsbuildinfo.client"
   },
   "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]

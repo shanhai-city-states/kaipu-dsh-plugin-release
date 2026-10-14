@@ -1,0 +1,80 @@
+{
+  "name": "@shanhai/kaipu-workstation",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "山海·开铺 · 工位插件 —— 场地的操作台面板（轮次时间线/状态/跳转门/浏览器入口）。★ 可单独装 / 可不装；卸掉它，场地仍完整可用。当前为骨架版。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanhai-city-states/kaipu-dsh-plugin-release.git",
+    "directory": "packages/plugin-workstation"
+  },
+  "icon": "icon.svg",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "kaipu",
+    "workstation",
+    "panel"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "//scripts": "★ 公开面不声明 scripts：构建脚本在不随本仓发布的判据层。",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "//inject": "★ 这里是【包名】词表（模块图边 / boot 顺序）；src/client/index.ts 的 inject 是【服务名】词表。两套都要填，填反了会卡在 waiting for services。",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "kaipu": {
+    "//": "★ 本块是【本仓自己的】声明，DSH 官方不读。我们自己的约束一律放 kaipu.*，不塞进 dsh 命名空间。",
+    "dshRange": ">=0.2.0-rc.2 <0.3.0",
+    "//descriptionReviewedAt": "★ 官方 contributing.md：描述会被当作声明并与代码核对。每次改描述都要真的复核代码并更新这个日期 —— --release 缺它即 FAIL。",
+    "descriptionReviewedAt": "2026-10-09",
+    "declaredSurfaces": [
+      "ui.panel",
+      "ui.slot",
+      "data.local"
+    ],
+    "devContract": "@shanhai/kaipu-contract（内部契约包 · 不随本仓发布 · 构建期依赖，已内联进产物）"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "react": "^18.3.1"
+  },
+  "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react 由宿主 DSH 提供（peer）；契约包是构建期依赖，已内联进产物。"
+}

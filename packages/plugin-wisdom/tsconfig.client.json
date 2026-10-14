@@ -1,6 +1,7 @@
 {
   "//": "client half —— ★ 这一侧才含 DOM lib 与 JSX（host 侧故意不含）",
   "//cjs": "★★ 编译成 CommonJS，让配套的打包脚本只需改相对 require 的目标，无需语法改写。",
+  "//contract": "★★ 与 tsconfig.json 同一条理由：契约包不在本仓 node_modules 里，用 paths 显式指向（它只提供类型；运行值由打包脚本内联）。",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
@@ -11,6 +12,9 @@
     "moduleResolution": "Node",
     "verbatimModuleSyntax": false,
     "types": ["react"],
+    "paths": {
+      "@shanhai/kaipu-contract": ["../contract/lib/index.d.ts"]
+    },
     "tsBuildInfoFile": "lib/.tsbuildinfo.client"
   },
   "include": ["src/client/**/*.ts", "src/client/**/*.tsx"]

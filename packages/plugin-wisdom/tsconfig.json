@@ -1,11 +1,15 @@
 {
   "//": "host half —— ★ 不含 DOM lib（防误用 window / fetch / document）。ESM（与 DSH host 一致）。",
+  "//contract": "★★ 契约包（@shanhai/kaipu-contract）**不在本仓** —— 构建期依赖；本包刻意不把它写进 devDependencies（理由见 package.json 的 //contract）⇒ 用 paths 显式指向它的类型入口。同 plugin-platform 那份 tsconfig 的 //contract。",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib",
     "lib": ["ES2022"],
     "types": [],
+    "paths": {
+      "@shanhai/kaipu-contract": ["../contract/lib/index.d.ts"]
+    },
     "tsBuildInfoFile": "lib/.tsbuildinfo.host"
   },
   "include": ["src/index.ts"]

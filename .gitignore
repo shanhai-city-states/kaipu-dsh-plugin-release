@@ -3,7 +3,7 @@ node_modules/
 .pnpm-store/
 dist/
 lib/
-# 契约层的 CJS 产物（构建期中间物；ESM 那份在 lib/）
+# ★ 契约层的 **CJS 产物**（给 client bundle 内联用；ESM 那份在 lib/）
 lib-cjs/
 *.tsbuildinfo
 
@@ -19,7 +19,13 @@ apps/shell/src-tauri/target/
 # ★ 开发用的本地 DSH_HOME 与浏览器 profile（本地生成，不进仓）
 dev/
 
+# ★ 判据复跑的**派生产物**（消毒审计报告 / 发布快照）—— 可重跑生成，不随提交入仓
+#   理由：入仓会让**每次复跑都产生 diff**（含生成时间戳），噪声污染提交历史；
+#   需要留档时**随件/邮件附**。
+#   复跑：node tools/probe/g2-disinfect-audit.mjs [--release]
+out/
+
 # 本仓**刻意不提交**的东西（干净版纪律）
-#   · 任何密钥/凭据（模型 Key、服务端密钥、签名私钥）
+#   · 任何密钥/凭据（模型 Key、agent_secret、签名私钥）
 #   · 任何客户数据、种子数据
 #   · 任何内部绝对路径

@@ -2,6 +2,7 @@
   "//": "host half —— ★ 不含 DOM lib（防误用 window / fetch / document）。ESM（与 DSH host 一致）。",
   "//remote": "src/remote/** 也在 host 侧（跑在 Node，不经打包）—— 必须一起编进 lib/。",
   "//paths": "★ @deepseek-ai/* 不进本仓 node_modules（本仓不是 DSH monorepo）⇒ 用 src/remote/dsh-typert.d.ts 的最小声明过编译；运行时由宿主提供真身（peer，同 dshmarket 的做法）。",
+  "//contract": "★★ 契约包（@shanhai/kaipu-contract）**不在本仓** —— 它是构建期依赖。★ 为什么用 paths 而不是 node_modules：本包**刻意不把它写进 devDependencies**（理由见 package.json 的 //contract）⇒ 没有 node_modules 软链可解析 ⇒ 必须在这里显式指向。★ 指向 `lib/index.d.ts`（契约的**构建产物**）⇒ 跑本仓构建前须先构建契约层（tools/build.mjs 的第 ① 步就是它）。⚠️ 在**发布仓**（不含契约包）里这条 paths 指向一个不存在的路径 —— 那是**如实的**：源码依赖一个不在本仓的层。",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
@@ -9,7 +10,8 @@
     "lib": ["ES2022"],
     "types": [],
     "paths": {
-      "@deepseek-ai/dsh-typert-protocol": ["./src/remote/dsh-typert.d.ts"]
+      "@deepseek-ai/dsh-typert-protocol": ["./src/remote/dsh-typert.d.ts"],
+      "@shanhai/kaipu-contract": ["../contract/lib/index.d.ts"]
     },
     "tsBuildInfoFile": "lib/.tsbuildinfo.host"
   },

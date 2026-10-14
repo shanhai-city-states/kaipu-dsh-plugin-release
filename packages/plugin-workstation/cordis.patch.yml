@@ -1,0 +1,17 @@
+# 山海·开铺 · 工位插件 · patch 层
+# =====================================================================
+# ★★ 本文件是「可摘除」约束的一半：
+#   工位 = 一个独立模块。摘掉本文件这段 insert + 删掉整个包目录
+#   ⇒ 场地插件（plugin-platform）必须仍完整可用 —— 宿主能起、能接第三方 Agent。
+#
+# ★ 命名：panelId = shanhai-kaipu-workstation（083-C-005 拍板，保持 shanhai-kaipu-* 前缀）
+#   与开铺(shanhai-kaipu) / 凉亭(shanhai-kaipu-wisdom) 同前缀、零改名、不动 097。
+
+- insert:
+    - id: shanhai-kaipu-workstation
+      name: '@shanhai/kaipu-workstation'
+      config:
+        # ★ 占位：后续版本由服务端契约定稿（ShanhaiPluginRegistration）。
+        # 中性发布形态（不写联调地址，避免死地址；同 platform 纪律）。
+        # ★ 形状对齐 wisdom/platform 两包（扁平 key，非嵌套）—— 083-C-006 C4。
+        scaffold: true

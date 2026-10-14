@@ -15,7 +15,7 @@
  *      理由与官方 `contributing.md` 同源：「描述必须属实，会被当作声明与代码核对」。
  *      把 mock 混成看起来像真数据，等于自己给自己造了一个"名不副实"的把柄。
  *
- * ── 这组数据刻意覆盖的**全部契约分支**（验收面）──────────────
+ * ── 这组数据刻意覆盖的**全部契约分支**（Step 6 的验收面）──────────────
  *
  *   | 场景 | 覆盖 |
  *   |:--|:--|
@@ -27,15 +27,15 @@
  *
  *   四类判定 `✅通过 / ⚡有条件 / ❌驳回 / ⛔拒收` **全部出现**（R3：必须可区分且可见）。
  *
- * ── ★★ 灯名字段已对齐接口规范（本文件最重要的一次改动）────────
+ * ── ★★ 2026-10-07：灯名字段已对齐契约 v1.4（本文件最重要的一次改动）────────
  *
- * **权威来源**：接口规范（服务端下发为准）
+ * **权威来源**：契约 v1.4（sha256 `f1211713…` · 1,448 行）
  *   §3.1 `role: "匠灯"` / `lamp: "匠灯"` · §3.3 `lamps: ["智灯","匠灯","戒灯","仁灯"]`
  *   · §3.4 SSE `start.lamps` / `lamp_start.lamp` / `dims` 同值域。
  *
  * **为什么必须改**（原来填的是「主体核验」这类**自编维度名**）：
  *   ① **事实错误**：`lamps[].lamp` / `agents[].role` 的真值是**灯名**。
- *      2026-10-07 实测 `GET /scenes` / `start.lamps` 均返灯名。
+ *      工坊 2026-10-07 实测 `GET /scenes` / `start.lamps` 均返灯名。
  *   ② **这条本来就在撒谎**：`live.ts:214` 用 `agents.find(x => x.role === raw)`
  *      把 `role` 与 lamp 名精确匹配 —— 而旧 mock 里 `role` 是 `'执行'`/`'审计'`、
  *      `lamp` 是 `'主体核验'`，**根本匹配不上**。旧数据下这条兜底路径**恒不命中**。
@@ -57,14 +57,14 @@
  *
  *   ★ **只取四灯**，不引入第五个名字：v1.4 §3.3 的**内置**多灯场景
  *     (`multi-dim-review`) 就是 `["智灯","匠灯","戒灯","仁灯"]` 四盏。
- *     **本仓不发明内置场景里没有的取值**（少做比多做好）。
+ *     **我方不发明内置场景里没有的取值**（少做比多做好）。
  *
  *   ★ **哪些保持自编**（裁定(a) 的"内容自编"那一半）：
  *     `agentName` / `seatHolders[].holderName` / `MOCK_SEAT_CHANGES` 的 from·to
  *     —— 它们承载的是「**哪个执行方坐这个位子**」（人/机构），**不是灯名**。
  *     契约 §3.1 里 `name` 与 `lamp` 本就是两个字段。
  *
- * ⚠️ **反向判据已配**：构建期本地判据层 ⓪.3 段断「界面不出现旧自编名」——
+ * ⚠️ **反向判据已配**：`tools/probe/run-view-probe.mjs` ⓪.3 段断「界面不出现旧自编名」——
  *   ★ **先加的反向那条**（旧名必须 0 命中），正向只是它的前提。
  *   理由：只断"新的在"是假绿 —— 改漏一处（比如只改了场景没改事件序列），正向照样全绿。
  */
@@ -80,8 +80,8 @@ export const MOCK_AGENTS: AgentCard[] = [
     id: 'ag-1001',
     slug: 'subject-verifier',
     name: '主体核验方',
-    // ★ 接口规范 §3.1：`role` 的值域 = **灯名**（示例 `"role": "匠灯", "lamp": "匠灯"`），
-    //   不是"执行/审计"这类**本仓自编的角色词**。
+    // ★ 契约 v1.4 §3.1：`role` 的值域 = **灯名**（示例 `"role": "匠灯", "lamp": "匠灯"`），
+    //   不是"执行/审计"这类**我方自编的角色词**。
     //   ⇒ 它同时是 `live.ts` 老形状兜底（`role === lamp` 匹配）的**唯一依据**，
     //     填错不会报错，只会**静默失配**。
     role: '智灯',
@@ -174,7 +174,7 @@ export const MOCK_SCENES: SceneCard[] = [
     lamps: [
       // ★ 四盏灯的顺序与 v1.4 §3.3 内置场景 `["智灯","匠灯","戒灯","仁灯"]` **逐字一致**
       // ★★ 2026-10-08 补 `duty`/`dutyNote` —— **这两个字段是契约 v1.5 §3.3 已有的**
-      //    （本仓类型与 mock 此前都没跟上，属"契约有、本仓缺"）。职责值**逐字取契约样例**，
+      //    （我方类型与 mock 此前都没跟上，属"契约有、我方缺"）。职责值**逐字取契约样例**，
       //    不自己编：契约注明「`duty` 权威源 = 官网 `.t-role`」。
       { lamp: '智灯', agentId: 'ag-1001', agentName: '主体核验方', duty: '拆局推演', dutyNote: '看眼前的路怎么走' },
       { lamp: '匠灯', agentId: 'ag-1002', agentName: '权责确认方', duty: '工程落地与系统维护', dutyNote: '把图纸砌成城墙' },
@@ -188,7 +188,7 @@ export const MOCK_SCENES: SceneCard[] = [
     // ★ 形状按契约 v1.3 §23.3（**数组**，每项 {seat, holderType, holderId, holderName}）
     //   —— 原先是「对象 + 三个固定键」的早期推测，契约落纸后改回契约形状。
     // ★★ 2026-10-08 补至 **4 项**：契约 v1.5 §23.3 明写「`seatHolders` **已落地（各场景 4 项）**」
-    //    ⇒ 本仓原 2 项**与现状不符**，这里补 management / signature。
+    //    ⇒ 我方原 2 项**与现状不符**，这里补 management / signature。
     // ★ 同时订正 `holderType` 值域：`builtin` = 平台内建的**备选承担方**（智囊团/第三方审计/管理方）；
     //    `platform` = **平台自身提供的服务位 —— 契约注明"当前仅签名位"**
     //    ⇒ `execution` / `audit` 原写 `platform` **用错档**，改回 `builtin`。
@@ -196,7 +196,7 @@ export const MOCK_SCENES: SceneCard[] = [
       { seat: 'execution', holderType: 'builtin', holderId: 'ag-1001', holderName: '主体核验方' },
       { seat: 'audit', holderType: 'builtin', holderId: 'ag-1003', holderName: '留痕审计方' },
       // ★ 管理位取**契约 `seats.json` 的默认值**（「山海管理方（候选）」是**默认/示例**，
-      //   不是固定值 —— 2026-10-08 明确：管理位可以是项目主持人，也可以是委托方自己）。
+      //   不是固定值 —— 发起人 2026-10-08 明确：管理位可以是项目主持人，也可以是委托方自己）。
       { seat: 'management', holderType: 'builtin', holderId: 'shanhai-mgmt', holderName: '山海管理方（候选）' },
       { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
     ],
@@ -265,7 +265,7 @@ export const MOCK_SCENES: SceneCard[] = [
     loopPolicy: { maxLoop: 1, maxGlobalLoops: 1 },
     requiresExternal: false,
     // ★★ 2026-10-08 补 4 项（契约 v1.5 §23.3「各场景 4 项」）。
-    //   ★★ 管理位**刻意用 `external` + 客户方的人** —— 2026-10-08 明确：
+    //   ★★ 管理位**刻意用 `external` + 客户方的人** —— 发起人 2026-10-08 明确：
     //      「管理位不一定姓山海，可以是项目主持人，也可以是委托方自己」。
     //      ⇒ 演示数据要**把这个形态真的演出来**，否则界面上永远只看得到平台默认值，
     //        那条口径就只落在文档里、落不到屏幕上。
@@ -297,7 +297,7 @@ export const MOCK_SCENES: SceneCard[] = [
       { seat: 'signature', holderType: 'platform', holderId: 'shanhai-signer', holderName: '山海签名服务' },
     ],
     description: '同一场景的"跑到一半"快照：用于演示客户端断开时的措辞。',
-    // ★★ **刻意留空** —— 「未归类不藏」：有场景却没归类 ⇒ 界面必须
+    // ★★ **刻意留空** —— 契约 #17「未归类不藏」：有场景却没归类 ⇒ 界面必须
     //    **单列「未归类」如实展示**。留空一个就是为了让这条被演示到、被断言到。
     category: '',
   },
@@ -305,7 +305,7 @@ export const MOCK_SCENES: SceneCard[] = [
 
 /* ─────────────── GET /scenes 新增两段（契约变更 #17 · 纯追加）─────────────── */
 /*
- * ★★ 这两段是新增消费的（设计答复「**消费**」）。
+ * ★★ 这两段是本轮新消费的（设计答复「**消费**」）。
  *   目的（他的原话）：**让客户先认出场合，而不是先学术语**。
  *
  * ★ 严格遵守他给的三条约束：
@@ -393,7 +393,7 @@ const RUN_OPENING_AUDIT: SceneRunEvent[] = [
     conditions: ['补件已核验（第 2 轮）'],
     round: 2,
     participatedDims: ['智灯', '匠灯', '戒灯'],
-    // ★ 报告**不能**给出"审全了"的错觉 ⇒ 这一项必须在报告里可见
+    // ★ 契约 #4：报告**不能**给出"审全了"的错觉 ⇒ 这一项必须在报告里可见
     skippedDims: ['仁灯'],
   },
   { event: 'usage', tokensIn: 12840, tokensOut: 3160, credits: 12, balanceAfter: 488 },
@@ -534,7 +534,7 @@ export function seatChangesOf(scene: string): SeatChangeRecord[] {
  * ★★ 为什么必须有这张表：契约里那两个码的 `clientAction` 是「**按 `detail.poll` 切到查询接口**」
  *    「按 `detail.requiresExternal` 显示该场景需进场」「带 `availableAt` 就必须一并显示」。
  *    **没有 detail 就没有出路** —— 界面只能干说一句"这一单已经在跑了，别急"，用户仍然什么也做不了。
- *    （这是实测抓到的真实缺口：接线初版漏了 detail。）
+ *    （这是 Step 7 实测抓到的真实缺口：第一版接线漏了 detail。）
  *
  * 形状照抄契约的 `detailShape` 字段：
  *   duplicate_request → { "state": "running", "poll": "/scene/run/{requestId}" }
