@@ -39,7 +39,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import type { SceneRunEvent } from '@shanhai/kaipu-contract'
 import { Intro, PanelHead } from './Intro.js'
 import { LeftPane, SceneCurrent, type LeftPaneProps } from './LeftPane.js'
-import { RightPane, type RunInput } from './RightPane.js'
+import { ActionBar, RightPane, type RunInput } from './RightPane.js'
 import { ShopShelf } from './ShopShelf.js'
 import { SeatLampPanel } from './SeatLampPanel.js'
 import { loadLive, mockSnapshot, type Snapshot } from './live.js'
@@ -697,6 +697,31 @@ export function PlatformPanel(): ReactElement {
               */}
               <SeatLampPanel scene={scene} />
 
+              {/*
+                ★★★ 行动带（2026-10-17 · Codex 提案 A1；**订正后在 run 之外**）。
+
+                ★★ 为什么必须在这里、而不是 RightPane 内部（这是第一版**真错了**的地方）：
+                   `<div data-kaipu-run>` 包住整个 `RightPane` ⇒ 写在 RightPane 里的任何东西
+                   **都在判据边界之内**。而本项目口径明写「新增锚点必须在 `data-kaipu-run` 之外」
+                   （见下方那段注释与 `ProcessFacts` / `SeatLampPanel` 的同款处理）。
+                   第一版把 ActionBar 写在 RightPane 里、注释却声称"在 run 之外"——
+                   **注释与事实相反**，比不做更糟（同"探针段名比事实大"）。
+                ⇒ 现在与 `ProcessFacts` / `SeatLampPanel` 并列装配在边界**之前**，结构上够不着。
+
+                ★ 它答的是"现在该做什么"，属于**发起前后都该先看到**的一句话 ⇒ 摆在这个位置
+                  与"这场谁来审"同层，不埋进运行结果里。
+                ★ `queryRoot` 传 `mainRef.current`：定位按钮只在本面板内找目标，
+                  宿主挂多个面板实例时不会跳到别人家（Codex 验收 P2 第三条）。
+              */}
+              <ActionBar
+                run={run}
+                scene={scene}
+                isMock={isMock}
+                canStart={!isMock}
+                leftHidden={leftHidden}
+                queryRootRef={mainRef}
+              />
+
               {/* ★★ `data-kaipu-run` = 运行视图的**判据边界**。
                   探针断 R2/R3/R4 时读这一块的文本，而不是整页文本 —— 否则页面上任何
                   一处出现"第 2 轮"都会让断言蒙对（图例、说明、别的区块…）。
@@ -1160,7 +1185,18 @@ function ManagePlaceholder(): ReactElement {
           lineHeight: LH.loose,
         }}
       >
-        当前本地演示模式暂不开放此入口 —— 接入场地服务端后，铺主在管理方界面发起开铺、指派执行方。
+        {/* ★★ 2026-10-17 改口径（Codex 提案 §4 · E5 勘误）
+         *
+         * 改之前写的是「当前本地演示模式暂不开放此入口」——
+         *   ★★★ **这是把限制归错了因**：这一页在**真服务端下也照常渲染**
+         *   （`view === 'manage'` 与 `isMock` 无关），所以真服务端用户看到
+         *   「本地演示模式暂不开放」会以为是自己没切对模式 ⇒ **误导**。
+         *   真正的边界是**门禁 068 未落地**，与本机在不在演示模式无关。
+         *
+         * ★ 保持"只说明状态与边界、不加任何管理操作"（红线 ③ 客户端零管理能力）。
+         */}
+        管理方功能尚未开放 —— 待门禁 068 接入后落地（P2.5）。发起开铺、指派执行方等动作，
+        均需在场地方的管理方界面完成；这里不提供任何操作入口。
       </div>
     </section>
   )

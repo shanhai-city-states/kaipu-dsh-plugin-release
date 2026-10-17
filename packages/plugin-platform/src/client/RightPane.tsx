@@ -201,6 +201,20 @@ export function RightPane({
         </div>
       )}
 
+      {/* ★★★ 行动带**不在这里渲染**（2026-10-17 · Codex 验收 P2 订正）。
+       *
+       * ★★ 订正的是什么（这条是**真的错了**，不是措辞问题）：
+       *   第一版把 `<ActionBar>` 直接写在这个位置（RightPane 内）——
+       *   而 `PlatformPanel` 用 `<div data-kaipu-run="1">` 包住**整个 RightPane**
+       *   ⇒ ActionBar 实际落在**判据边界之内**。
+       *   但当时的注释写着「三者都在 run **之外**」——**注释与事实相反**，
+       *   正是本项目最忌讳的病（同"探针段名比事实大"）。
+       *
+       * ⇒ 现在 ActionBar 由 `PlatformPanel` 在 `<div data-kaipu-run>` **之前**装配，
+       *   与 `ProcessFacts` / `SeatLampPanel` 同款处理（结构上够不着，不靠自律）。
+       *   本文件只**导出**组件，不再自己渲染。
+       */}
+
       {/* ★ 空态：**先给"怎么开始"**，再说"尚未运行"。
           ★★ 为什么 `inbound === 0`（全部待接入）**也允许**发起（2026-10-05 实测后改）：
             一开始的判据是"没有执行方就不给跑"，但实测服务端**照样能把这一场跑完**
@@ -497,7 +511,20 @@ function StartRunForm({
         />
       </label>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        {/* ★★ 主次分明（2026-10-17 · Codex 提案 §3.4「让开始运行与铺子资料有明确主次」）
+         *
+         * 改之前：两个按钮都是「透明底 + 描边 + 同样字号」，形状接近 ⇒
+         *   ready 之后「开始运行」在视觉上并不比「铺子资料」更像主行动。
+         *
+         * ★★★ 订正（2026-10-17 · Codex 验收「设计偏差：导航蓝被用作主行动色」）：
+         *   第一版用 `C.accent`（#3B6FE0）做实底 —— **与既有语义分工冲突**：
+         *   `TabBar` 的注释明写「暖金是"签名灯/主行动"的语义色，页签是**导航**性质」，
+         *   即 **蓝=导航、暖金=主行动**。用蓝做主按钮等于把两套语义搅在一起。
+         *   ⇒ 改回暖金系：实底 `#c69a3c` + 深色字（**不用白字** ——
+         *     暖金配白字对比度只有约 2.3:1，12-13px 小字读不清；配深棕约 5.7:1）。
+         *   ★ 暖金色值取自本文件 `UnsignedBanner` 的既有暖金色系，不新造颜色。
+         */}
         <button
           type="button"
           disabled={!ready}
@@ -505,17 +532,18 @@ function StartRunForm({
           style={{
             fontSize: FS.small,
             padding: '5px 14px',
-            border: `1px solid ${C.border}`,
+            border: `1px solid ${ready ? '#c69a3c' : C.border}`,
             borderRadius: 4,
-            background: ready ? C.soft : 'transparent',
-            color: ready ? 'inherit' : C.dim,
+            background: ready ? '#c69a3c' : 'transparent',
+            color: ready ? '#2b1d00' : C.dim,
+            fontWeight: ready ? 600 : 400,
             cursor: ready ? 'pointer' : 'not-allowed',
             font: 'inherit',
           }}
         >
           {running ? '正在跑…' : '开始运行'}
         </button>
-        {/* ★ 返回铺子资料：与顶部页签同源的"顺手回去取更多"入口 */}
+        {/* ★ 返回铺子资料：与顶部页签同源的"顺手回去取更多"入口（**次要**，保持透明） */}
         <button
           type="button"
           data-kaipu-goshop="1"
@@ -533,6 +561,16 @@ function StartRunForm({
         >
           铺子资料
         </button>
+        {/* ★★ 禁用原因**明写**（2026-10-17 · Codex 提案 §3.4）
+         *
+         * 为什么必须写出来：禁用态只靠"颜色变淡"是不合格的可访问性 ——
+         *   色弱用户看不出差别，而"为什么不能点"是此刻他最想知道的一件事。
+         * ★ 只在**真的禁用**时出现（running 时按钮是"正在跑…"，不是禁用），
+         *   且**不编原因**：只说两种真实情况（运行中 / 没填内容）。
+         */}
+        {!ready && !running && content.trim() === '' && (
+          <span style={{ fontSize: FS.small, color: C.dim }}>请先填写待审内容</span>
+        )}
       </div>
     </section>
   )
@@ -818,6 +856,224 @@ function shortId(id: string): string {
   return id.length <= 20 ? id : `${id.slice(0, 8)}…`
 }
 
+/* ─────────────────── 行动带（A1 · 2026-10-17）─────────────────── */
+
+/**
+ * ★★★ 右栏行动带 —— **分状态**告诉用户"现在该做什么"。
+ *
+ * ── 为什么它必须存在（2026-10-17 实测出来的缺口）────────────────────────────
+ *   `PlatformPanel` 在 `selected` 失效时会**自动回落到第一场**（那个 `useEffect`，
+ *   PlatformPanel.tsx:289）⇒ **只要列表非空，`NoScenePicked` 空态几乎永远不显示**
+ *   ⇒ 那段已定案的空态文案「选一场，把你手头的东西放进来审一审」事实上**被架空了**。
+ *   用户真正看到的第一屏是：场景名 + 一大块配置 + 未签名提示 + 未接入说明，
+ *   **却没有一句指向"下一步"**。这一带就是补这一句。
+ *
+ * ── 分支规则（**只说真话，不编进度**）──────────────────────────────────────
+ * | 状态 | 显示 |
+ * |:--|:--|
+ * | `idle` + 可发起 | 「已选：{场景}。粘贴待审内容，或从铺子资料带入。」+ 定位按钮 |
+ * | `idle` + 演示模式 | 「选择场景，查看演示过程。」（**不挂定位按钮** ——
+ *   演示模式没有真实发起表单，按了是假入口） |
+ * | `running` | 「正在运行，下面逐轮更新。」（**不给进度条/百分比/剩余时间**） |
+ * | `stopped` | 「已停止接收」+ 指路下方已有结论（若有） |
+ * | `summary` 到达 | 追加「查看本次结论 ↓」按钮 |
+ * | 异常 | **不覆盖**上列任何一条 —— 下面的 `runError` / `ErrorSurface` 原文照出 |
+ *
+ * ★ 为什么 `summary` 之前**不挂**结论按钮：那时还没有结论，挂一个点不动的按钮
+ *   比不挂更糟（同"禁用态只靠颜色"的问题）。
+ *
+ * ── 定位怎么做的 ───────────────────────────────────────────────────────────
+ *   复用本文件既有的 `nearestScroller` + `smoothScrollTo`（StartRunForm 与
+ *   `expandAndCenter` 两处同款），**只滚面板自己的滚动容器**。
+ *   ★ 不用 `scrollIntoView`：它会连带滚动宿主页面，把别人的布局也拽动（踩过）。
+ *   ★ 滚完**移键盘焦点**到目标标题：只用鼠标点完，用户 Tab 一下会跳回别处。
+ */
+export function ActionBar({
+  run,
+  scene,
+  isMock,
+  canStart,
+  leftHidden,
+  queryRootRef,
+}: {
+  run: RunView
+  scene: SceneCard | null
+  isMock: boolean
+  /** 真服务端路径才有真实发起表单（演示/通道不可用时没有可填的落点） */
+  canStart: boolean
+  /**
+   * ★★ 左栏状态**三态**，不能拍成布尔（2026-10-17 · Codex 验收 P2 订正）。
+   *
+   * 第一版把它压成 `leftHidden !== null` ⇒ `collapsed`（用户宽屏收起）与
+   * `narrow`（容器太窄）被当成同一回事，都提示"点顶部的「场景」"。
+   * 但 `PlatformPanel` **只在 narrow 时**才渲染顶部那条折叠条 ⇒
+   * **宽屏收起时顶部什么都没有**，那句话是**指路指空**（用户照着点只会扑空）。
+   * ⇒ 三态分开，各指各的真实出口（与 `NoScenePicked` 的 `guide` 同一口径）。
+   */
+  leftHidden: 'collapsed' | 'narrow' | null
+  /**
+   * ★★ 查询根的 **ref**（2026-10-17 · Codex 验收 P2「全局查询可能定位另一个面板」）。
+   *
+   * ── 第一版为什么还不算修好（Codex 第二轮指出的）──────────────────────────
+   *   第一版写的是：
+   *     `scope?.querySelector(sel) ?? document.querySelector(sel)`
+   *   ⇒ **只要本面板里查不到，就退化为全文档查询** —— 而注释写的是
+   *     "容器还没挂载时才退化" ⇒ **又是一次注释比事实好看**（与本文件上一处同病）。
+   *   多实例下真实后果：本实例没有 summary（比如还没跑完），另一个实例有
+   *   ⇒ 点「查看本次结论」会**跳到别人的结论**。这比"不动"更糟（它会撒谎）。
+   *
+   * ── 现在的口径（无兜底）────────────────────────────────────────────────
+   *   ① `queryRootRef.current === null` ⇒ 直接 return（没有本面板容器，就不定位）
+   *   ② 本面板内查不到目标 ⇒ 直接 return（**宁可不动，也不跳去别的实例**）
+   *   ⇒ **不存在任何全局回退路径**。
+   *   ★ 为什么不担心"容器没挂载导致点不动"：那颗按钮本身长在本容器里，
+   *     容器没挂载时用户根本点不到它 —— 这个"退化"没有真实场景。
+   */
+  queryRootRef?: { current: HTMLElement | null }
+}): ReactElement | null {
+  /** 两个定位目标：表单在 `data-kaipu-start`，结论块在 `data-kaipu-summary` */
+  const jumpTo = useCallback(
+    (anchor: 'start' | 'summary') => {
+      const sel = anchor === 'start' ? '[data-kaipu-start]' : '[data-kaipu-summary]'
+      // ★ 只在本面板容器内查；没有容器 / 没有目标 ⇒ 什么都不做（**不跨实例兜底**）
+      const scope: HTMLElement | null = queryRootRef?.current ?? null
+      if (scope === null) return
+      const host = scope.querySelector<HTMLElement>(sel)
+      if (host === null) return
+      const box = nearestScroller(host)
+      // 没有可滚容器 ⇒ 它本来就在视野里，没有"目标位"可去（与 StartRunForm 同款判据）
+      if (box !== null) smoothScrollTo(box, centerTop(box, host))
+      // 焦点跟随：只用鼠标点完，Tab 会跳回别处 ⇒ 把焦点落在目标上
+      if (!host.hasAttribute('tabindex')) host.setAttribute('tabindex', '-1')
+      host.focus({ preventScroll: true })
+    },
+    [queryRootRef],
+  )
+
+  const idle = run.status === 'idle'
+  const running = run.status === 'running'
+  const stopped = run.status === 'stopped'
+  /**
+   * ★★ `done` 必须显式覆盖（2026-10-17 实测补漏）。
+   *
+   * `RunStatus` 是**四值**：`idle | running | stopped | done`（见 `run-reducer.ts`）。
+   * 第一版只写了前三个 ⇒ **跑完之后行动带只剩一个「查看本次结论 ↓」按钮、没有一句主体文案**，
+   * 看起来像"话被吞了"。这是实测点开一次运行才发现的 —— 光看代码很容易漏。
+   */
+  const done = run.status === 'done'
+  const hasSummary = run.summary !== null
+
+  // 没有可指认的状态 ⇒ 不渲染这一带（不做"其实没有"的空壳）
+  if (!idle && !running && !stopped && !done && !hasSummary) return null
+  // 没有场景 ⇒ 没有"已选 X"可说（此时右栏本身在走空态，这一带不出来抢话）
+  if (scene === null) return null
+
+  const sceneName = scene.label
+
+  /**
+   * ★★ 「换一场去哪」**按三态各指各的**（2026-10-17 · Codex 验收 P2 订正）。
+   *
+   * `nearestScroller` / 上面那套只负责滚动；这里负责**指路是否指得着**：
+   *   · `null`      ⇒ 左栏在场，什么都不用说（就在左边）
+   *   · `collapsed` ⇒ 左栏是**用户自己收起的**，出口是**侧边那条把手**（宽屏**没有**顶部折叠条）
+   *   · `narrow`    ⇒ 容器太窄、左栏压根不渲染，出口才是**顶部折叠条**
+   * ★ 第一版把后两者合并、一律写"点顶部的「场景」" ⇒ 宽屏收起时**指路指空**。
+   *   与 `NoScenePicked.guide` 保持同一口径（那里早就分了三态，这里当时没跟上）。
+   */
+  const switchHint =
+    leftHidden === null
+      ? null
+      : leftHidden === 'collapsed'
+        ? '换一场：点左侧那条「展开场景栏」的把手。'
+        : '换一场：点顶部的「场景」。'
+
+  return (
+    <div
+      data-kaipu-actionbar="1"
+      style={{
+        margin: '0 14px',
+        padding: '8px 11px',
+        border: `1px solid ${C.border}`,
+        borderLeft: `3px solid ${running ? '#d97706' : C.accent}`,
+        background: C.soft,
+        fontSize: FS.small,
+        lineHeight: LH.normal,
+      }}
+    >
+      {/* 文案主体：每种状态只说这一状态下为真的话 */}
+      {idle && (
+        <div style={{ color: C.text }}>
+          {canStart ? (
+            <>
+              已选：<b>{sceneName}</b>。粘贴待审内容，或从铺子资料带入。
+              {switchHint !== null && <span style={{ color: C.dim }}>　{switchHint}</span>}
+            </>
+          ) : (
+            <>已选：<b>{sceneName}</b>。选择场景，查看演示过程。</>
+          )}
+        </div>
+      )}
+      {running && (
+        <div style={{ color: C.text }}>
+          正在运行。下面按「第 N 轮」逐轮更新 —— 现在读到的都是已发生的事。
+        </div>
+      )}
+      {stopped && (
+        <div style={{ color: C.text }}>
+          已停止接收。服务端仍在把它算完 —— 下面已有的轮次与结论仍然作数。
+        </div>
+      )}
+      {done && !stopped && (
+        <div style={{ color: C.text }}>
+          这一趟跑完了。往下看<b>本次结论</b> —— 特别留意「未参与审核面」那一栏。
+        </div>
+      )}
+
+      {/* 定位按钮行：idle 才指表单（有表单才指得动）；结论到达才指结论 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', marginTop: 6 }}>
+        {idle && canStart && (
+          <button
+            type="button"
+            data-kaipu-jump-fill="1"
+            onClick={() => jumpTo('start')}
+            style={{
+              fontSize: FS.small,
+              padding: '3px 10px',
+              border: `1px solid ${C.border}`,
+              borderRadius: 4,
+              background: 'transparent',
+              color: C.accent,
+              cursor: 'pointer',
+              font: 'inherit',
+            }}
+          >
+            填写待审内容 ↓
+          </button>
+        )}
+        {hasSummary && (
+          <button
+            type="button"
+            data-kaipu-jump-summary="1"
+            onClick={() => jumpTo('summary')}
+            style={{
+              fontSize: FS.small,
+              padding: '3px 10px',
+              border: `1px solid ${C.border}`,
+              borderRadius: 4,
+              background: 'transparent',
+              color: C.accent,
+              cursor: 'pointer',
+              font: 'inherit',
+            }}
+          >
+            查看本次结论 ↓
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ─────────────────── 空场（用户可见面）─────────────────── */
 
 function ZeroInbound({ scene }: { scene: SceneCard }): ReactElement {
@@ -1067,7 +1323,11 @@ function LampRow({ lamp }: { lamp: LampView }): ReactElement {
 
 function SummaryBlock({ summary, finishReason }: { summary: SummaryView; finishReason: string | null }): ReactElement {
   return (
-    <section style={{ marginTop: 18, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+    // ★★ `data-kaipu-summary`（2026-10-17 · Codex 提案 §6 方案B）：行动带「查看本次结论 ↓」
+    //   的滚动目标。★ **不是**复用 `data-kaipu-gist` —— 那个锚点在 `NoScenePicked`
+    //   空态里（"选一场，把你手头的东西…"），拿它当目标会跳到空态而不是结论。
+    //   落点选**块的根**而非内层，滚到块首比滚到内层某行好读。
+    <section data-kaipu-summary="1" style={{ marginTop: 18, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: FS.title }}>本次结论</span>
         <VerdictBadge verdict={summary.verdict} />

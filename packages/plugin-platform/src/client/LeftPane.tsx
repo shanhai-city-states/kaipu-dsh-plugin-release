@@ -152,6 +152,8 @@ export function LeftPane({
   sceneFirst = false,
 }: LeftPaneProps): ReactElement {
   const { groups, unclassified } = groupScenes(scenes, categories)
+  const pendingAgents = agents.filter((agent) => agent.status === 'pending').length
+  const disabledAgents = agents.filter((agent) => agent.status === 'disabled').length
 
   /**
    * ── 三块各自成块，再按 `sceneFirst` 决定顺序（2026-10-08 · 107「方案 D」）──
@@ -166,12 +168,18 @@ export function LeftPane({
       title="执行方（Agent 目录）"
       sectValue="执行方"
       icon="📂"
-      hint="被接进这场戏的审方（即接入的 Agent）。标「待接入」的还没人接，灰掉的是被关掉了。"
+      hint="已接入的执行方及其状态。标「待接入」的还没人接，灰掉的是被关掉了。"
       // ★ 收起态也要能一眼看出"有几家"（同收起点写着当前是哪一场的口径）
-      aside={<span style={{ color: C.dim }}>（{agents.length}）</span>}
-      // ★★ 临时解：默认展开 —— 介绍把「Agent 目录」与「场景目录」并列成核心能力，
-      //   默认收起会让第一眼看不到 Agent 在哪。若短期内四页落地则并入独立页，此处回退。
-      defaultOpen
+      aside={
+        <span data-kaipu-agent-summary="1" style={{ color: C.dim, overflowWrap: 'anywhere' }}>
+          （{agents.length}
+          {pendingAgents > 0 && ` · ${pendingAgents} 待接入`}
+          {disabledAgents > 0 && ` · ${disabledAgents} 已停用`}
+          {agents.length === 0 && ' · 待接入'}）
+        </span>
+      }
+      // 初始收起让位于场景；PaneBlock 的用户展开状态不随数据刷新重置。
+      defaultOpen={false}
     >
       {/*
         ★★ 零接入时**明确**显示「待接入」（空态占位）。
@@ -200,7 +208,7 @@ export function LeftPane({
       id="recommend"
       title="该怎么选"
       icon="📂"
-      hint="按场合推荐。选之前看一眼，就不用逐个点开猜。"
+      hint="按场合提供选择参考。请根据适用说明，在「场景」中选择；推荐名称不一定与场景同名。"
       aside={<span style={{ color: C.dim }}>（{recommendations.length}）</span>}
       defaultOpen={false}
     >
@@ -566,7 +574,24 @@ function SectionTitle({
         style={{
           display: 'flex',
           alignItems: 'baseline',
-          gap: 8,
+          columnGap: 8,
+          /**
+           * ★★★ 标题行**放不下就换行**（2026-10-17 · 发起人反馈「执行方（Agent 目录）后面换行」）。
+           *
+           * ── 改前的实测（260px 最窄档）──────────────────────────────────
+           *   标题行实测高 **35px**（340px 档只有 19px）——
+           *   因为 flex **不换行**，标题被压缩到 138px 宽、**自己内部折成两行**，
+           *   而右侧摘要 `（5 · 1 待接入 · 1 已停用）` 还挤在同一行旁边。
+           *   ⇒ 一行里同时出现"标题折行"和"摘要并列"两种形态，看着就乱。
+           *
+           * ── 修法：自适应，不是硬换行 ────────────────────────────────────
+           *   加 `flexWrap` + `rowGap`：宽档（340/420）放得下 ⇒ 仍是**一行**（不白占高度）；
+           *   窄档（260）放不下 ⇒ **摘要整块落到第二行**，标题不再被压缩折行。
+           *   ★ 为什么不做成"永远两行"：那会让 340/420 档白白多占 19px，
+           *     而 107 方案 D 的初衷正是**把高度让给场景**。能省就省。
+           */
+          flexWrap: 'wrap',
+          rowGap: 2,
           fontSize: FS.small,
           letterSpacing: 0.8,
           color: C.text,
@@ -691,20 +716,55 @@ function AgentRow({ agent }: { agent: AgentCard }): ReactElement {
         cursor: 'help',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <span style={{ fontSize: FS.title, color: off ? C.dim : C.text }}>{agent.name}</span>
-        <span style={{ fontSize: FS.tag, color: C.faint }}>{agent.role}</span>
-        {/* ★ 三态共占同一个位置：`已停用` / `待接入` / `v3`（同一时刻只会出现一个）
-            ★★ `data-kaipu-agent-state` 锚点：判据要断**这一格**的文本 ——
-              不能断整行的文本，因为占位条目的**名字本身就是「(待接入)」**，
-              断"行内含待接入"会被名字蒙对（2026-10-05 写这条判据时当场发现）。 */}
-        <span data-kaipu-agent-state="1" style={{ fontSize: FS.tag, color: pend ? '#d97706' : C.dim }}>
-          {statusText}
-        </span>
-        {/* ★ ⓘ = 可发现性：`title` 只有悬停才出来，不标一下没人知道这里有东西 */}
-        <span aria-hidden="true" style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.faint }}>
-          ⓘ
-        </span>
+      {/* ★★★ 两行排版（2026-10-17 · 发起人反馈：「背后的内容全部换行，更整体好看」）。
+       *
+       * ── 改之前是什么样 ──────────────────────────────────────────────────
+       *   一行 flex 塞四样：`名称 · 角色 · 状态(v3/待接入/已停用) · ⓘ`
+       *   260px 窄档下必然压缩：`主体核验方` + `智灯` + `v3` 挤在一起，
+       *   名字长一点就换行、把 ⓘ 顶到奇怪的位置 —— **每行高度不一致，整体就散**。
+       *
+       * ── 现在 ────────────────────────────────────────────────────────────
+       *   第一行：**名称**（主体）+ ⓘ 右对齐
+       *   第二行：**角色** + **状态**（都属"元信息"，同层）
+       *   ⇒ 每行只承担一件事，**行高一致**，五条排下来是一个整齐的块。
+       *
+       * ★ 锚点一个没动（判据全依赖它们，见下）：
+       *   `data-kaipu-agent` / `data-kaipu-agent-status` 仍在**外层根节点**上；
+       *   `data-kaipu-agent-state` 仍在**那个只装状态文本的 span** 上
+       *   —— 它必须继续单独占一格：占位条目的**名字本身就是「(待接入)」**，
+       *      断"行内含待接入"会被名字蒙对（2026-10-05 写这条判据时当场发现的坑）。
+       */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span
+            style={{
+              fontSize: FS.title,
+              color: off ? C.dim : C.text,
+              // 长名字允许在任意处断（窄档下不撑破），但不许把 ⓘ 挤走
+              minWidth: 0,
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {agent.name}
+          </span>
+          {/* ★ ⓘ = 可发现性：`title` 只有悬停才出来，不标一下没人知道这里有东西 */}
+          <span
+            aria-hidden="true"
+            style={{ marginLeft: 'auto', flex: '0 0 auto', fontSize: FS.tag, color: C.faint }}
+          >
+            ⓘ
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: FS.tag, color: C.faint }}>{agent.role}</span>
+          {/* ★ 三态共占同一个位置：`已停用` / `待接入` / `v3`（同一时刻只会出现一个）
+              ★★ `data-kaipu-agent-state` 锚点：判据要断**这一格**的文本 ——
+                不能断整行的文本，因为占位条目的**名字本身就是「(待接入)」**，
+                断"行内含待接入"会被名字蒙对（2026-10-05 写这条判据时当场发现）。 */}
+          <span data-kaipu-agent-state="1" style={{ fontSize: FS.tag, color: pend ? '#d97706' : C.dim }}>
+            {statusText}
+          </span>
+        </div>
       </div>
     </div>
   )

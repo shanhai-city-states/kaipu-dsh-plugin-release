@@ -171,7 +171,7 @@ export function Intro(): ReactElement {
 
       <div style={{ marginTop: 12, fontSize: FS.title }}>四个词，一眼对上</div>
       <div style={{ marginTop: 6 }}>
-        <Term k="执行方" v="被接进这场戏的审方。灰掉的是被有意关掉的，不是坏了。" />
+        <Term k="执行方" v="已接入的执行方及其状态。灰掉的是被有意关掉的，不是坏了。" />
         <Term k="场景" v="一次会商流程的固定配置：审哪几个审核面、最多回炉几轮。" />
         {/* ★★ 2026-10-07 修：这里原来写「一个审查角度，**例如「主体核验」「留痕完整性」**」，
             举例取自**演示数据**的 lamp 值。
