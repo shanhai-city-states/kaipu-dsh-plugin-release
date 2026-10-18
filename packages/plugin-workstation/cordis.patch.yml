@@ -4,14 +4,21 @@
 #   工位 = 一个独立模块。摘掉本文件这段 insert + 删掉整个包目录
 #   ⇒ 场地插件（plugin-platform）必须仍完整可用 —— 宿主能起、能接第三方 Agent。
 #
-# ★ 命名：panelId = shanhai-kaipu-workstation（083-C-005 拍板，保持 shanhai-kaipu-* 前缀）
-#   与开铺(shanhai-kaipu) / 凉亭(shanhai-kaipu-wisdom) 同前缀、零改名、不动 097。
+# ★ 命名：panelId/id = shanhai-kaipu-workstation-gw（拍板，保持 shanhai-kaipu-* 前缀）
+#   `-gw` 是检索用英文 id 后缀（拼音 gw）；**界面显示仍是「工位」**，包名不动。
+#   与开铺(shanhai-kaipu) / 凉亭(shanhai-kaipu-wisdom) 同前缀、零改名、不动现有命名。
 
 - insert:
-    - id: shanhai-kaipu-workstation
+    - id: shanhai-kaipu-workstation-gw
       name: '@shanhai/kaipu-workstation'
       config:
         # ★ 占位：后续版本由服务端契约定稿（ShanhaiPluginRegistration）。
         # 中性发布形态（不写联调地址，避免死地址；同 platform 纪律）。
-        # ★ 形状对齐 wisdom/platform 两包（扁平 key，非嵌套）—— 083-C-006 C4。
+        # ★ 形状对齐 wisdom/platform 两包（扁平 key，非嵌套）—— 形状对齐。
         scaffold: true
+        # ★ 期4 起：真服务端接入（读 /org/tree，可建/改/删工位）。
+        #   与 platform 同址同形态；用户机不需要手填任何东西。
+        baseUrl: 'https://agent.ak2029.com/kai-pu'
+        # ★ 空 ⇒ host 按 hostname/user/platform 推导指纹，同机稳定
+        fingerprint: ''
+        clientVersion: 'dsh-plugin-workstation/0.1.0'

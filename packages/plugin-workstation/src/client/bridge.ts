@@ -28,12 +28,28 @@ export const REMOTE_CHANNEL = '/api'
 /** 宿主网关服务键（DSH 的 wire root 服务） */
 export const CONNECTION_SERVICE = 'connection'
 
-/** ★ 工位插件**只用这两个端点**（期1） */
+/** ★ 工位插件端点清单。前两个是期1 只读态，后四个是期4 组织层真操作。 */
 export const ENDPOINTS = {
   /** 接没接上 + 种子概览（第一件要知道的事） */
   status: 'status',
   /** 工位完整持久化态（座位/球/轮次/留痕/事件流底座） */
   state: 'state',
+  /** ★ 组织树（真数据）：工位节点 + 协作边 */
+  orgTree: 'orgTree',
+  /** ★ 新建工位节点 */
+  orgNodeCreate: 'orgNodeCreate',
+  /** ★ 改工位：改名 / 换上级 / 绑席位 / 解绑 */
+  orgNodePatch: 'orgNodePatch',
+  /** ★ 归档工位（软删） */
+  orgNodeDelete: 'orgNodeDelete',
+  /** ★ 期5 任务层：发布 */
+  tasksCreate: 'tasksCreate',
+  /** ★ 期5 任务层：列表 */
+  tasksList: 'tasksList',
+  /** ★ 期5 任务层：领取 */
+  tasksClaim: 'tasksClaim',
+  /** ★ 期5 任务层：完成 */
+  tasksDone: 'tasksDone',
 } as const
 
 export type EndpointName = (typeof ENDPOINTS)[keyof typeof ENDPOINTS]
@@ -124,6 +140,9 @@ export async function callKaipu<T>(
     raw = await conn.rpc!.call(REMOTE_CHANNEL, endpointOf(method), payload as never, signal as never)
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e)
+    /* ★ 匠 P2-⑥ / 戒 P2-4 同族（上游第 1 处）：传输层**唯一可得信号**就是异常文本。
+       这里**没有** `code` 字段可用（异常在网关成帧之前就抛了）⇒ 文案嗅探属**不可收敛项**，
+       已登记在案（不假装它被"结构化"了）。上游若改成结构化错误对象，此处应同步收窄。 */
     if (/\b404\b/.test(detail)) {
       return { ok: false, error: { kind: 'gateway', code: 'not_found', detail } }
     }
@@ -137,8 +156,16 @@ export async function callKaipu<T>(
   if (gw.ok !== true) {
     const anyGw = gw as { success?: boolean; message?: string; error?: { message?: string } }
     const gwMsg = anyGw.message ?? anyGw.error?.message ?? ''
-    if (anyGw.success === false || /路径不存在/.test(gwMsg)) {
-      return { ok: false, error: { kind: 'gateway', code: 'not_found', detail: gwMsg || '路径不存在' } }
+    /* ① **结构化优先**：网关显式说 `success === false` 是稳定契约（改端口/改文案它不变）
+       ⇒ 直接判「端点不存在」，不再看文案。 */
+    if (anyGw.success === false) {
+      return { ok: false, error: { kind: 'gateway', code: 'not_found', detail: gwMsg || '端点不存在' } }
+    }
+    /* ② 文案兜底（★ **不可去除**）：老宿主 / 代理层 / 被网关转译过的错往往只剩一句话，
+       没有 `success` 也没有 `code`。去掉它 = 这些环境上「端点没注册」会被误报成
+       「网关调用失败」，用户按错的方向排查。 */
+    if (/路径不存在/.test(gwMsg)) {
+      return { ok: false, error: { kind: 'gateway', code: 'not_found', detail: gwMsg } }
     }
     return {
       ok: false,

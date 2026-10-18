@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Kaipu Wisdom Team",
-    "description": "Companion sidebar panel for the Kaipu site plugin. Installs and uninstalls on its own; the site plugin stays fully usable without it. Scaffold release."
+    "description": "Companion sidebar panel for the Kaipu site plugin: shows the built-in expert team, the scenes they serve, and seat status. ★ Must be installed alongside kaipu-platform — seat data is provided by the site plugin through the host gateway; installed alone it truthfully reports \"channel not ready\". ★ Fully removable: uninstall it and the site plugin stays complete."
   }
 }

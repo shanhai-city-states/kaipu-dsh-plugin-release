@@ -30,14 +30,14 @@
         capabilityBoundary: true # 能力边界页
         roleSeats: true          # 角色位
         # ── 服务端接入 ─────────────────────────────────────────
-        # ★★ 这里**故意留空**：本文件是**随包发布**的，而联调面是临时的 ——
+        # ★★ 2026-10-18 起内置生产地址（开箱即用）：
         #   把联调地址写在这里 ⇒ 对方撤掉之后，真实用户会去连一个死地址。
-        # ⇒ 纪律：**发布的包保持中性**（空 = 本地/未接入模式），
+        #   改前留空的结果是「装了也连不上」——市场用户不会去改 cordis.patch.yml。
         #   联调地址写在 **dev profile 的覆盖层**里（由开发配置脚本生成，
         #   落在 .gitignore 内的 dev/ 下）。
         #   想改地址/铺子：改 dev profile 的 `KAIPU_BASE_URL` / `KAIPU_ACCOUNT`
         #   想验"未接入模式"：在 dev profile 里设 `KAIPU_DISCONNECT=1`
-        baseUrl: ''
+        baseUrl: 'https://agent.ak2029.com/kai-pu'
         accountId: ''
         # fingerprint: ''       # 不填 ⇒ 本机推导（同机稳定）；填了就用填的（部署期最稳）
         clientVersion: '0.1.0'

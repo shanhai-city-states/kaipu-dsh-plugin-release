@@ -50,5 +50,3 @@ export const LH = {
   normal: 1.8,
   loose: 2,
 } as const
-
-export const VACANT = '#d97706'

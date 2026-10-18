@@ -2,7 +2,7 @@
   "name": "@shanhai/kaipu-workstation",
   "version": "0.1.0",
   "type": "module",
-  "description": "山海·开铺 · 工位插件 —— 场地的操作台面板（轮次时间线/状态/跳转门/浏览器入口）。★ 可单独装 / 可不装；卸掉它，场地仍完整可用。当前为骨架版。",
+  "description": "山海·开铺 · 工位插件 —— 场地的操作台面板（轮次时间线/状态/跳转门/浏览器入口）。★ 可单独装 / 可不装；卸掉它，场地仍完整可用。当前渲染工位持久化态（非实时流）。",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,6 +17,8 @@
     "dsh-plugin",
     "kaipu",
     "workstation",
+    "gw",
+    "gongwei",
     "panel"
   ],
   "publishConfig": {
@@ -64,12 +66,19 @@
     "//": "★ 本块是【本仓自己的】声明，DSH 官方不读。我们自己的约束一律放 kaipu.*，不塞进 dsh 命名空间。",
     "dshRange": ">=0.2.0-rc.2 <0.3.0",
     "//descriptionReviewedAt": "★ 官方 contributing.md：描述会被当作声明并与代码核对。每次改描述都要真的复核代码并更新这个日期 —— --release 缺它即 FAIL。",
-    "descriptionReviewedAt": "2026-10-09",
+    "descriptionReviewedAt": "2026-10-19",
     "declaredSurfaces": [
       "ui.panel",
       "ui.slot",
       "data.local"
     ],
+    "//panel": "★ 面板注册六字段约定（本仓自有声明 · DSH 官方不读 · 机检 tools/check-panel-registry.mjs）。字段口径：panelId 与 patch 的 id、WORKSTATION_PANEL_ID 三处同值；displayName/description 只声明 **语言无关的文案 key**（不写死文案，避免第三份副本）；entryId 是**非 URL 的逻辑标识**（不含 / # :）；parent 可选、本期不填（不把内部架构代号写进发布面）；siblings 待单源派生就位前**必须缺席**。",
+    "panel": {
+      "panelId": "shanhai-kaipu-workstation-gw",
+      "displayName": "meta.title",
+      "description": "meta.description",
+      "entryId": "workstation"
+    },
     "devContract": "@shanhai/kaipu-contract（内部契约包 · 不随本仓发布 · 构建期依赖，已内联进产物）"
   },
   "peerDependencies": {

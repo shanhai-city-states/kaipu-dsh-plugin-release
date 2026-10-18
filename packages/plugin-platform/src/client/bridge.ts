@@ -62,6 +62,17 @@ export const ENDPOINTS = {
   listScenes: 'listScenes',
   capabilities: 'capabilities',
   /**
+   * ★ 改席位（执行位 / 审计位）—— 写通道。
+   *   host 侧 `assignSeat` → `POST /roles/assign`；服务端才是判据所在
+   *   （签名位 403 / 执行与审计同一实体 409），前端不要自己预判。
+   */
+  assignSeat: 'assignSeat',
+  /**
+   * ★ 生成邀请链接 —— 和 `assignSeat` 同类：**写通道**。
+   *   用户点「邀请协作方」⇒ host `createInvite` ⇒ `POST /invites`。
+   */
+  createInvite: 'createInvite',
+  /**
    * 契约 §3.4 的运行 —— **两个一元端点**（不是流式）。
    * ★★ 为什么不是 `@Remote({ mode: 'stream' })`（2026-10-05 实测后定的）：
    *   浏览器侧唯一的非一元通道 `connection.rpc.open` **不存在**

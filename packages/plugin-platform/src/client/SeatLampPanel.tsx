@@ -38,8 +38,10 @@
  *     **不是**一个可点控件。样式用淡色纯文本（与灯栏「待接入」同款），不画边框、不挂
  *     `cursor:pointer`，避免被读成"这里能改"。政策依据见 `SEAT_EDITABLE` 注释与文件末注释。
  */
-import { useState, type ReactElement } from 'react'
+import { Fragment, useCallback, useState, type ReactElement } from 'react'
 import type { SceneCard, SeatHolder } from '@shanhai/kaipu-contract'
+import { ENDPOINTS, callKaipu } from './bridge.js'
+import { currentConnection } from './live.js'
 import { C, FS, LH } from './theme.js'
 
 /**
@@ -110,6 +112,114 @@ function holderLabel(h: SeatHolder | undefined): { text: string; muted: boolean 
 }
 
 export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElement | null {
+  // ★★ Hooks 必须在 early return **之前**（React 规则：条件返回后不能再挂 hooks）
+  // ── 指派已有执行方（能力保留，入口收进邀请抽屉 —— 2026-10-18 发起人裁定）──
+  const [editing, setEditing] = useState<string | null>(null)
+  const [cands, setCands] = useState<Array<{ id: string; name: string }>>([])
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  // ── ★ 邀请协作方 · **抽屉式**（2026-10-18 · 发起人重画了交互）──────────────
+  //   原来是两处入口：行内「可改」按钮（点开=换已有执行方）+ 标题行「＋邀请协作方」
+  //   （点开=小表单选灯位）。发起人反馈：行内「可改」点开没意义；他想象中的形态是
+  //   —— 点「邀请」→ **抽屉**里把四个位摆出来（位名 + 当前承担方 + 可改性），
+  //   **勾选**可改的位 → 生成邀请链接。
+  //   ⇒ 按他画的改：行内按钮撤掉（恢复纯文本标签），邀请入口只剩一个，
+  //     抽屉里"看位 → 勾位 → 出链接"一条线走完。
+  const [inviting, setInviting] = useState<boolean>(false)
+  /** 勾选了哪些位（只有 `可改` 的位可勾；默认全勾 —— 打开后一步就能生成） */
+  const [picked, setPicked] = useState<string[]>([])
+  const [invNote, setInvNote] = useState<string>('')
+  const [invBusy, setInvBusy] = useState<boolean>(false)
+  const [invErr, setInvErr] = useState<string | null>(null)
+  const [invResults, setInvResults] = useState<Array<{ seat: string; url: string; expiresAt: string }>>([])
+
+  /**
+   * 抽屉里的「生成邀请链接」：对**每个勾选的位**各生成一条一次性链接。
+   * ★ `seat` 走勾选值（execution/audit…）；`lamp` 取该场景**第一个待接入**的审核面
+   *   （全接入则退第一个）—— 对方 Agent 接进来先补"缺人"的那面，这是最自然的落位。
+   * ★ 有效期、一次性消费、码的随机性全在服务端；前端只负责发起与展示。
+   */
+  const doInvitePicked = useCallback(async (): Promise<void> => {
+    const conn = currentConnection()
+    if (!conn) {
+      setInvErr('还没接上服务端，发不了邀请。')
+      return
+    }
+    if (picked.length === 0) {
+      setInvErr('先勾选要请人的位。')
+      return
+    }
+    const lamp = scene?.lamps?.find((l) => l.agentId === null)?.lamp ?? scene?.lamps?.[0]?.lamp ?? ''
+    if (lamp === '') {
+      setInvErr('这一场还没有可接入的审核面。')
+      return
+    }
+    setInvBusy(true)
+    setInvErr(null)
+    const got: Array<{ seat: string; url: string; expiresAt: string }> = []
+    for (const seat of picked) {
+      const r = await callKaipu<{ url?: string; expiresAt?: string }>(conn, ENDPOINTS.createInvite, {
+        lamp,
+        seat,
+        note: invNote,
+        ttlDays: 7,
+      })
+      if (r.ok === true) {
+        got.push({ seat, url: String(r.data.url ?? ''), expiresAt: String(r.data.expiresAt ?? '') })
+      } else {
+        setInvErr('business' in r ? r.business.message : r.error.detail)
+        break
+      }
+    }
+    setInvBusy(false)
+    if (got.length > 0) setInvResults(got)
+  }, [picked, invNote, scene])
+
+  /**
+   * 点「可改」→ 拉可选执行方。
+   * ★ 候选来自 `GET /agents`（本铺 + 平台级），**不在前端硬编码** ——
+   *   谁有资格当执行方是服务端的事实，不是界面常量。
+   */
+  const openEditor = useCallback(async (seat: string): Promise<void> => {
+    setNote(null)
+    setCands([])
+    setEditing((cur) => (cur === seat ? null : seat))
+    const conn = currentConnection()
+    if (!conn) {
+      setNote('还没接上服务端，改不了。')
+      return
+    }
+    const r = await callKaipu<{ agents?: Array<{ id?: string; name?: string }> }>(conn, ENDPOINTS.listAgents, {})
+    if (r.ok === true) {
+      const list = (r.data.agents ?? [])
+        .filter((a) => typeof a.id === 'string' && a.id !== '')
+        .map((a) => ({ id: String(a.id), name: String(a.name ?? a.id) }))
+      setCands(list)
+      if (list.length === 0) setNote('这个开铺里还没有可以指派的执行方。')
+    } else {
+      setNote('读不到可选执行方。')
+    }
+  }, [])
+
+  const doAssign = useCallback(async (seat: string, id: string, name: string): Promise<void> => {
+    const conn = currentConnection()
+    if (!conn) {
+      setNote('还没接上服务端，改不了。')
+      return
+    }
+    setBusy(true)
+    const r = await callKaipu(conn, ENDPOINTS.assignSeat, { seat, holderId: id, holderName: name, reason: '' })
+    setBusy(false)
+    if (r.ok === true) {
+      setEditing(null)
+      setNote(`已改成「${name}」—— 重新打开面板即可看到。`)
+    } else {
+      // ★ 服务端的话原样给用户看（签名位 403 / 兼任 409 都在这里出）
+      setNote('business' in r ? r.business.message : r.error.detail)
+    }
+  }, [])
+
   // ★ 没选场景 ⇒ 什么都不画（与 `ProcessFacts` 同款：不占位、不留空壳）
   if (scene === null) return null
 
@@ -127,30 +237,235 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
 
       {/* ── 位栏：本开铺由谁审（租户级，不跟场景走） ─────────────────────────────
           ★★ 界面对齐介绍「角色位」（双向对齐，改界面）。
-          小标题加「角色位」标识 —— 介绍称「角色位」、界面原叫「位栏」，现统一为「角色位」。 */}
-      <div style={{ marginTop: 12, fontSize: FS.tag, color: C.dim }}>
-        角色位 · 本开铺谁来审 · {SEAT_ORDER.length} 个位
+          小标题加「角色位」标识 —— 介绍称「角色位」、界面原叫「位栏」，现统一为「角色位」。
+          ★ 2026-10-18：这是**唯一**的邀请/换人入口 —— 行内「可改」按钮已撤
+          （发起人：点开没意义；他画的形态是"点邀请 → 抽屉 → 勾位 → 出链接"）。 */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 12 }}>
+        <span style={{ fontSize: FS.tag, color: C.dim }}>
+          角色位 · 本开铺谁来审 · {SEAT_ORDER.length} 个位
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            const next = !inviting
+            setInviting(next)
+            setInvErr(null)
+            setInvResults([])
+            setEditing(null)
+            // ★ 打开抽屉 ⇒ 默认把两个可改位勾上 —— "打开 → 生成"两步走完；
+            //   不想请某一位就取消勾选（勾选权仍在用户手里）
+            setPicked(next ? SEAT_ORDER.filter((k) => SEAT_EDITABLE[k] === true) : [])
+          }}
+          style={{
+            marginLeft: 'auto', fontSize: FS.tag, color: C.dim, background: 'none',
+            border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline',
+          }}
+        >
+          {inviting ? '收起' : '＋ 邀请协作方'}
+        </button>
       </div>
+
+      {/* ── ★ 邀请抽屉（2026-10-18 · 发起人重画）────────────────────────────
+          交互一条线：点「＋邀请协作方」→ 抽屉弹出**四个位**（位名 · 当前承担方 · 可改性）
+          → 勾选可改的位（默认全勾）→ 「生成邀请链接」→ 每位一条，带复制。
+          ★ 管理位/签名位**不可勾**：不是前端偷懒，是既定政策（管理位由铺主指派、
+            签名位契约层锁死）—— 行右侧标签如实标注，不画一个点不动的勾选框。
+          ★ 抽屉放在 `[data-kaipu-seats]` **之外**：探针按 `seats > div` 数四行，
+            抽屉混进去计数就漂（判据正确性，不是洁癖）。
+          ★ 指派已有执行方的**能力没删**：收进抽屉作为次要动作（勾选行下的小链接），
+            主线是"邀请新人"，"换已有的人"退居二线。 */}
+      {inviting ? (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: '9px 11px', marginTop: 6 }}>
+          <div style={{ fontSize: FS.tag, color: C.dim, marginBottom: 4 }}>
+            勾选要请人坐的位，生成一次性邀请链接 —— 对方打开就能接入。
+          </div>
+
+          {/* 四位行：勾选框（仅可改位）+ 位名 + 当前承担方 + 可改性标签 */}
+          {SEAT_ORDER.map((k) => {
+            const { text, muted } = holderLabel(holders.get(k))
+            const editable = SEAT_EDITABLE[k] === true
+            const checked = picked.includes(k)
+            return (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                {editable ? (
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) =>
+                      setPicked((cur) => (e.target.checked ? [...cur, k] : cur.filter((s) => s !== k)))
+                    }
+                    style={{ flex: '0 0 auto', margin: 0, accentColor: '#C8881F' }}
+                  />
+                ) : (
+                  // ★ 占位对齐：不可改的位没有勾选框，但留同样宽的空位 —— 四行左缘齐
+                  <span aria-hidden="true" style={{ flex: '0 0 13px' }} />
+                )}
+                <span style={{ flex: '0 0 44px', fontSize: FS.tag, color: C.dim }}>{SEAT_LABEL[k] ?? k}</span>
+                <span style={{ fontSize: FS.small, color: muted ? C.dim : C.text, minWidth: 0 }}>{text}</span>
+                <span style={{ marginLeft: 'auto', flex: '0 0 auto', fontSize: FS.tag, color: C.dim }}>
+                  {editLabelOf(k)}
+                </span>
+              </div>
+            )
+          })}
+
+          {/* 留一句话（可选）+ 生成按钮 */}
+          {invResults.length === 0 && (
+            <>
+              <input
+                value={invNote}
+                onChange={(e) => setInvNote(e.target.value)}
+                placeholder="给对方留一句话（可选）"
+                style={{
+                  width: '100%', boxSizing: 'border-box', fontSize: FS.tag, padding: '4px 7px',
+                  border: `1px solid ${C.border}`, borderRadius: 4, marginTop: 4, fontFamily: 'inherit',
+                }}
+              />
+              <button
+                type="button"
+                disabled={invBusy || picked.length === 0}
+                onClick={() => void doInvitePicked()}
+                style={{
+                  width: '100%', marginTop: 7, padding: '7px 12px', borderRadius: 6,
+                  border: `1px solid ${picked.length === 0 || invBusy ? C.border : '#C8881F'}`,
+                  background: picked.length === 0 || invBusy ? 'transparent' : 'rgba(200,136,31,0.12)',
+                  color: picked.length === 0 || invBusy ? C.dim : '#A66A12',
+                  cursor: picked.length === 0 || invBusy ? 'default' : 'pointer',
+                  font: 'inherit', fontSize: FS.small, fontWeight: 600,
+                }}
+              >
+                {invBusy ? '生成中…' : picked.length === 0 ? '先勾选上面的位' : `生成邀请链接（${picked.length} 位）`}
+              </button>
+            </>
+          )}
+
+          {/* 生成结果：每个勾选位一条链接（可复制） */}
+          {invResults.length > 0 && (
+            <>
+              <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 6, marginBottom: 3 }}>
+                把链接发给对方（7 天有效 · 一次性）：
+              </div>
+              {invResults.map((r) => (
+                <div
+                  key={r.seat}
+                  style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}
+                >
+                  <span style={{ flex: '0 0 44px', fontSize: FS.tag, color: C.dim }}>
+                    {SEAT_LABEL[r.seat] ?? r.seat}
+                  </span>
+                  <input
+                    readOnly
+                    value={r.url}
+                    onFocus={(e) => e.currentTarget.select()}
+                    style={{
+                      flex: '1 1 160px', minWidth: 0, fontSize: FS.tag, padding: '3px 6px',
+                      border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: 'inherit',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(r.url)
+                    }}
+                    style={{ flex: '0 0 auto', fontSize: FS.tag, padding: '2px 8px', cursor: 'pointer' }}
+                  >
+                    复制
+                  </button>
+                </div>
+              ))}
+              <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 4 }}>
+                有效期至 {invResults[0]?.expiresAt ?? '—'}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInvResults([])
+                    setPicked(SEAT_ORDER.filter((k) => SEAT_EDITABLE[k] === true))
+                  }}
+                  style={{
+                    marginLeft: 10, fontSize: FS.tag, background: 'none', border: 'none',
+                    color: C.dim, cursor: 'pointer', textDecoration: 'underline', padding: 0,
+                  }}
+                >
+                  再发一批
+                </button>
+              </div>
+            </>
+          )}
+
+          {invErr !== null && (
+            <div style={{ fontSize: FS.tag, color: '#b45309', marginTop: 5, lineHeight: LH.tight }}>{invErr}</div>
+          )}
+        </div>
+      ) : null}
       <div
         data-kaipu-seats="1"
         style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: '3px 10px', marginTop: 4 }}
       >
         {SEAT_ORDER.map((k) => {
           const { text, muted } = holderLabel(holders.get(k))
+          const editable = SEAT_EDITABLE[k] === true
           return (
-            <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
-              {/*
-                ★ 位名用 `dim`、承担方用 `text`：**人是主体，位是格子**（同左栏 V3 层级口径）。
-                ★ 行末的「可改/不可改/🔒 锁死」是**纯展示政策标签**（见 `SEAT_EDITABLE` 注释）：
-                  淡色文本、靠右（`marginLeft:auto`）、与灯栏「待接入」同款视觉，**不暗示可点**。
-              */}
-              <span style={{ flex: '0 0 44px', fontSize: FS.tag, color: C.dim }}>{SEAT_LABEL[k] ?? k}</span>
-              <span style={{ fontSize: FS.small, color: muted ? C.dim : C.text }}>{text}</span>
-              <span style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.dim }}>{editLabelOf(k)}</span>
-            </div>
+            <Fragment key={k}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
+                {/*
+                  ★ 位名用 `dim`、承担方用 `text`：**人是主体，位是格子**（同左栏 V3 层级口径）。
+                  ★ 行末标签 —— **2026-10-18 改回纯文本**：
+                    行内「可改」按钮撤掉（发起人：点开没意义）—— 换人/请人统一走上面的邀请抽屉；
+                    标签保留为**政策陈述**（谁有资格改这个位），不是入口。
+                */}
+                <span style={{ flex: '0 0 44px', fontSize: FS.tag, color: C.dim }}>{SEAT_LABEL[k] ?? k}</span>
+                <span style={{ fontSize: FS.small, color: muted ? C.dim : C.text }}>{text}</span>
+                <span style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.dim }}>{editLabelOf(k)}</span>
+              </div>
+
+              {/* 指派已有执行方：入口收进邀请抽屉（勾选行下的小链接），此处只渲染展开态 */}
+              {inviting && editable && editing === k && cands.length > 0 ? (
+                <div style={{ padding: '2px 0 8px 13px' }}>
+                  {cands.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void doAssign(k, a.id, a.name)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', fontSize: FS.small,
+                        color: C.text, background: 'none', border: `1px solid ${C.border}`,
+                        borderRadius: 3, padding: '3px 8px', marginTop: 4,
+                        cursor: busy ? 'default' : 'pointer',
+                      }}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </Fragment>
           )
         })}
+        {note !== null ? (
+          <div style={{ fontSize: FS.tag, color: C.dim, padding: '4px 0 2px' }}>{note}</div>
+        ) : null}
       </div>
+
+      {/* 指派已有执行方的次要入口（抽屉内）：勾选了可改位才出现 —— 能力保留，不占主线 */}
+      {inviting && picked.length > 0 && (
+        <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 5, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <span>不是请新人，是把位子换给已有执行方？</span>
+          {picked.filter((k) => SEAT_EDITABLE[k] === true).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => void openEditor(k)}
+              style={{
+                fontSize: FS.tag, color: C.dim, background: 'none', border: 'none', padding: 0,
+                cursor: 'pointer', textDecoration: 'underline', font: 'inherit',
+              }}
+            >
+              指派{SEAT_LABEL[k] ?? k}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── 灯栏：要过哪几面 ─────────────────────────────
           ★★ 2026-10-08 夜话改版：**把五盏灯真的画成五盏灯**（发起人点题参考灯笼🏮）。

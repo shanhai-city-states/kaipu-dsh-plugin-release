@@ -25,6 +25,26 @@ import { useEffect, useRef, useState, type ReactNode, type ReactElement } from '
 import type { AgentCard, SceneCard, SceneCategory, SceneRecommendation } from '@shanhai/kaipu-contract'
 import { C, FS } from './theme.js'
 
+/**
+ * ★★ 左栏**卡片语言**（2026-10-18 · 发起人：「这个卡片密度合适…其他的也按照这个思路走」）。
+ *
+ * 一处定义、四处引用（执行方卡 / 场景卡 / 推荐卡 / 空态卡）——
+ * 卡片化最容易翻车的地方不是"每张卡好不好看"，而是**几张卡的圆角/缩进/内边距各差 1px**，
+ * 一排下来就是"歪"。所以宽度、缩进、内边距、描边、圆角全部收在这里，一个数都不外泄。
+ *
+ * ★ `width: calc(100% - 20px)` + `margin: 0 10px` + `boxSizing: border-box`
+ *   ⇒ 卡片两侧各留 10px，总宽恒等于栏宽（260px 档不会顶出横向滚动条）。
+ * ★ 圆角 10：与参照件的卡片同档；再大就变成"气泡"，在 260px 里显胖。
+ */
+const CARD = {
+  boxSizing: 'border-box',
+  width: 'calc(100% - 20px)',
+  margin: '6px 10px 0',
+  padding: '8px 11px',
+  border: `1px solid ${C.border}`,
+  borderRadius: 10,
+} as const
+
 export interface LeftPaneProps {
   agents: readonly AgentCard[]
   scenes: readonly SceneCard[]
@@ -188,16 +208,26 @@ export function LeftPane({
         （不编事实：场地可用、接入后此处列出各 Agent 及其状态）。
       */}
       {agents.length === 0 ? (
+        /**
+         * ★★ 空态也走卡片语言（2026-10-18）：**虚线**描边 ——
+         *   同样是"一块有边界的东西"，但虚线说的是"这里还空着"，
+         *   与实线卡片的"这里坐着一个"形成对照。比一行裸文字更能说明"该往这儿放东西"。
+         */
         <div
           data-kaipu-agent-empty="1"
-          style={{ padding: '6px 14px', fontSize: FS.tag, color: C.dim, lineHeight: 1.6 }}
+          style={{
+            ...CARD,
+            border: `1px dashed ${C.border}`,
+            background: 'transparent',
+            fontSize: FS.tag,
+            color: C.dim,
+            lineHeight: 1.6,
+          }}
         >
           本铺尚未接入任何执行方（待接入）—— 场地照常可用，接入后此处会列出各 Agent 及其状态。
         </div>
       ) : (
-        agents.map((a) => (
-          <AgentRow key={a.id} agent={a} />
-        ))
+        agents.map((a) => <AgentRow key={a.id} agent={a} />)
       )}
     </PaneBlock>
   )
@@ -213,11 +243,19 @@ export function LeftPane({
       defaultOpen={false}
     >
       {/* ★ `data-kaipu-recommend` 保留在这一层（判据认它；换父级不改锚点名） */}
-      <div data-kaipu-recommend="1" style={{ padding: '0 14px 4px' }}>
+      <div data-kaipu-recommend="1">
+        {/*
+          ★★ 每一条推荐 → **一张卡**（2026-10-18 卡片化）。
+          ★ 为什么不带 logo 块：执行方卡的色块装的是**名字首字**（身份标识）；
+            推荐条目的 `label` 是"场合名"而不是实体，硬塞首字会看着像又一个 Agent。
+            ⇒ 统一的只是**外壳**（描边/圆角/内边距/名称加粗 + 元信息小字），不硬搬身份件。
+          ★ 推荐**不可点**：`label` 与 `scene` 不一定同名（hint 里已写明），
+            做成按钮等于暗示"点了就选好了" —— 那是编交互。
+        */}
         {recommendations.map((r) => (
-          <div key={r.key} style={{ marginTop: 4 }}>
-            <div style={{ fontSize: FS.small }}>{r.label}</div>
-            <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.6 }}>
+          <div key={r.key} style={CARD}>
+            <div style={{ fontSize: FS.title, fontWeight: 600 }}>{r.label}</div>
+            <div style={{ marginTop: 2, fontSize: FS.tag, color: C.dim, lineHeight: 1.6 }}>
               适合：{r.when}
             </div>
           </div>
@@ -264,13 +302,30 @@ export function LeftPane({
           ⇒ 别处的便利（折叠）不能拿来牺牲这一条。
       */}
       {unclassified.length > 0 && (
-        <div data-kaipu-category="__unclassified__" style={{ borderTop: `1px solid ${C.border}` }}>
-          <div style={{ padding: '8px 14px 4px' }}>
-            <div style={{ fontSize: FS.tag, color: C.text }}>
-              <span aria-hidden="true" style={{ marginRight: 5 }}>
-                📂
+        /**
+         * ★ 与上面分类**同款组名形态**（2026-10-18 统一）：名称 + 数量 pill。
+         *   `borderTop` 保留 —— 它隔的是"分类区 vs 非分类区"（语义边界），不是同类兄弟。
+         */
+        <div
+          data-kaipu-category="__unclassified__"
+          style={{ borderTop: `1px solid ${C.border}`, marginTop: 8, paddingTop: 2 }}
+        >
+          <div style={{ padding: '6px 12px 2px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', columnGap: 6 }}>
+              <span style={{ fontSize: FS.tag, fontWeight: 600, color: C.text }}>未归类</span>
+              <span
+                style={{
+                  fontSize: FS.tag,
+                  lineHeight: '16px',
+                  padding: '0 6px',
+                  borderRadius: 999,
+                  background: C.soft,
+                  color: C.dim,
+                  flex: '0 0 auto',
+                }}
+              >
+                {unclassified.length}
               </span>
-              未归类
               {/*
                 ★ 那句"如实列出，不藏"**收进悬停提示**（2026-10-05 瘦身）。
                   它是对**契约 #17** 的交代（给评审看的），不是给客户看的信息 ——
@@ -281,7 +336,7 @@ export function LeftPane({
               <span
                 title="契约 #17「未归类不藏」：还没归到某个场合的场景，如实列出，不塞进别的组。"
                 aria-hidden="true"
-                style={{ marginLeft: 6, color: C.faint, cursor: 'help' }}
+                style={{ marginLeft: 'auto', flex: '0 0 auto', color: C.faint, cursor: 'help' }}
               >
                 ⓘ
               </span>
@@ -400,12 +455,25 @@ function PaneBlock({
         ★ `listStyle:'none'` 抹掉浏览器默认的三角 —— 我们自绘一个 ▸/▾（在 `SectionTitle` 里），
           因为它能**跟着 open 翻转**（默认 marker 的位置/大小不受我们控制）。
       */}
-      <summary style={{ listStyle: 'none', cursor: 'pointer' }}>
-        <SectionTitle icon={icon} hint={hint} aside={aside} chevron={open ? '▾' : '▸'} sectValue={sectValue}>
+      {/* ★★ 收起时 hint 不渲染（省高度），但**挂到 title 上**——悬停仍能读到，
+          信息不丢。这是「收起=省地方，但别让人不知道这块是什么」的折中。 */}
+      <summary style={{ listStyle: 'none', cursor: 'pointer' }} title={open ? undefined : hint}>
+        <SectionTitle
+          icon={icon}
+          hint={hint}
+          hintVisible={open}
+          aside={aside}
+          chevron={open ? '▾' : '▸'}
+          sectValue={sectValue}
+        >
           {title}
         </SectionTitle>
       </summary>
-      {children}
+      {/*
+        ★ 块尾留 6px（2026-10-18 卡片化）：卡片自带 `margin-top`、不带下边距，
+          最后一张会紧贴下一块的标题行 ⇒ 统一在这里补一格，别在每张卡上加（会叠）。
+      */}
+      <div style={{ paddingBottom: 6 }}>{children}</div>
     </details>
   )
 }
@@ -445,6 +513,14 @@ function CategoryGroup({
   onSelect: (scene: string) => void
 }): ReactElement {
   const ref = useRef<HTMLDetailsElement | null>(null)
+  /**
+   * ★★ 只为**画折叠符号**而存在（2026-10-18 卡片化）。
+   *   ⚠️ 它**不参与** `open` 属性 —— `<details>` 仍是"浏览器自己管开合"，
+   *   这一位只跟着 `onToggle` 记一下当前是开着还是合着，好把 `▾` 画成 `▸`。
+   *   若拿它去写 `open={open}`，就退化成受控属性 ⇒ 用户手动折上后，
+   *   下一次数据刷新会被 React 设回去（本仓 `RoundBlock` 那条注释记过同款坑）。
+   */
+  const [open, setOpen] = useState(true)
   useEffect(() => {
     const el = ref.current
     if (el !== null) el.open = true
@@ -462,26 +538,63 @@ function CategoryGroup({
      *   ★ 只撤**分类之间**那条：`未归类` 上方那条**保留** ——
      *     两者性质不同：前者隔"同类兄弟"，后者隔"分类区 vs 非分类区"（是个语义边界）。
      *
-     * ★ `first ? 0 : 4` 的 marginTop：首条分类不加上间距（它紧跟「场景」块标题，
-     *   那里已有留白），其余分类之间留一格 —— 这就是"撤线改留白"的落点。
+     * ★★★ 2026-10-18 卡片化后**留白加大到 8px**（原 4px）：
+     *   场景行变成卡片后，卡片自身有描边 ⇒ 组与组之间若还只有 4px，
+     *   上一组的最后一张卡与下一组的组名会"粘"在一起，看着像同一组。
      */
     <details
       ref={ref}
       data-kaipu-category={group.key}
-      style={{ padding: 0, ...(first ? {} : { marginTop: 4 }) }}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      style={{ padding: 0, ...(first ? {} : { marginTop: 8 }) }}
     >
-      <summary style={{ padding: '8px 14px 4px', cursor: 'pointer', lineHeight: 1.7 }}>
+      {/*
+        ★★ 分类头 = **分组标签**，不是卡片（2026-10-18 · 刻意不套框）。
+        理由：卡片化是为了"每条内容有边界"；若分类也画一圈框，里面再放场景卡，
+        260px 里就是**框套框**（两道描边 + 两层缩进，可用宽度只剩 ~210px），
+        比原来的行形态更挤。⇒ 分组用**无框标签**（名称加粗 + 数量 pill + 折叠符号），
+        视觉上是"一组卡片的上方题头"，层级靠字重与留白，不靠线。
+        ★ 折叠符号自绘到最右（`listStyle:'none'` 抹掉默认三角）：与三块外层容器同一个语汇。
+      */}
+      <summary style={{ listStyle: 'none', cursor: 'pointer', padding: '6px 12px 2px' }}>
         {/*
-          ★★ V3：分类名 `C.text` → `C.dim`。
-          实测原状是**倒挂**的：分类名（rgb(15,17,21) 近黑）比小节标题（rgb(138,138,138) 灰）
-          **更亮**，两者又同为 12px ⇒ 扫读时"分类"压过"场景"这一区名。
-          ⇒ 分类是**组名**（结构），不是内容 ⇒ 降到与 intent/计数 同一色阶，
-            整条 summary 一起"退到背景"，让场景行与小节标题站在前面。
+          ★★ V3：分类名 `C.text` → 近黑半粗。
+          实测原状是**倒挂**的：分类名比小节标题更亮、两者又同为 12px
+          ⇒ 扫读时"分类"压过"场景"这一区名。
+          ★ 2026-10-18 再收一档：分类是**组名**（结构），不是内容 ⇒
+            用它做"一组卡片的题头"，字重 600、字号仍 12px，不与场景卡里的名称抢 15px。
         */}
-        <span style={{ fontSize: FS.tag, color: C.dim }}>{group.label}</span>
-        <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>{group.intent}</span>
-        <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>（{group.scenes.length}）</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', columnGap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: FS.tag, fontWeight: 600, color: C.text }}>{group.label}</span>
+          <span
+            style={{
+              fontSize: FS.tag,
+              lineHeight: '16px',
+              padding: '0 6px',
+              borderRadius: 999,
+              background: C.soft,
+              color: C.dim,
+              flex: '0 0 auto',
+            }}
+          >
+            {group.scenes.length}
+          </span>
+          <span
+            aria-hidden="true"
+            style={{ marginLeft: 'auto', fontSize: 10, color: C.faint, flex: '0 0 auto' }}
+          >
+            {open ? '▾' : '▸'}
+          </span>
+        </div>
       </summary>
+      {/*
+        ★ `intent`（"这个场合是干嘛的"）**始终渲染** —— 折叠由 `<details>` 自己隐藏。
+        不改成"展开才渲染"：探针展开分类是**直接设 DOM 的 `open`**，不走 React 状态，
+        条件渲染会让它在判据眼里永久消失（假失败）。
+      */}
+      <div style={{ fontSize: FS.tag, color: C.faint, padding: '0 12px 2px', lineHeight: 1.6 }}>
+        {group.intent}
+      </div>
       {group.scenes.map((s) => (
         <SceneRow key={s.scene} scene={s} active={s.scene === selected} onSelect={onSelect} />
       ))}
@@ -513,6 +626,7 @@ function SectionTitle({
    *   不传则回退到 `children`（其余两块沿用旧锚点值，行为不变）。
    */
   sectValue,
+  hintVisible = true,
 }: {
   children: string
   hint: string
@@ -550,6 +664,12 @@ function SectionTitle({
    */
   chevron?: string
   sectValue?: string | undefined
+  /**
+   * ★★ 说明文字是否显示（2026-10-18 · 左栏瘦身）。
+   * `PaneBlock` 传的是自己的 `open` ⇒ **收起不渲染、展开才渲染**。
+   * ★ 默认 `true`：没传的地方（若将来有）行为不变。
+   */
+  hintVisible?: boolean
 }): ReactElement {
   return (
     <div
@@ -622,43 +742,51 @@ function SectionTitle({
           </span>
         )}
       </div>
-      <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 2, lineHeight: 1.6 }}>{hint}</div>
+      {/*
+        ★★★ 说明文字**只在展开时显示**（2026-10-18 · 发起人反馈「操作台看起来有点乱」）。
+
+        ── 改前实测（260px 档）─────────────────────────────────────────
+          三块 hint **收起时也占着**：执行方 49px、该怎么选 40px、场景 20px，共约 110px。
+          ⇒ 收起状态下用户看到的是「标题 + 一大段解释」，**反而看不到列表**
+            —— 解释在看之前就拦住了一切，这是"乱"的第一来源。
+
+        ── 改后 ──────────────────────────────────────────────────────
+          收起 ⇒ 不渲染（连 DOM 都没有，`innerText` 也干净）
+          展开 ⇒ 照常显示（要看的细节，展开时才需要解释）
+          ★ **信息不丢**：收起时把 hint 挂到 `<summary title>` 上，悬停仍可读到
+            （见 `PaneBlock` 里 summary 的 `title={...}`）。
+
+        ★ 为什么不反向（默认展开、靠折叠省空间）：107 方案 D 已经定了
+          「执行方/推荐默认收起、场景默认展开」，默认态就是收起的，所以这一条省得最多。
+      */}
+      {hintVisible && (
+        <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 2, lineHeight: 1.6 }}>{hint}</div>
+      )}
     </div>
   )
 }
 
 /**
- * 执行方一行。`disabled` ⇒ 灰显 + 「已停用」+ **不是按钮**。
- * ★ 刻意不用 `<button disabled>`：停用的 Agent 不是"点不了"，是**这里没有一个可点的东西**。
- *   用 disabled button 会让屏幕阅读器念出一个不可用的按钮 —— 那读起来像故障，
- *   而"被有意关掉了"才是事实。
+ * 执行方一行 → **一张卡片**（2026-10-18 · 发起人点名参照外部卡片式工作台：「卡片式最清晰简洁」）。
  *
- * ★★ 2026-10-05 瘦身：**两行 → 一行**，一句话说明收进悬停提示。
+ * ══════════════════════════════════════════════════════════════════
+ * ★★ 参照件：一张外部卡片式工作台的 `expert-card`（参照件来源见内部施工记录 003 期）──
+ *   白底（透明，跟随宿主）+ 1px 圆角边框 + 头行（色块 logo + 名称 + 右上角标签）
+ *   + 一行元信息。它的「清晰」来自三件事，逐件搬过来：
+ *     ① **每条信息有自己的边界**（卡片框）—— 不再是一列无边界的行，扫读有落点；
+ *     ② **头行三件套**（logo 块 / 名称 / 状态标签）—— 状态从"行尾小字"变成
+ *        右上角**徽标**，一眼可辨；
+ *     ③ **信息分层不变**：名称（主体）> role（判断依据，留在外面）> 其余（悬停）。
  *
- *   改前（每个 ~62px，含两行文字）：
- *     主体核验方                          v3
- *     执行 · 核验证照与主体信息是否一致。
- *   改后（每个 ~34px）：
- *     主体核验方  执行  v3              ⓘ
+ * ★★ 判据锚点一个没动（判据全依赖它们）：
+ *   `data-kaipu-agent` / `data-kaipu-agent-status` 仍在**外层根节点**上；
+ *   `data-kaipu-agent-state` 仍在**那个只装状态文本的节点**上 ——
+ *   它必须继续单独占一格：占位条目的**名字本身就是「(待接入)」**，
+ *   断"行内含待接入"会被名字蒙对（2026-10-05 写这条判据时当场发现的坑）。
  *
- *   ★ 切分依据 —— **哪条是判断依据，哪条是细看才需要**：
- *     · `role`（执行 / 审计）= 判断依据 ⇒ **必须留在外面**（roleSeats 是功能面，藏了就选不了位）
- *     · `skillSummary`（"具体审什么"）= 细看才需要 ⇒ 收进 `title`
- *   契约对总台卡片**没有"完整说明必须常驻"的要求**：renderRules R1–R6 全部只管**运行视图**，
- *   §十 对接清单 #1 只要求"Agent 卡片"在场 ⇒ 收窄不违约。
- *
- *   ★ 为什么用**原生 `title`** 而不是自绘悬停浮层：
- *     面板挂在宿主容器里，容器常带 `overflow` 裁剪 ⇒ 自绘浮层会被裁掉，
- *     还要自己处理定位 / 键盘 / 触屏三套逻辑。`title` 零 JS、不会被裁、
- *     屏幕阅读器会把它当 accessible description 读出来。
- *
- *   ★★ 收进 `title` 的东西**判据读不到**（`innerText` 不含 title 属性）
- *     ⇒ **必须另有一条断言证明它还在**（见 `run-view-probe` 的「总台卡片」段）。
- *       否则这次"瘦身"会**悄悄变成删内容** —— 那正是本项目最忌的一类错。
- *
- *   ★ `disabled` ⇒ 灰显 + 「已停用」**必须仍然看得见**
- *     （契约 models.ts：返回全部就是为了让人看见"被关掉了"）
- *     —— 这是本次瘦身**不许动**的一条，且**留在外面**，不收进提示。
+ * ★ 可见文本纪律（探针 ⑧ 段）：卡片可见文本 ≤30 字符、role（灯名）必须可见、
+ *   三态状态必须可见 —— 卡片化**只换容器，不换信息量**；skillSummary/能力/版本
+ *   仍然全部收进 `title` 悬停（信息不丢，判据照断）。
  */
 function AgentRow({ agent }: { agent: AgentCard }): ReactElement {
   /**
@@ -672,7 +800,6 @@ function AgentRow({ agent }: { agent: AgentCard }): ReactElement {
    *   前者"这个位子还没人接"（正常态、下一步是去接入），
    *   后者"有人把它关掉了"（下一步是去问为什么）。
    *   把 `pending` 显示成「已停用」**不是保守，是编了一个不存在的决定**。
-   *   （实测抓到：旧 `toAgentStatus` 是 fail-closed，未知值一律当 disabled ⇒ 占位条目全被误报。）
    */
   const off = agent.status === 'disabled'
   const pend = agent.status === 'pending'
@@ -700,77 +827,99 @@ function AgentRow({ agent }: { agent: AgentCard }): ReactElement {
 
   return (
     <div
-      // ★ 判据锚点：让"执行方每行多高、悬停提示有没有内容、三态怎么显示"
-      //   可以被**量测与断言**，而不必去数 DOM 层级（层级选择器一改就飘）。
       data-kaipu-agent={agent.id}
-      // ★ 三态各带一个标记，判据可**逐态**断言（免得"看成一样"蒙混过关）
       data-kaipu-agent-status={agent.status}
       title={tip}
       // ★ 屏幕阅读器不读 `title` 的时机不确定 ⇒ 再给一份显式描述（内容与 title 同源）
       aria-label={ariaText}
       style={{
-        padding: '6px 14px',
+        ...CARD,
         // ★ 只有 `disabled` 淡化：`pending` 是**正常态**（等接入），不该看起来像"坏了"
         opacity: off ? 0.55 : 1,
-        borderLeft: `2px solid ${off ? 'transparent' : pend ? '#d97706' : C.accent}`,
         cursor: 'help',
       }}
     >
-      {/* ★★★ 两行排版（2026-10-17 · 发起人反馈：「背后的内容全部换行，更整体好看」）。
-       *
-       * ── 改之前是什么样 ──────────────────────────────────────────────────
-       *   一行 flex 塞四样：`名称 · 角色 · 状态(v3/待接入/已停用) · ⓘ`
-       *   260px 窄档下必然压缩：`主体核验方` + `智灯` + `v3` 挤在一起，
-       *   名字长一点就换行、把 ⓘ 顶到奇怪的位置 —— **每行高度不一致，整体就散**。
-       *
-       * ── 现在 ────────────────────────────────────────────────────────────
-       *   第一行：**名称**（主体）+ ⓘ 右对齐
-       *   第二行：**角色** + **状态**（都属"元信息"，同层）
-       *   ⇒ 每行只承担一件事，**行高一致**，五条排下来是一个整齐的块。
-       *
-       * ★ 锚点一个没动（判据全依赖它们，见下）：
-       *   `data-kaipu-agent` / `data-kaipu-agent-status` 仍在**外层根节点**上；
-       *   `data-kaipu-agent-state` 仍在**那个只装状态文本的 span** 上
-       *   —— 它必须继续单独占一格：占位条目的**名字本身就是「(待接入)」**，
-       *      断"行内含待接入"会被名字蒙对（2026-10-05 写这条判据时当场发现的坑）。
+      {/*
+       * 头行三件套：**logo 块 + 名称 + 状态徽标**（expert-card 的 card-head 形态）。
+       * · logo = 名称首字，装进圆角小色块 —— 给每张卡一个视觉锚点（260px 下
+       *   五张卡排下来，纯文字行是"糊成一片"的，色块让每张卡有"头"）。
+       * · 状态徽标在**右上角**（marginLeft:auto）：从"行尾小字"提为"徽标"，
+       *   待接入（琥珀）/ 已停用（灰）/ v3（灰）一眼分层 —— 不再与名称抢同一行基线。
        */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span
-            style={{
-              fontSize: FS.title,
-              color: off ? C.dim : C.text,
-              // 长名字允许在任意处断（窄档下不撑破），但不许把 ⓘ 挤走
-              minWidth: 0,
-              overflowWrap: 'anywhere',
-            }}
-          >
-            {agent.name}
-          </span>
-          {/* ★ ⓘ = 可发现性：`title` 只有悬停才出来，不标一下没人知道这里有东西 */}
-          <span
-            aria-hidden="true"
-            style={{ marginLeft: 'auto', flex: '0 0 auto', fontSize: FS.tag, color: C.faint }}
-          >
-            ⓘ
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: FS.tag, color: C.faint }}>{agent.role}</span>
-          {/* ★ 三态共占同一个位置：`已停用` / `待接入` / `v3`（同一时刻只会出现一个）
-              ★★ `data-kaipu-agent-state` 锚点：判据要断**这一格**的文本 ——
-                不能断整行的文本，因为占位条目的**名字本身就是「(待接入)」**，
-                断"行内含待接入"会被名字蒙对（2026-10-05 写这条判据时当场发现）。 */}
-          <span data-kaipu-agent-state="1" style={{ fontSize: FS.tag, color: pend ? '#d97706' : C.dim }}>
-            {statusText}
-          </span>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            flex: '0 0 22px',
+            width: 22,
+            height: 22,
+            borderRadius: 7,
+            background: C.soft,
+            color: off ? C.faint : '#A66A12',
+            fontSize: 11,
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {agent.name.slice(0, 1)}
+        </span>
+        <span
+          style={{
+            fontSize: FS.title,
+            fontWeight: 600,
+            color: off ? C.dim : C.text,
+            // 长名字允许在任意处断（窄档下不撑破），但不许把徽标挤走
+            minWidth: 0,
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {agent.name}
+        </span>
+        <span
+          data-kaipu-agent-state="1"
+          style={{
+            marginLeft: 'auto',
+            flex: '0 0 auto',
+            fontSize: FS.tag,
+            lineHeight: '16px',
+            padding: '1px 7px',
+            borderRadius: 999,
+            background: C.soft,
+            color: pend ? '#b45309' : C.dim,
+          }}
+        >
+          {statusText}
+        </span>
+      </div>
+      {/*
+       * ★ role（灯名）= 判断依据 ⇒ **必须留在外面**（roleSeats 是功能面，藏了就选不了位；
+       *   探针 ⑧ 也正面断"灯名仍在卡片可见文本里"）。缩进 30px = logo 22 + gap 8，
+       *   与名称对齐 —— 卡片的第二行，不再与头行抢宽度。
+       */}
+      <div style={{ marginTop: 2, paddingLeft: 30, fontSize: FS.tag, color: C.dim, lineHeight: 1.55 }}>
+        {agent.role}
       </div>
     </div>
   )
 }
 
-/** 场景一行（可点选）。 */
+/**
+ * 场景一行 → **一张可选卡片**（2026-10-18 · 与执行方卡片同批改造）。
+ *
+ * ★★ 参照件仍是那张外部卡片式工作台：卡片 = 圆角边框 + 内边距，选中态**整卡高亮**。
+ *   改前是"左边 2px 色线 + 浅底"的行形态 —— 行与行之间没有边界，
+ *   与执行方区块排在一起时"两列文字墙"分不出谁是谁；卡片化后每场有自己的框。
+ *
+ * ★ 选中色用**暖金**（#C8881F 系，与「点亮第一盏灯」/ 主行动暖金同一色系），
+ *   不用导航蓝 `C.accent` —— 选场是这场合的**核心动作**，不是页签导航；
+ *   且灯栏夜话改版已把"品牌暖金=灯火"钉死，选中一张卡 = "点亮这一场"，语义顺的。
+ *
+ * ★★ 结构纪律（探针 ①.1 换场判据依赖）：仍是 `<button>` + `aria-pressed` +
+ *   `aria-label`（场景名）—— 探针靠 `[data-kaipu-left] button[aria-pressed]`
+ *   找到所有场景并逐个点击，形态怎么改这三样不能丢。
+ */
 function SceneRow({
   scene,
   active,
@@ -789,20 +938,20 @@ function SceneRow({
       aria-pressed={active}
       onClick={() => onSelect(scene.scene)}
       style={{
+        ...CARD,
+        // ★ 按钮默认居中：必须显式左对齐（否则卡片里每行文字都会居中）
         display: 'block',
-        width: '100%',
         textAlign: 'left',
-        padding: '9px 14px',
-        border: 'none',
-        borderLeft: `2px solid ${active ? C.accent : 'transparent'}`,
-        background: active ? C.soft : 'transparent',
+        // ★ 选中态：品牌暖金边 + 极浅暖底（与 Agent 卡的灰边中性态区分开）
+        border: `1px solid ${active ? '#C8881F' : C.border}`,
+        background: active ? 'rgba(200,136,31,0.08)' : 'transparent',
         color: C.text,
         cursor: 'pointer',
         font: 'inherit',
       }}
     >
-      <div style={{ fontSize: FS.title }}>{scene.label}</div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+      <div style={{ fontSize: FS.title, fontWeight: active ? 600 : 500 }}>{scene.label}</div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 3, flexWrap: 'wrap' }}>
         {/*
           ★★ 2026-10-08：文案 `N 维` → `N 个审核面`。
           依据是**已定裁定**「界面文案：维度 → 审核面」—— 这个词在这里**漏改**了
@@ -810,7 +959,7 @@ function SceneRow({
           ★ 只改**界面文案**：数据侧的 `lamp` 值域、`role:"综合维度"` 那类**真值不动**。
         */}
         <Chip>{scene.lamps.length} 个审核面</Chip>
-        {pending > 0 && <Chip tone="#d97706">待接入 {pending}</Chip>}
+        {pending > 0 && <Chip tone="#b45309">待接入 {pending}</Chip>}
         {scene.requiresExternal && <Chip tone="#6d28d9">需预约</Chip>}
       </div>
     </button>

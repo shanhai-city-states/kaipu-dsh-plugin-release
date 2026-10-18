@@ -1,5 +1,5 @@
 /**
- * 山海·开铺 · 工位插件 · host half（083-C 期1）
+ * 山海·开铺 · 工位插件 · host half（期1）
  * =====================================================================
  * ★ 本包不含我方服务端逻辑副本——场地数据/状态/API 在服务端。
  *   本包只是「工位」的客户端面，通过契约(@shanhai/kaipu-contract)与服务端通信。
@@ -9,9 +9,15 @@ import { WorkstationRemoteService } from './remote/service.js'
 
 /** 插件配置（与 `cordis.patch.yml` 的 config 对应） */
 export interface WorkstationConfig {
-  // C4②（083-C 复核结论）：接口键集须覆盖 patch 声明键
+  // 复核结论②：接口键集须覆盖 patch 声明键
   // cordis.patch.yml 现声明 config: { scaffold: true }，此处补对应可选项
   scaffold?: boolean
+  /** ★ 服务端地址（期4 起接真数据；空 ⇒ 退回 scaffold 只读态） */
+  baseUrl?: string
+  /** 本机指纹（空 ⇒ host 按 hostname/user/platform 推导，同机稳定） */
+  fingerprint?: string
+  /** 客户端版本（服务端灰度用，可空） */
+  clientVersion?: string
 }
 
 /** DSH host 侧最小 ctx 形状（只写我们用到的，避免绑 DSH monorepo 内部包） */
@@ -23,7 +29,7 @@ export const name = 'shanhai-kaipu-workstation'
 
 export function apply(ctx: HostContext, config: WorkstationConfig = {}): void {
   ctx.logger?.info(
-    `[${name}] 工位插件已加载（期1 · 渲染持久化态 · scaffold=${config.scaffold === true}）`,
+    `[${name}] 工位插件已加载（${config.baseUrl ? '已接服务端 ' + config.baseUrl : '本地只读态（未配 baseUrl）'}）`,
   )
 
   // ── host 侧数据通道（Typert Remote / SRC 模式）──────────────────────
@@ -44,7 +50,7 @@ export function apply(ctx: HostContext, config: WorkstationConfig = {}): void {
     new WorkstationRemoteService(ctx as never, config as Record<string, unknown>)
     ctx.logger?.info(
       `[${name}] ✓ 数据通道已注册（remote namespace=kaipu-workstation；` +
-        `status / state）`,
+        `status / state / orgTree / orgNodeCreate / orgNodePatch / orgNodeDelete）`,
     )
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

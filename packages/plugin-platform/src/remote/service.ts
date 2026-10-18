@@ -167,6 +167,47 @@ export interface KaipuServiceConfig {
 }
 
 /** 空入参（有些端点不需要参数；**仍要有一个 query**，见约束 ③） */
+/** `kaipu/createInvite` 的入参 —— 请谁进、进哪个灯位、多久有效 */
+export interface CreateInviteQuery {
+  lamp: string
+  seat?: string
+  note?: string
+  ttlDays?: number
+}
+
+/**
+ * `kaipu/createInvite` 的回执。
+ * ★ `url` = 可直接发给对方的完整链接（`.../kai-pu/invite/<code>`）；
+ *   `code` 一次性、带有效期，判据全在服务端。
+ */
+export interface CreateInvitePayload {
+  code: string
+  url: string
+  path: string
+  lamp: string
+  expiresAt: string
+  ttlDays: number
+}
+
+/** `kaipu/assignSeat` 的入参 —— 改哪个位、换成谁 */
+export interface AssignSeatQuery {
+  seat: string
+  holderId: string
+  holderName: string
+  reason?: string
+}
+
+/**
+ * `kaipu/assignSeat` 的回执。
+ * ★ `holder.id` / `holder.name` 在 `type==='external'` 时**服务端会遮蔽成空串**
+ *   （防跨租户回显真名）⇒ 界面不要拿它当「改名成功」的证据，刷新后看 seatHolders。
+ */
+export interface AssignSeatPayload {
+  seat: string
+  holder: { type: string; id: string; name: string }
+  logged: boolean
+}
+
 export interface EmptyQuery {
   [k: string]: never
 }
@@ -565,6 +606,77 @@ export class KaipuRemoteService extends TypertRemoteService {
   }
 
   /* ═══════════════════════ 四、端点（wire: kaipu/<method>） ═══════════════════════ */
+
+  /**
+   * 带令牌 POST（★ 401 只重试**一次**，与 `authedGet` 同款）
+   *
+   * ★ 为什么需要它：此前 host 侧只有 GET 一条带令牌通道 ⇒ 席位改派这类写操作
+   *   即使后端 `POST /roles/assign` 早就绪，界面也发不出请求（实测症状：
+   *   「可改」标签点不动、没有任何请求出网）。写通道必须与读通道并列存在。
+   */
+  private async authedPost<T>(path: string, body: unknown, signal: CancelSignal | undefined): Promise<RemoteResult<T>> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const tk = await this.ensureToken(signal)
+      if (tk.ok !== true) return tk
+      const r = await this.http('POST', path, body, signal)
+      if (KaipuRemoteService.isErr(r)) return r
+      if (r.status === 401 && attempt === 0) {
+        this.token = null // 令牌被判无效 ⇒ 丢掉，下一轮重取
+        this.tokenExpiresAt = 0
+        continue
+      }
+      if (r.status !== 200) {
+        const parsed = KaipuRemoteService.parseErr(r.text)
+        return {
+          ok: false,
+          kind: 'error',
+          code: parsed?.code ?? `http_${r.status}`,
+          error: parsed?.message ?? `写入失败（HTTP ${r.status}）`,
+        }
+      }
+      try {
+        return { ok: true, data: JSON.parse(r.text) as T }
+      } catch {
+        return { ok: false, kind: 'error', code: 'bad_json', error: '响应读不懂（不是 JSON）' }
+      }
+    }
+    return { ok: false, kind: 'error', code: 'unauthorized', error: '通行证不管用了，重新领一张。' }
+  }
+
+  /**
+   * `kaipu/assignSeat` —— **改席位**（执行位 / 审计位可改；管理位、签名位服务端会拒）
+   *
+   * ★ 服务端才是判据所在，客户端**不要**自己预判能不能改：
+   *   · 签名位 ⇒ 403 `seat_immutable`「签名这件事，只能我来。」
+   *   · 执行位与审计位由同一实体兼任 ⇒ 409 `seat_conflict`「干活的和审账的，不能是同一个人。」
+   *   ⇒ 把这两条话原样交给用户看，比在前端猜规则可靠。
+   */
+  @Remote('assignSeat')
+  async assignSeat(query: AssignSeatQuery, signal?: CancelSignal): Promise<RemoteResult<AssignSeatPayload>> {
+    return this.authedPost<AssignSeatPayload>('/roles/assign', {
+      seat: query.seat,
+      holderId: query.holderId,
+      holderName: query.holderName,
+      reason: query.reason ?? '',
+    }, signal)
+  }
+
+  /**
+   * `kaipu/createInvite` —— **生成邀请链接，请别人的 Agent 进场**。
+   *
+   * ★ 为什么这个必须做到客户端：功能早在服务端（`POST /invites`），但没有入口 ⇒
+   *   用户只能手工提请求。「功能在、入口不在」和「没做」在用户那边是同一件事。
+   * ★ 邀请码一次性、随机、带有效期 —— 判据全在服务端，前端只负责发起与展示。
+   */
+  @Remote('createInvite')
+  async createInvite(query: CreateInviteQuery, signal?: CancelSignal): Promise<RemoteResult<CreateInvitePayload>> {
+    return this.authedPost<CreateInvitePayload>('/invites', {
+      lamp: query.lamp,
+      seat: query.seat ?? '',
+      note: query.note ?? '',
+      ttlDays: query.ttlDays ?? 7,
+    }, signal)
+  }
 
   /**
    * `kaipu/status` —— **面板第一件要知道的事：接没接上**。

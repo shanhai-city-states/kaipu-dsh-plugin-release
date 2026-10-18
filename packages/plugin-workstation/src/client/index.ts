@@ -1,5 +1,5 @@
 /**
- * 山海·开铺 · 工位插件 · client half（083-C 期1）
+ * 山海·开铺 · 工位插件 · client half（期1）
  * =====================================================================
  * ★ 与场地/智囊团插件**同构但独立**：自己一个侧边栏入口、自己一个 main 面板。
  *   两包**互不 import**。
@@ -9,6 +9,7 @@
  */
 import { createElement } from 'react'
 import { WORKSTATION_PANEL_ID } from './panel-id.js'
+import { WorkstationPanelIcon } from './WorkstationPanelIcon.js'
 import { WorkstationPanel, wireConnection } from './WorkstationPanel.js'
 import type { ClientCtxLike } from './bridge.js'
 
@@ -46,7 +47,7 @@ export function apply(ctx: ClientContext): void {
           order: 40, // ★ 排在场地(30)/智囊团(35)之后 —— 工位可选配套
           label: () => '工位', // ★ 必须是函数
         },
-        () => createElement('span', {}, '工位'),
+          WorkstationPanelIcon, // ★ 图标位返回图标（原来返回文字 ⇒ 侧边栏重复「工位 工位」）
       ),
     )
   } catch (e) {

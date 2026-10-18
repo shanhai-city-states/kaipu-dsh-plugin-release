@@ -1,8 +1,8 @@
 /**
- * 山海·开铺 · 工位插件 · host half · 工位持久化态（083-C 期1）
+ * 山海·开铺 · 工位插件 · host half · 工位持久化态（期1）
  * =====================================================================
  * ★ 纯类型经契约层（@shanhai/kaipu-contract）import —— 本文件只放【纯函数 + scaffold 种子】。
- * ★ 设计纪律四点（083-C-015）的类型落点在契约层 `workstation.ts`；本文件落【纯函数判据 + 种子】。
+ * ★ 设计纪律四点的类型落点在契约层 `workstation.ts`；本文件落【纯函数判据 + 种子】。
  *
  * ★ 硬边界（不可破）：presence='away' 绝不自动推出 membershipActive=false。
  *   判据见 `seatText` —— 任何把「离座」当成「移除」的代码都是违反边界，须拦截。
@@ -17,7 +17,17 @@ import type {
 
 // ───────────────────────────── 纯函数（判据可直接 import 断言） ─────────────────────────────
 
-/** 座位汇总：占用/空位/离座仍在编/已移除 四数正交 */
+/**
+ * 座位汇总 —— ★ **四数分账**（不是「正交」，也不是两两互斥）：
+ *   · `occupied`       `status==='occupied'`（**含** away）
+ *   · `awayButActive`  **⊆ occupied**（占用位里 presence==='away' 的子集）
+ *   · `vacant`         `membershipActive===true && status==='vacant'`（在编的空位）
+ *   · `removed`        `membershipActive===false`（已移除 · 座位已回空位池）
+ * ⇒ occupied + vacant + removed == 座位数（`awayButActive` 是 occupied 的子集，不计入合计）。
+ *
+ * ★ 判序不可调换：**先判移除**。T-1 裁定「移除 = 释放回空位池」⇒ 移除后 status 必为
+ *   `vacant`；若先判 `status==='vacant'`，移除项会被记进 vacant，`removed` 恒 0（假读数）。
+ */
 export function summarizeSeats(state: WorkstationState): {
   occupied: number
   vacant: number
@@ -29,16 +39,16 @@ export function summarizeSeats(state: WorkstationState): {
   let awayButActive = 0
   let removed = 0
   for (const s of state.seats) {
+    if (!s.membershipActive) {
+      removed++ // 移除=释放回空位池（status 此时必为 vacant）
+      continue
+    }
     if (s.status === 'vacant') {
       vacant++
       continue
     }
-    if (!s.membershipActive) {
-      removed++ // 移除=释放回空位池
-      continue
-    }
     occupied++
-    if (s.presence === 'away') awayButActive++ // ③ 离座但仍占座、留痕在
+    if (s.presence === 'away') awayButActive++ // ③ 离座但仍占座、留痕在（⊆ occupied）
   }
   return { occupied, vacant, awayButActive, removed }
 }
@@ -46,10 +56,14 @@ export function summarizeSeats(state: WorkstationState): {
 /**
  * ③ 边界判据：座位文案——离座≠空缺≠移除。
  * presence='away' 且 membershipActive=true ⇒ 「离座·留痕在」（非空缺、非移除）。
+ *
+ * ★ T-1 裁定（2026-10-18）：**移除 = 释放回空位池**（`status:'vacant'` + `presence:null`
+ *   + `membershipActive:false`）⇒ 移除后座面就回到「空位」，**不存在「已移除」这一档**。
+ *   原先那条 `!membershipActive ⇒ 「已移除 · 释放回空位池」` 分支因此是**不可达的死码**，已删；
+ *   「曾有成员被移除」这件事落 trace（`member_removed` round），不靠座面残留态表达。
  */
 export function seatText(seat: Seat): string {
   if (seat.status === 'vacant') return '空位 · 可邀请'
-  if (!seat.membershipActive) return '已移除 · 释放回空位池'
   return seat.presence === 'away' ? '离座 · 留痕在' : '在场'
 }
 
@@ -73,13 +87,119 @@ export function splitMembers(state: WorkstationState): {
   return { humans, agents }
 }
 
+// ───────────────────────── 不变量（⑨ Seat 权威源 · T-1 移除语义） ─────────────────────────
+
+/** 一条不变量违规（机器码 + 人话） */
+export interface ConsistencyIssue {
+  code: string
+  detail: string
+}
+
+/**
+ * ⑨ 不变量：**座位态 ↔ 成员快照必须一致**，且座位态自身合法。
+ *
+ * ★★ 权威源方向（写死）：**`Seat` 是权威源，`Member.presence` / `Member.membershipActive`
+ *   是它的快照**。两侧不一致时判为 `*_drift`，修法是**改快照去贴座位**，不是反过来。
+ *   （理由：座面渲染、汇总计数、座位池分配都以座位为索引；若以人为权威，
+ *    一个没有座位的人也能「在场」⇒ 座位数对不上。）
+ *
+ * ★ 非法态四条（类型层不禁，靠本判据 + 判据脚本拦）：
+ *   ① `vacant` 却带 presence        —— 空位没有「在场」可言
+ *   ② `occupied` 却无 presence      —— 占着座说不出在场状态
+ *   ③ `occupied` 却 `membershipActive=false` —— 既占座又说不是成员
+ *   ④ `membershipActive=false` 却非 `vacant` —— 移除未释放座位（T-1 禁）
+ *
+ * ★ 纯函数：不读时钟、不读环境，判据脚本可直接 import 正负例断言。
+ */
+export function assertSeatMemberConsistency(state: WorkstationState): {
+  ok: boolean
+  issues: ConsistencyIssue[]
+} {
+  const issues: ConsistencyIssue[] = []
+  const membersById = new Map(state.members.map((m) => [m.id, m]))
+
+  for (const s of state.seats) {
+    /* ① 空位不许有在场态 */
+    if (s.status === 'vacant' && s.presence !== null) {
+      issues.push({ code: 'vacant_with_presence', detail: `座位 ${s.id} 是空位，却带 presence=${String(s.presence)}` })
+    }
+    /* ② 占用位必须有在场态 */
+    if (s.status === 'occupied' && s.presence === null) {
+      issues.push({ code: 'occupied_without_presence', detail: `座位 ${s.id} 已占用，却没有在场态` })
+    }
+    /* ③ 占用位必须是在编成员（禁「占座 + 非成员」） */
+    if (s.status === 'occupied' && !s.membershipActive) {
+      issues.push({ code: 'occupied_but_removed', detail: `座位 ${s.id} 既占用又已移除（移除必须释放座位）` })
+    }
+    /* ④ 移除 ⇒ 必须已释放回空位池（T-1） */
+    if (!s.membershipActive && s.status !== 'vacant') {
+      issues.push({ code: 'removed_not_released', detail: `座位 ${s.id} 已移除但 status=${s.status}（移除=释放回空位池）` })
+    }
+    /* ⑤ 占用位必须有 holder，且 holder 的成员快照与座位一致 */
+    if (s.status === 'occupied') {
+      if (s.holderId === undefined) {
+        issues.push({ code: 'occupied_without_holder', detail: `座位 ${s.id} 已占用，但没有 holderId` })
+        continue
+      }
+      const m = membersById.get(s.holderId)
+      if (m === undefined) {
+        issues.push({ code: 'holder_missing', detail: `座位 ${s.id} 的 holderId=${s.holderId} 不在 members 里` })
+        continue
+      }
+      if (m.presence !== s.presence) {
+        issues.push({
+          code: 'presence_drift',
+          detail: `座位 ${s.id} presence=${String(s.presence)}，成员 ${m.id} 快照=${m.presence}（以座位为准）`,
+        })
+      }
+      if (m.membershipActive !== s.membershipActive) {
+        issues.push({
+          code: 'membership_drift',
+          detail: `座位 ${s.id} membershipActive=${String(s.membershipActive)}，成员 ${m.id} 快照=${String(m.membershipActive)}（以座位为准）`,
+        })
+      }
+      if (m.seatId !== undefined && m.seatId !== s.id) {
+        issues.push({ code: 'seat_pointer_drift', detail: `成员 ${m.id} 的 seatId=${m.seatId}，但持有座位 ${s.id}` })
+      }
+    }
+  }
+
+  /* ⑥ 成员侧指针必须指向存在的座位 */
+  for (const m of state.members) {
+    if (m.seatId === undefined) continue
+    if (!state.seats.some((s) => s.id === m.seatId)) {
+      issues.push({ code: 'member_seat_missing', detail: `成员 ${m.id} 的 seatId=${m.seatId} 不存在` })
+    }
+  }
+
+  return { ok: issues.length === 0, issues }
+}
+
+/**
+ * **出数前置**：任何要交给 wire / 面板的工位态，必须先过不变量。
+ *
+ * ★ 为什么是「抛」而不是「降级返回」：不自洽的状态**没有正确降级方式**——
+ *   无论返回哪一半（座位还是成员）都是在给面板喂假数据。抛错会被 host 注册处的
+ *   `try/catch` 兜住 ⇒ 面板显示「未接入」+ 日志留原因，**比静默出假数据安全**。
+ */
+export function checkedWorkstationState(projectId?: string): WorkstationState {
+  const state = scaffoldState(projectId)
+  const check = assertSeatMemberConsistency(state)
+  if (!check.ok) {
+    throw new Error(
+      `工位状态不自洽（${check.issues.length} 处）：${check.issues.map((i) => `${i.code} — ${i.detail}`).join('；')}`,
+    )
+  }
+  return state
+}
+
 // ───────────────────────────── scaffold 种子（诚实标 source='scaffold' · 非 live） ─────────────────────────────
 
 /**
  * 期1 渲染以持久化态先行：本种子标注 source='scaffold'，
- * 待服务端五项（083-C-014 §五）落地后接真 `kaipu-workstation/state`（source='live'）。
+ * 待服务端五项（契约 §五）落地后接真 `kaipu-workstation/state`（source='live'）。
  * 种子内容对齐 v0.4-A 原型标注：发起人·协作方甲·协作方乙在场，协作方丙离座·留痕在，空位可邀请。
- * ★ 花名中性化（`083-C-021 §一` 裁定①）：演示种子的作用是让人看懂「结构」，不是记住「人」——
+ * ★ 花名中性化（中性化规则·裁定①）：演示种子的作用是让人看懂「结构」，不是记住「人」——
  *   真名反而模糊「这是演示」的信号（下载者可能当成真实配置照抄）。
  */
 export function scaffoldState(projectId = 'proj_083c_demo'): WorkstationState {
@@ -92,7 +212,7 @@ export function scaffoldState(projectId = 'proj_083c_demo'): WorkstationState {
   ]
 
   const invite: Invite = {
-    id: 'inv_001',
+    id: 'inv_demo_a',
     seatId: 's5',
     toName: '新协作方',
     toKind: 'human',
@@ -109,7 +229,9 @@ export function scaffoldState(projectId = 'proj_083c_demo'): WorkstationState {
     // ③ 协作方丙离座≠空缺：status 仍 occupied、membershipActive 仍 true
     { id: 's4', label: '协作方丙位', status: 'occupied', holderId: 'm_gu', presence: 'away', membershipActive: true },
     // 空位 + 待接受邀请（②）
-    { id: 's5', label: '空位', status: 'vacant', presence: 'away', membershipActive: true, invite },
+    // ★ 戒 P2-6（2026-10-18）：空位**不带在场态**（`presence:null`）。原先写 `'away'` 是
+    //   把「没人坐」说成「人离座」，与 `vacant ⇒ presence===null` 的不变量直接冲突。
+    { id: 's5', label: '空位', status: 'vacant', presence: null, membershipActive: true, invite },
   ]
 
   return {
