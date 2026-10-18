@@ -199,7 +199,7 @@ export function checkedWorkstationState(projectId?: string): WorkstationState {
  * 期1 渲染以持久化态先行：本种子标注 source='scaffold'，
  * 待服务端五项（契约 §五）落地后接真 `kaipu-workstation/state`（source='live'）。
  * 种子内容对齐 v0.4-A 原型标注：发起人·协作方甲·协作方乙在场，协作方丙离座·留痕在，空位可邀请。
- * ★ 花名中性化（中性化规则·裁定①）：演示种子的作用是让人看懂「结构」，不是记住「人」——
+ * ★ 花名中性化（中性化规则·裁定①）：初始持久化态的作用是让人看懂「结构」，不是记住「人」——
  *   真名反而模糊「这是演示」的信号（下载者可能当成真实配置照抄）。
  */
 export function scaffoldState(projectId = 'proj_083c_demo'): WorkstationState {
