@@ -50,6 +50,76 @@ export const ENDPOINTS = {
   tasksClaim: 'tasksClaim',
   /** ★ 期5 任务层：完成 */
   tasksDone: 'tasksDone',
+
+  /* ── ★ 期5b-1 任务层补齐（后端已实现 · 本轮接线）──
+     ★ 值是**网关方法名**（host `service.ts` 的 `@Remote`），**不是** HTTP 路径。
+       HTTP 路径由 host 侧拼（`{id}` 处一律 `encodeURIComponent(query.taskId)`），
+       `${id}` 不进 wire —— 与 `tasksClaim` 的写法完全一致。
+       对应后端路由见每条注释。 */
+  /** 开工（claimed/rejected → in_progress）· `POST /tasks/{id}/start` */
+  tasksStart: 'tasksStart',
+  /** 租约续期 · `POST /tasks/{id}/heartbeat` */
+  tasksHeartbeat: 'tasksHeartbeat',
+  /** 阻塞求助（必带 reason）· `POST /tasks/{id}/block` */
+  tasksBlock: 'tasksBlock',
+  /** 解除求助阻塞 · `POST /tasks/{id}/unblock` */
+  tasksUnblock: 'tasksUnblock',
+  /** 强行指派（期5b-2 接 UI，本轮只开通道）· `POST /tasks/{id}/assign` */
+  tasksAssign: 'tasksAssign',
+  /** 加依赖（期5b-2 接 UI，本轮只开通道）· `POST /tasks/{id}/deps` */
+  tasksDeps: 'tasksDeps',
+  /** HITL 审批通过 · `POST /tasks/{id}/approve` */
+  tasksApprove: 'tasksApprove',
+  /** HITL 驳回 · `POST /tasks/{id}/reject` */
+  tasksReject: 'tasksReject',
+  /** 看板分组（期5b-2 接 UI，本轮只开通道）· `GET /tasks/board` */
+  tasksBoard: 'tasksBoard',
+  /** 阻塞列表 · `GET /tasks/blocked` */
+  tasksBlocked: 'tasksBlocked',
+  /** 待审批列表 · `GET /tasks/pending-approvals` */
+  tasksPendingApprovals: 'tasksPendingApprovals',
+  /** ★ 本人身份（服务端 `account_id`）—— 心跳判据：只对 `claimed_by == 本人` 发 */
+  whoami: 'whoami',
+
+  /* ── ★ 期6a-2 资料按位（5 个端点 · 与服务端 ROUTES 一一对应）── */
+  /** 列位上的文件 · `GET /packs/{iid}/files` */
+  packsList: 'packsList',
+  /** 上传（raw body + X-Filename + X-Body-Sha256）· `POST /packs/{iid}/files` */
+  packUpload: 'packUpload',
+  /** 下载（二进制）· `GET /packs/{iid}/files/{name}` */
+  packDownload: 'packDownload',
+  /** 删除 · `DELETE /packs/{iid}/files/{name}` */
+  packDelete: 'packDelete',
+  /** 流水（hash 链 + 锚点对账）· `GET /packs/{iid}/journal` */
+  packJournal: 'packJournal',
+
+  /* ── ★ 座位与邀请（真实数据）── */
+  /** 本铺真实席位 · `GET /roles/seats` */
+  rolesSeats: 'rolesSeats',
+  /** 生成邀请 · `POST /invites` */
+  inviteCreate: 'inviteCreate',
+
+  /* ── 工位当前交互（存服务端）── */
+  contextGet: 'contextGet',
+  contextPut: 'contextPut',
+  /** 一键清场（清人不移位） */
+  orgClearAgents: 'orgClearAgents',
+  /** 请出单个位上的 Agent */
+  seatEvict: 'seatEvict',
+  /** 通知列表 */
+  notifications: 'notifications',
+  /** 通知全部已读 */
+  notificationsRead: 'notificationsRead',
+  /** 查最新插件版本 */
+  pluginVersion: 'pluginVersion',
+  /** 交互包打包下载 */
+  packExport: 'packExport',
+  /** 交互包排定删除（24h） */
+  packPurge: 'packPurge',
+  /** 取消排定删除 */
+  packPurgeCancel: 'packPurgeCancel',
+  /** 查排定删除状态 */
+  packPurgeStatus: 'packPurgeStatus',
 } as const
 
 export type EndpointName = (typeof ENDPOINTS)[keyof typeof ENDPOINTS]

@@ -136,6 +136,10 @@ export interface OrgNodeView {
   child_count?: number
   /** system = 建场时建的（永久不可删）· user = 用户自己加的 */
   origin?: string
+  /** ★ 工位编号（沟通用「几号工位」）—— 服务端按创建顺序分配，删除不回收 */
+  seq?: number
+  /** ★ 谁坐在这里（服务端按 agents.lamp ↔ role_seats.seat 归位） */
+  holders?: Array<{ agentId: string; name: string; seat: string; seatLabel?: string; online?: boolean; lastSeen?: string | null }>
   /** 非空 = 不能删，值就是原因（如「被 4 个席位占用」） */
   undeletable?: string | null
 }
@@ -182,6 +186,84 @@ export async function createOrgNode(
   return orgError(r)
 }
 
+/** ★ 请出一个位上的 Agent（只清这一个） */
+export async function evictSeat(seat: string): Promise<OrgResult<{ seat: string; evicted: { agentId: string; name: string } }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ seat: string; evicted: { agentId: string; name: string } }>(
+    connection, 'seatEvict', { seat })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 通知列表 */
+export async function loadNotifications(): Promise<OrgResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>(
+    connection, 'notifications', {})
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 通知全部标为已看 */
+export async function markNotificationsRead(): Promise<OrgResult<{ seen: boolean }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ seen: boolean }>(connection, 'notificationsRead', {})
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 查最新插件版本（有更新时提示卸载重装） */
+export async function checkPluginVersion(current: string): Promise<OrgResult<{ current: string | null; latest: string | null; updateAvailable: boolean; notes: string }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ current: string | null; latest: string | null; updateAvailable: boolean; notes: string }>(
+    connection, 'pluginVersion', { current })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 打包下载一个交互包（所有座位） */
+export async function exportPack(interactionId: string): Promise<OrgResult<{ filename: string; dataBase64: string; files: number; bytes: number }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ filename: string; dataBase64: string; files: number; bytes: number }>(
+    connection, 'packExport', { interactionId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 排定 24 小时后删除一个交互包 */
+export async function purgePack(interactionId: string): Promise<OrgResult<{ interactionId: string; deleteAfter: string }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ interactionId: string; deleteAfter: string }>(connection, 'packPurge', { interactionId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 取消排定的删除 */
+export async function cancelPurge(interactionId: string): Promise<OrgResult<{ interactionId: string; cancelled: boolean }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ interactionId: string; cancelled: boolean }>(connection, 'packPurgeCancel', { interactionId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 查删除状态 */
+export async function purgeStatus(interactionId: string): Promise<OrgResult<{ interactionId: string; pending: boolean; deleteAfter: string | null }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ interactionId: string; pending: boolean; deleteAfter: string | null }>(
+    connection, 'packPurgeStatus', { interactionId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 一键清场：让所有 Agent 离场（清人不移位 · 需 confirm='CLEAR'） */
+export async function clearAgents(): Promise<OrgResult<{ cleared: number; agents: Array<{ agentId: string; name: string; seat: string }> }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ cleared: number; agents: Array<{ agentId: string; name: string; seat: string }> }>(
+    connection, 'orgClearAgents', { confirm: 'CLEAR' })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
 /** 改名 */
 export async function renameOrgNode(nodeId: string, name: string): Promise<OrgResult<unknown>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
@@ -213,6 +295,10 @@ export interface TaskItem {
   claimed_at?: string | null
   done_at?: string | null
   result?: string | null
+  /* ★ 期6-L1（2026-10-20）：任务↔资料绑定（服务端返回） */
+  interactionId?: string
+  fileCount?: number
+  projectId?: string | null
 }
 
 export interface TaskListResult {

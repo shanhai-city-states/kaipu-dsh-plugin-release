@@ -28,13 +28,18 @@ interface HttpResponseLike {
   ok: boolean
   status: number
   text(): Promise<string>
+  /** ★ 二进制出口（下载用）—— 类型自己声明，不引 DOM/Node */
+  arrayBuffer(): Promise<ArrayBuffer>
+  /** ★ 取响应头（下载要拿 Content-Disposition / Content-Type） */
+  headers?: { get(name: string): string | null }
 }
 type FetchLike = (
   url: string,
   init?: {
     method?: string
     headers?: Record<string, string>
-    body?: string
+    /** ★ 上传要发 raw 二进制；JSON 请求仍走 string */
+    body?: string | Uint8Array
     signal?: unknown
   },
 ) => Promise<HttpResponseLike>
@@ -123,6 +128,17 @@ export class KaipuHttpClient {
     return this.fingerprint
   }
 
+  /**
+   * ★ 主动握手并返回本铺 `account_id`（期5b-1 加）。
+   * 为什么需要：心跳只能对**本人持有**的任务发（`claimed_by == 本人`），
+   * 而面板侧唯一可信的「本人」就是服务端在 `/auth/device` 回的 `accountId`。
+   * ★ 只回 accountId，**不回 token**（凭据纪律：token 不出 host）。
+   */
+  async identify(signal?: AbortSignalLike): Promise<string> {
+    await this.ensureToken(signal)
+    return this.accountId ?? ''
+  }
+
   /** 懒握手：token 缺失或已过期才重新换，换完缓存在内存 */
   private async ensureToken(signal?: AbortSignalLike): Promise<string> {
     const now = Date.now()
@@ -153,6 +169,118 @@ export class KaipuHttpClient {
   ): Promise<T> {
     const token = await this.ensureToken(signal)
     return (await this.request(method, path, body, token, signal)) as T
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────
+   * ★ 期6a-2 · 资料通道（raw bytes）
+   *
+   * 为什么不能复用 `call()`：
+   *   `call()` 固定 `Content-Type: application/json` + `JSON.stringify`。
+   *   资料上传要 **raw body**（服务端边写边算 sha，不解析 JSON）+
+   *   三个自定义头（X-Filename / X-Body-Sha256 / Content-Type）。
+   *
+   * ★ 为什么是 base64 过 wire 而不是直接传二进制：
+   *   `@Remote` 的参数走 JSON 序列化 —— 二进制过不去。
+   *   所以**渲染层 → host** 用 base64，**host → 服务端** 用 raw bytes。
+   *   代价：内存约为文件大小 ×1.4（base64 膨胀 + 解码缓冲），
+   *   故 UI 侧对单件设上限（超限提示改用 CLI），不拿它传超大文件。
+   * ───────────────────────────────────────────────────────────────────── */
+
+  /** 上传：raw bytes + 自定义头。返回服务端 JSON（含文件名/sha/大小）。 */
+  async uploadRaw(
+    path: string,
+    bytes: Uint8Array,
+    headers: Record<string, string>,
+    signal?: AbortSignalLike,
+  ): Promise<unknown> {
+    const token = await this.ensureToken(signal)
+    const f = getFetch()
+    if (f === null) {
+      throw new KaipuHttpError(0, 'no_fetch', '当前宿主没有全局 fetch（需 Node 18+）—— 工位连不上服务端。')
+    }
+    const h: Record<string, string> = { Accept: 'application/json', ...headers }
+    if (token) h.Authorization = `Bearer ${token}`
+    if (!h['Content-Type']) h['Content-Type'] = 'application/octet-stream'
+
+    let res: HttpResponseLike
+    try {
+      const init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; signal?: unknown } = {
+        method: 'POST',
+        headers: h,
+        body: bytes,
+      }
+      if (signal !== undefined) init.signal = signal
+      res = await f.call(globalThis, `${this.baseUrl}${path}`, init)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new KaipuHttpError(0, 'network_error', `上传连不上服务端（${this.baseUrl}）：${msg}`)
+    }
+    return this.parseJsonResponse(res, await res.text())
+  }
+
+  /** 下载：返回二进制 + 服务端给的文件名/类型。 */
+  async downloadRaw(
+    path: string,
+    signal?: AbortSignalLike,
+  ): Promise<{ bytes: Uint8Array; contentType: string; filename: string | null }> {
+    const token = await this.ensureToken(signal)
+    const f = getFetch()
+    if (f === null) {
+      throw new KaipuHttpError(0, 'no_fetch', '当前宿主没有全局 fetch（需 Node 18+）—— 工位连不上服务端。')
+    }
+    const h: Record<string, string> = { Accept: '*/*' }
+    if (token) h.Authorization = `Bearer ${token}`
+
+    let res: HttpResponseLike
+    try {
+      const init: { method: string; headers: Record<string, string>; signal?: unknown } = { method: 'GET', headers: h }
+      if (signal !== undefined) init.signal = signal
+      res = await f.call(globalThis, `${this.baseUrl}${path}`, init)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new KaipuHttpError(0, 'network_error', `下载连不上服务端（${this.baseUrl}）：${msg}`)
+    }
+
+    if (!res.ok) {
+      // 失败时服务端回 JSON 错误体
+      this.parseJsonResponse(res, await res.text()) // 必抛
+      throw new KaipuHttpError(res.status, `http_${res.status}`, `下载失败 ${res.status}`)
+    }
+
+    const buf = await res.arrayBuffer()
+    const cd = res.headers?.get('Content-Disposition') ?? null
+    return {
+      bytes: new Uint8Array(buf),
+      contentType: res.headers?.get('Content-Type') ?? 'application/octet-stream',
+      filename: parseRfc6266Filename(cd),
+    }
+  }
+
+  /** JSON 响应的统一解包（成功/失败两条路都在这里，避免两处口径不一致） */
+  private parseJsonResponse(res: HttpResponseLike, text: string): unknown {
+    let parsed: unknown = null
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = { message: text.slice(0, 200) }
+      }
+    }
+    if (!res.ok) {
+      const eb = (parsed || {}) as KaipuErrorBody
+      const code =
+        typeof eb.error === 'string' ? eb.error : typeof eb.code === 'string' ? eb.code : `http_${res.status}`
+      const message =
+        (typeof eb.message === 'string' && eb.message) ||
+        (typeof eb.detail === 'string' && eb.detail) ||
+        `服务端返回 ${res.status}`
+      throw new KaipuHttpError(res.status, code, message)
+    }
+    if (parsed !== null && typeof parsed === 'object' && 'data' in (parsed as Record<string, unknown>)) {
+      const env = parsed as Record<string, unknown>
+      if (env.ok === true || env.ok === undefined) return env.data
+    }
+    return parsed
   }
 
   /** 裸请求（不自动带 token；握手自己用） */
@@ -238,4 +366,26 @@ function deriveFingerprint(): string {
     h |= 0
   }
   return `dsh-${Math.abs(h).toString(16).padStart(12, '0').slice(0, 12)}`
+}
+
+/**
+ * 从 `Content-Disposition` 取文件名。
+ * ★ 服务端用的是 RFC 6266 双写（`filename*=UTF-8''…` + `filename="…"`），
+ *   所以优先取星号形式（中文名只有它能正确还原），再回退普通形式。
+ * ★ 取不到就返回 null（UI 用兜底名），**不要**抛错 —— 下载本身已经成功了。
+ */
+function parseRfc6266Filename(cd: string | null): string | null {
+  if (!cd) return null
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd)
+  if (star && star[1]) {
+    try {
+      return decodeURIComponent(star[1])
+    } catch {
+      return star[1]
+    }
+  }
+  const quoted = /filename="([^"]*)"/i.exec(cd)
+  if (quoted && quoted[1]) return quoted[1]
+  const plain = /filename=([^;]+)/i.exec(cd)
+  return plain && plain[1] ? plain[1].trim() : null
 }
