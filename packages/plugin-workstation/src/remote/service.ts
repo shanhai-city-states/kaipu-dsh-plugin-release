@@ -113,6 +113,24 @@ export interface TaskCreateQuery {
   detail?: string
   /** 指派给哪个工位（空 ⇒ 任何工位可领） */
   nodeId?: string
+  /** ★ 期6-L2：归到哪个项目（空 ⇒ 未归类） */
+  projectId?: string
+}
+
+/** `projectsList` 返回的一项 */
+export interface ProjectRow {
+  projectId: string
+  name: string
+  status: 'active' | 'archived' | string
+  createdAt: string
+  archivedAt?: string | null
+  /** 该项目下任务数（服务端子查询） */
+  taskCount?: number
+}
+
+/** `projectsList` 返回 */
+export interface ProjectsListPayload {
+  projects: ProjectRow[]
 }
 
 /** `tasksList` 入参 */
@@ -498,6 +516,7 @@ export class WorkstationRemoteService extends TypertRemoteService {
     const body: Record<string, unknown> = { title: query.title }
     if (typeof query.detail === 'string') body.detail = query.detail
     if (typeof query.nodeId === 'string' && query.nodeId.length > 0) body.node_id = query.nodeId
+    if (typeof query.projectId === 'string' && query.projectId.length > 0) body.project_id = query.projectId
     const data = await this.requireHttp().call<TaskRow>('POST', '/tasks', body, signal)
     return { ok: true, data }
   }
@@ -530,6 +549,38 @@ export class WorkstationRemoteService extends TypertRemoteService {
     const data = await this.requireHttp().call<Record<string, unknown>>(
       'POST',
       `/tasks/${encodeURIComponent(query.taskId)}/claim`,
+      {},
+      signal,
+    )
+    return { ok: true, data }
+  }
+
+  /* ── 期6-L2 · 项目层（长期实体：项目结束可归档、可复用）── */
+
+  /** 项目清单（带 task_count） */
+  @Remote('projectsList')
+  async projectsList(_query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<ProjectsListPayload>> {
+    const data = await this.requireHttp().call<{ projects?: ProjectRow[] }>('GET', '/projects', undefined, signal)
+    return { ok: true, data: { projects: Array.isArray(data?.projects) ? data.projects : [] } }
+  }
+
+  /** 新建项目 */
+  @Remote('projectsCreate')
+  async projectsCreate(query: { name: string }, signal?: CancelSignal): Promise<RemoteResult<ProjectRow>> {
+    const name = (query.name ?? '').trim()
+    if (name.length === 0) {
+      throw new KaipuHttpError(400, 'empty_name', '项目名不能为空。')
+    }
+    const data = await this.requireHttp().call<ProjectRow>('POST', '/projects', { name }, signal)
+    return { ok: true, data }
+  }
+
+  /** 归档项目：打包全部任务资料 + manifest（只读原件，不删） */
+  @Remote('projectArchive')
+  async projectArchive(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<Record<string, unknown>>> {
+    const data = await this.requireHttp().call<Record<string, unknown>>(
+      'POST',
+      `/projects/${encodeURIComponent(query.projectId)}/archive`,
       {},
       signal,
     )

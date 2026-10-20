@@ -50,6 +50,12 @@ export const ENDPOINTS = {
   tasksClaim: 'tasksClaim',
   /** ★ 期5 任务层：完成 */
   tasksDone: 'tasksDone',
+  /** ★ 期6-L2 项目层：清单 */
+  projectsList: 'projectsList',
+  /** ★ 期6-L2 项目层：新建 */
+  projectsCreate: 'projectsCreate',
+  /** ★ 期6-L2 项目层：归档（打包 + manifest） */
+  projectArchive: 'projectArchive',
 
   /* ── ★ 期5b-1 任务层补齐（后端已实现 · 本轮接线）──
      ★ 值是**网关方法名**（host `service.ts` 的 `@Remote`），**不是** HTTP 路径。

@@ -15,9 +15,13 @@ import {
   type EndpointName,
 } from './bridge.js'
 import {
+  archiveProject,
   claimTask,
   createOrgNode,
+  createProject,
   createTask,
+  loadProjects,
+  type ProjectItem,
   deleteOrgNode,
   checkPluginVersion,
   clearAgents,
@@ -2545,6 +2549,12 @@ function TaskSection(): ReactElement {
   const [composing, setComposing] = useState(false)
   const [title, setTitle] = useState('')
   const [detail, setDetail] = useState('')
+  /* ★ 期6-L2：项目归属（空 = 未归类） */
+  const [projects, setProjects] = useState<ProjectItem[]>([])
+  const [projId, setProjId] = useState('')
+  const [projNew, setProjNew] = useState(false)
+  const [projName, setProjName] = useState('')
+  const [projNotice, setProjNotice] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   /* 身份与两个折叠区（块 C / 块 D） */
@@ -2574,6 +2584,9 @@ function TaskSection(): ReactElement {
          首次加载本来就是 null，靠上面的 err 卡片说话。 */
       setErr({ code: r.code, message: r.message, source: 'read' })
     }
+    /* ★ 期6-L2：项目清单与任务同批刷新（读失败不清空，保留上次可用值） */
+    const pr = await loadProjects()
+    if (pr.ok) setProjects(pr.data.projects)
     /* ★ 两个徽标与任务列表同批刷新：计数取自服务端列表本身，不在前端另算 */
     const [blockedNext, pendingNext] = await Promise.all([
       fetchFlagged('tasksBlocked'),
@@ -2657,7 +2670,7 @@ function TaskSection(): ReactElement {
     const t = title.trim()
     if (t.length === 0) return
     void run(async () => {
-      const r = await createTask(t, detail.trim())
+      const r = await createTask(t, detail.trim(), projId || undefined)
       if (r.ok) {
         setTitle('')
         setDetail('')
@@ -2665,6 +2678,42 @@ function TaskSection(): ReactElement {
       }
       return r
     }, '任务已发布')
+  }
+
+  /** 新建项目（发布表单里就地建，建完自动选中） */
+  const onCreateProject = (): void => {
+    const n = projName.trim()
+    if (n.length === 0) return
+    void run(async () => {
+      const r = await createProject(n)
+      if (r.ok) {
+        setProjName('')
+        setProjNew(false)
+        setProjId(r.data.projectId)
+        /* 立刻拉一次清单，让下拉马上有这一项（不等下次全量刷新） */
+        const pr = await loadProjects()
+        if (pr.ok) setProjects(pr.data.projects)
+      }
+      return r
+    }, '项目已建')
+  }
+
+  /** 归档项目：打包 + manifest（不删原件） */
+  const onArchive = (p: ProjectItem): void => {
+    void run(async () => {
+      const r = await archiveProject(p.projectId)
+      if (r.ok) {
+        const d = r.data as { files?: number; bytes?: number; archive?: string }
+        setProjNotice(`「${p.name}」已归档：${d.files ?? 0} 个文件 / ${d.bytes ?? 0} 字节（含 manifest）`)
+      }
+      return r
+    })
+  }
+
+  const projectNameOf = (id?: string | null): string => {
+    if (!id) return ''
+    const p = projects.find((x) => x.projectId === id)
+    return p ? p.name : ''
   }
 
   const tasks = data?.tasks ?? []
@@ -2752,6 +2801,39 @@ function TaskSection(): ReactElement {
             rows={2}
             style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
           />
+          {/* ★ 期6-L2：项目归属（空 = 未归类；也可就地新建） */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: FS.tag, color: C.dim }}>项目</span>
+            <select
+              value={projId}
+              onChange={(e) => setProjId(e.target.value)}
+              style={{ ...inputStyle, width: 'auto', flex: 1, minWidth: 140 }}
+            >
+              <option value="">未归类</option>
+              {projects.filter((p) => p.status !== 'archived').map((p) => (
+                <option key={p.projectId} value={p.projectId}>
+                  {p.name}（{p.taskCount ?? 0}）
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={() => setProjNew((v) => !v)} disabled={busy} style={btnStyle(false)}>
+              {projNew ? '取消' : '＋ 新项目'}
+            </button>
+          </div>
+          {projNew ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                value={projName}
+                onChange={(e) => setProjName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onCreateProject() }}
+                placeholder="项目名，如「财税专家工作台」"
+                style={inputStyle}
+              />
+              <button type="button" onClick={onCreateProject} disabled={busy || projName.trim().length === 0} style={btnStyle(true)}>
+                建
+              </button>
+            </div>
+          ) : null}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
             <button type="button" onClick={onPublish} disabled={busy || title.trim().length === 0} style={btnStyle(true)}>
               发布
@@ -2864,11 +2946,47 @@ function TaskSection(): ReactElement {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {tasks.map((t) => (
             <CardBoundary key={t.task_id}>
-              <TaskCard task={t} myId={myId} busy={busy} run={run} />
+              <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} />
             </CardBoundary>
           ))}
         </div>
       )}
+
+      {/* ★ 期6-L2 · 项目（长期实体：归档 = 打包全部资料 + manifest；不删原件） */}
+      {projects.length > 0 ? (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: FS.title, fontWeight: 600 }}>项目</div>
+            <span style={{ fontSize: FS.tag, color: C.dim }}>{projects.length}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: FS.tag, color: C.dim }}>归档 = 打包资料 + 清单，不删原件</span>
+          </div>
+          {projNotice ? (
+            <div style={{ ...cardStyle, marginBottom: 6, fontSize: FS.small }}>{projNotice}</div>
+          ) : null}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {projects.map((p) => (
+              <div key={p.projectId} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: FS.small, fontWeight: 600 }}>{p.name}</span>
+                <span style={{ fontSize: FS.tag, color: C.dim }}>{p.taskCount ?? 0} 个任务</span>
+                {p.status === 'archived' ? (
+                  <span style={{ fontSize: FS.tag, color: C.dim }}>已归档</span>
+                ) : null}
+                <span style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  onClick={() => onArchive(p)}
+                  disabled={busy}
+                  style={btnStyle(true)}
+                  title="打包这个项目的全部任务资料 + manifest（不删原件）"
+                >
+                  归档
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -2941,6 +3059,8 @@ function TaskCard(props: {
   task: TaskUi
   myId: string | null
   busy: boolean
+  /** ★ 期6-L2：所属项目名（空 = 未归类） */
+  projectName?: string
   run: (fn: () => Promise<{ ok: boolean; code?: string; message?: string }>, okMsg?: string) => Promise<void>
 }): ReactElement {
   const { task, myId, busy, run } = props
@@ -3013,6 +3133,25 @@ function TaskCard(props: {
           {open ? '▾ ' : '▸ '}{task.title}
         </span>
         <span style={{ fontSize: FS.small, color: tone }}>{statusText(task.status)}</span>
+        {/* ★ 期6-L2：所属项目（未归类不显示，避免噪音） */}
+        {props.projectName ? (
+          <span
+            title={`属于项目「${props.projectName}」`}
+            style={{
+              fontSize: FS.tag,
+              color: C.dim,
+              border: `1px solid ${C.border}`,
+              borderRadius: 6,
+              padding: '1px 6px',
+              maxWidth: 140,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {props.projectName}
+          </span>
+        ) : null}
         {/* ★ 期6-L1：这次任务的附件数（0 也显示 ⇒ 可从这里直接去上传，天然归属该任务） */}
         <button
           type="button"

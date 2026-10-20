@@ -315,10 +315,53 @@ export async function loadTasks(all: boolean): Promise<OrgResult<TaskListResult>
   return orgError(r)
 }
 
-/** 发布任务 */
-export async function createTask(title: string, detail: string): Promise<OrgResult<TaskItem>> {
+/** 发布任务（`projectId` 可选：归到某个项目；空 ⇒ 未归类） */
+export async function createTask(
+  title: string,
+  detail: string,
+  projectId?: string,
+): Promise<OrgResult<TaskItem>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<TaskItem>(connection, 'tasksCreate', { title, detail })
+  const query: { title: string; detail: string; projectId?: string } = { title, detail }
+  if (typeof projectId === 'string' && projectId.length > 0) query.projectId = projectId
+  const r = await callKaipu<TaskItem>(connection, 'tasksCreate', query)
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/* ── 期6-L2 · 项目层 ── */
+
+/** 项目（服务端字段：camelCase） */
+export interface ProjectItem {
+  projectId: string
+  name: string
+  status: string
+  createdAt: string
+  archivedAt?: string | null
+  /** 该项目下任务数（服务端子查询） */
+  taskCount?: number
+}
+
+/** 读项目清单 */
+export async function loadProjects(): Promise<OrgResult<{ projects: ProjectItem[] }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ projects: ProjectItem[] }>(connection, 'projectsList', {})
+  if (r.ok === true) return { ok: true, data: { projects: Array.isArray(r.data?.projects) ? r.data.projects : [] } }
+  return orgError(r)
+}
+
+/** 新建项目 */
+export async function createProject(name: string): Promise<OrgResult<ProjectItem>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<ProjectItem>(connection, 'projectsCreate', { name })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** 归档项目（打包全部任务资料 + manifest；不删原件） */
+export async function archiveProject(projectId: string): Promise<OrgResult<Record<string, unknown>>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<Record<string, unknown>>(connection, 'projectArchive', { projectId })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }
