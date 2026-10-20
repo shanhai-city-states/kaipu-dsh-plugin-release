@@ -1067,6 +1067,23 @@ export class WorkstationRemoteService extends TypertRemoteService {
   }
 
   /** 生成邀请（铺主 Bearer）—— `lamp` 必填（请这位 Agent 进哪一盏灯） */
+  /**
+   * ★ 2026-10-21（阿开拍板 L3）：铺主给本铺签一次性「设备加入码」。
+   *   用途：另一台设备要用本铺 accountId 时，必须持码 —— 否则知道铺名就能进。
+   */
+  @Remote('deviceJoinCodeCreate')
+  async deviceJoinCodeCreate(
+    query: { note?: string; ttlHours?: number }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string }>> {
+    const body: Record<string, unknown> = {}
+    if (typeof query.note === 'string' && query.note.length > 0) body.note = query.note
+    if (typeof query.ttlHours === 'number' && Number.isFinite(query.ttlHours)) body.ttlHours = query.ttlHours
+    const data = await this.requireHttp().call<{
+      code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string
+    }>('POST', '/device-join-codes', body, signal)
+    return { ok: true, data }
+  }
+
   @Remote('inviteCreate')
   async inviteCreate(query: InviteCreateQuery, signal?: CancelSignal): Promise<RemoteResult<InviteCreated>> {
     const lamp = typeof query.lamp === 'string' ? query.lamp.trim() : ''

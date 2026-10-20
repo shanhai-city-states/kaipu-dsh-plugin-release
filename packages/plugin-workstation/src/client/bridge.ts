@@ -104,6 +104,8 @@ export const ENDPOINTS = {
   rolesSeats: 'rolesSeats',
   /** 生成邀请 · `POST /invites` */
   inviteCreate: 'inviteCreate',
+  /** ★ 2026-10-21：签发一次性「设备加入码」· `POST /device-join-codes` */
+  deviceJoinCodeCreate: 'deviceJoinCodeCreate',
 
   /* ── 工位当前交互（存服务端）── */
   contextGet: 'contextGet',

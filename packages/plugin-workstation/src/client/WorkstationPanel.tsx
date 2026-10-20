@@ -2532,6 +2532,24 @@ function PackSection({ onUpload, focus }: {
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [journal, setJournal] = useState<PackJournalPayload | null>(null)
+  /* ★ 2026-10-21（阿开拍板 L3）：设备加入码 —— 新设备进本铺必须持码 */
+  const [joinCode, setJoinCode] = useState<{ code: string; expiresAt: string } | null>(null)
+  const [joinBusy, setJoinBusy] = useState(false)
+  const [joinCopied, setJoinCopied] = useState(false)
+
+  const makeJoinCode = (): void => {
+    setJoinBusy(true)
+    void (async () => {
+      const r = await callPack<{ code: string; accountId: string; expiresAt: string }>(
+        'deviceJoinCodeCreate', { note: '新设备加入', ttlHours: 24 })
+      setJoinBusy(false)
+      if (!r.ok) {
+        setErr({ code: r.code, message: r.message })
+        return
+      }
+      setJoinCode({ code: r.data.code, expiresAt: r.data.expiresAt })
+    })()
+  }
 
   /* 开局从服务端拉「上次的交互」 */
   useEffect(() => {
@@ -2719,6 +2737,36 @@ function PackSection({ onUpload, focus }: {
             placeholder="备注（可选，如：和阿舟对财税）"
             style={{ flex: '1 1 180px', padding: '5px 7px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
           />
+        </div>
+        {/* ★ 2026-10-21（阿开拍板 L3）：新设备入铺要持码 —— 否则知道铺名就能进 */}
+        <div style={{
+          display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, flexWrap: 'wrap',
+          paddingTop: 8, borderTop: `1px dashed ${C.border}`,
+        }}>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>新设备要进这个铺：</span>
+          <button type="button" onClick={makeJoinCode} disabled={joinBusy} style={btnStyle(false)}>
+            {joinBusy ? '生成中…' : '生成设备加入码'}
+          </button>
+          {joinCode !== null ? (
+            <>
+              <code style={{
+                fontSize: FS.small, padding: '2px 6px', background: C.soft,
+                borderRadius: 4, letterSpacing: 0.5,
+              }}>{joinCode.code}</code>
+              <span style={{ fontSize: FS.tag, color: C.dim }}>24 小时内有效 · 只能用一次</span>
+              <button type="button" style={btnStyle(false)} onClick={() => { void (async () => {
+                try {
+                  await navigator.clipboard.writeText(joinCode.code)
+                  setJoinCopied(true)
+                  setTimeout(() => setJoinCopied(false), 1800)
+                } catch { /* 手动复制 */ }
+              })() }}>{joinCopied ? '✓ 已复制' : '复制'}</button>
+            </>
+          ) : (
+            <span style={{ fontSize: FS.tag, color: C.dim }}>
+              另一台设备（同事的机器 / 客户机）要用本铺时，给它这个码
+            </span>
+          )}
         </div>
       </details>
 
