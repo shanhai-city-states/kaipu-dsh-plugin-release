@@ -3524,7 +3524,12 @@ function TaskCard(props: {
                     : '交付说明：做了什么、结论是什么、还差什么（至少 100 字）'}
                   style={{ width: '100%', flex: 1, minHeight: 260, padding: 10, borderRadius: 8,
                            border: `1px solid ${C.border}`, background: 'transparent', color: C.text,
-                           fontSize: FS.base, lineHeight: 1.6, resize: 'vertical' }}
+                           fontSize: FS.base, lineHeight: 1.6, resize: 'vertical',
+                           /* ★ 2026-10-20 阿开：「蓝色边框歪了」。
+                              ① 缺 boxSizing ⇒ width:100% 再加 padding/border 会右侧溢出 ~22px，蓝框被卡片裁掉；
+                              ② autoFocus 时浏览器默认 outline 画在盒外 ⇒ 更明显。
+                              ⇒ border-box + outlineOffset:-1（描边画在边框内侧）。 */
+                           boxSizing: 'border-box', outlineOffset: -1 }}
                 />
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span style={{ fontSize: FS.tag, color: (hasFiles || askText.trim().length >= 100) ? '#16a34a' : C.faint }}>
