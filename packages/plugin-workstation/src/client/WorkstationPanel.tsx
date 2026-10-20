@@ -875,6 +875,58 @@ function Section({ title, children }: { title: string; children: ReactNode }): R
    ★ 卡片语言对齐 platform：圆角 10 / 细边 / 状态点 / 操作靠右。
    ══════════════════════════════════════════════════════════════════ */
 
+/* ══════════════════════════════════════════════════════════════════
+   ★ 任务概览条（2026-10-21 阿开：「工位下方增加任务数统计」）
+   ══════════════════════════════════════════════════════════════════
+   ★ 为什么只统计**状态**、不统计「每个工位几个 Agent / 几张任务」：
+     按位计数一旦挂在工位卡片上，就会被当成 KPI 读（谁多谁少），
+     而工位是**场地**不是员工。场地只该回答「现在堵在哪」——
+     那正是状态分布能回答的。人不是数字。
+   ══════════════════════════════════════════════════════════════════ */
+function TaskStatsBar(): ReactElement {
+  const [counts, setCounts] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const r = await loadTasks(true)
+      if (!alive || !r.ok) return
+      const m: Record<string, number> = {}
+      for (const t of r.data.tasks) m[t.status] = (m[t.status] ?? 0) + 1
+      setCounts(m)
+    })()
+    return () => { alive = false }
+  }, [])
+
+  if (counts === null) return <></>
+  const g = (keys: string[]): number => keys.reduce((n, k) => n + (counts[k] ?? 0), 0)
+  const items: Array<{ label: string; n: number; color: string }> = [
+    { label: '待领', n: g(['posted', 'open']), color: '#8b95a5' },
+    { label: '在手', n: g(['claimed', 'in_progress', 'blocked']), color: C.accent },
+    { label: '待审批', n: g(['submitted']), color: '#d97706' },
+    { label: '已完成', n: g(['accepted', 'done']), color: '#1a7f37' },
+    { label: '其他', n: g(['rejected', 'timeout', 'cancelled']), color: '#c2410c' },
+  ]
+  const total = items.reduce((n, x) => n + x.n, 0)
+
+  return (
+    <div style={{
+      ...cardStyle, marginTop: 8, padding: '8px 12px',
+      display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+    }}>
+      <span style={{ fontSize: FS.small, color: C.dim }}>任务</span>
+      {items.map((it) => (
+        <span key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: FS.small }}>
+          <span style={{ width: 7, height: 7, borderRadius: 999, background: it.color, display: 'inline-block' }} />
+          <span style={{ color: C.dim }}>{it.label}</span>
+          <span style={{ fontWeight: 600, color: it.n > 0 ? C.text : C.dim }}>{it.n}</span>
+        </span>
+      ))}
+      <span style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.dim }}>共 {total} 条</span>
+    </div>
+  )
+}
+
 function OrgSection(): ReactElement {
   const [tree, setTree] = useState<OrgTreeView | null>(null)
   const [err, setErr] = useState<{ code: string; message: string; source?: 'action' | 'read'; title?: string } | null>(null)
@@ -989,7 +1041,7 @@ function OrgSection(): ReactElement {
               (n, node) => n + (node.holders ?? []).filter((h) => (h.agentId ?? '') !== '').length, 0)
             return joined > 0
               ? `已有 ${joined} 位 Agent 加入工位`
-              : `${nodes.length} 个工位 · 还没有 Agent 入位`
+              : `10 个工位位次 · 已建 ${nodes.length} 个 · 还没有 Agent 入位`
           })()}
         </span>
         <span style={{ flex: 1 }} />
@@ -1194,6 +1246,7 @@ function OrgSection(): ReactElement {
             还有 {gridNodes.length - 10} 个位未显示（先显示前 10 个）
           </div>
         ) : null}
+        <TaskStatsBar />
         </>
       )}
 
