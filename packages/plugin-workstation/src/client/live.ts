@@ -303,6 +303,8 @@ export interface TaskItem {
   interactionId?: string
   fileCount?: number
   projectId?: string | null
+  /** ★ 2026-10-21：发布人显示名（工位编号 + 昵称，如「#3 阿里星月」） */
+  createdByName?: string
 }
 
 export interface TaskListResult {

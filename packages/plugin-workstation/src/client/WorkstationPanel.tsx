@@ -1764,6 +1764,36 @@ const STATUS_TEXT: Record<string, string> = {
   done: '已完成',
 }
 
+/** ★ 2026-10-21 阿开：「任务卡片加一个日期+时间」—— 统一成 `2026-10-21 20:22`（本地时区） */
+function fmtWhen(iso?: string | null): string {
+  if (iso === undefined || iso === null || iso === '') return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace('T', ' ')
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/**
+ * ★ 2026-10-21 评估结论：**不是一个时间打天下**。
+ *   待领看「什么时候发的」，完成看「什么时候做完的」—— 同一个「发布时间」在已完成卡片上
+ *   回答不了用户真正的问题。所以按状态取对应时间戳：
+ *     待领 → 发布（created_at）· 已领/进行中 → 领取（claimed_at）
+ *     待审批/已完成/已驳回 → 交付（done_at）· 其余 → 发布
+ */
+function taskWhen(
+  t: { created_at?: string; claimed_at?: string | null; done_at?: string | null },
+  st: string,
+): { label: string; at: string } | null {
+  if (st === 'posted') return t.created_at ? { label: '发布', at: t.created_at } : null
+  if (st === 'claimed' || st === 'in_progress' || st === 'blocked') {
+    return { label: '领取', at: t.claimed_at ?? t.created_at ?? '' }
+  }
+  if (st === 'submitted' || st === 'accepted' || st === 'rejected') {
+    return { label: '完成', at: t.done_at ?? t.claimed_at ?? t.created_at ?? '' }
+  }
+  return t.created_at ? { label: '发布', at: t.created_at } : null
+}
+
 function statusText(status: string): string {
   return STATUS_TEXT[status] ?? status
 }
@@ -3407,6 +3437,22 @@ function TaskCard(props: {
           {copied ? '✓ 已复制' : st === 'posted' ? '领取并复制' : '复制'}
         </button>
       </div>
+      {/* ★ 2026-10-21 阿开：「待领和已完成加日期+时间」—— 按状态取对应时间戳（见 taskWhen） */}
+      {(() => {
+        const when = taskWhen(task, st)
+        if (when === null) return null
+        const shown = fmtWhen(when.at)
+        if (shown === '') return null
+        return (
+          /* ★ 2026-10-21 阿开：「发布人和发布日期上下 2 行小字就可以了」
+             ⇒ 拆两行、紧凑行高（不额外撑高卡片）。 */
+          <div style={{ fontSize: FS.tag, color: C.faint, marginTop: 3, paddingLeft: 14, lineHeight: 1.45 }}>
+            {task.createdByName !== undefined && task.createdByName !== ''
+              ? <div>发布人：{task.createdByName}</div> : null}
+            <div>{when.label}：{shown}</div>
+          </div>
+        )
+      })()}
       {open && task.detail ? (
         <div style={{
           fontSize: FS.small, color: C.dim, marginTop: 4, whiteSpace: 'pre-wrap',
