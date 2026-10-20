@@ -1142,8 +1142,8 @@ function OrgSection(): ReactElement {
               onRename={onRename}
               onDelete={onDelete}
               onInvite={() => setInviting(inviting === n.node_id ? null : n.node_id)}
-              onEvict={(seat) => { void (async () => {
-                const r = await evictSeat(seat)
+              onEvict={(seat, agentId) => { void (async () => {
+                const r = await evictSeat(seat, agentId)
                 if (!r.ok) {
                   /* 失败就别 refresh —— 一刷新就可能把这条错误盖掉 */
                   const title = r.code === 'seat_vacant' ? '这个位本来就空着'
@@ -1216,7 +1216,15 @@ const INVITE_LAMPS: ReadonlyArray<{ value: string; label: string }> = [
 
 function InviteBar(props: { node: OrgNodeView; made: { url: string; expiresAt: string } | null; onMade: (v: { url: string; expiresAt: string }) => void }): ReactElement {
   const { node, made, onMade } = props
-  const [lamp, setLamp] = useState<string>('execution')
+  /* ★★ 2026-10-20 阿开：「我邀请 Codex 进审计位，审计位不显示，还是邀请按钮」
+     根因：这里默认 `execution` —— 在「审计位」卡片上点邀请，实际发的却是执行位。
+     邀请码里的 lamp 才是「这个码会让你坐哪」，所以默认值必须**跟着卡片走**。 */
+  const [lamp, setLamp] = useState<string>(() => {
+    // ① 节点直连的 seat key 最准（改过名也不影响） ② 退回名字匹配 ③ 最后 execution
+    if (node.seatKey && INVITE_LAMPS.some((x) => x.value === node.seatKey)) return node.seatKey
+    const hit = INVITE_LAMPS.find((x) => x.label === node.name || node.name.startsWith(x.label))
+    return hit ? hit.value : 'execution'
+  })
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -1357,7 +1365,7 @@ interface OrgNodeCardProps {
   onInvite: () => void
   inviteOpen: boolean
   /** ★ 请出：这个位上的人离场（只清这一个位） */
-  onEvict: (seat: string) => void
+  onEvict: (seat: string, agentId: string) => void
 }
 
 /** 一个「位」= 3 列网格里的一张卡（不缩进、不展开子级 —— 座位表口径） */
@@ -1507,6 +1515,16 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
         >
           {node.name}
         </span>
+        {!isRenaming && node.renameable === false ? (
+          /* ★ 2026-10-20 阿开：「签名位不能换人吗？如果必须，把改名按钮去掉」
+             ⇒ 不给「必然失败/不该做」的按钮，直接把原因写出来。 */
+          <span
+            title="这个位由平台席位占用（不可替换），名字不能改"
+            style={{ flex: '0 0 auto', fontSize: FS.tag, color: C.faint, whiteSpace: 'nowrap' }}
+          >
+            平台位 · 不可改名
+          </span>
+        ) : null}
         {isRenaming ? (
           <input
             autoFocus
@@ -1528,7 +1546,7 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
               outline: 'none',
             }}
           />
-        ) : (
+        ) : node.renameable === false ? null : (
           <button
             type="button"
             onClick={() => props.onStartRename(node)}
@@ -1584,7 +1602,7 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
                 <>
                   <button
                     type="button"
-                    onClick={() => { setEvictArm(false); props.onEvict(holders[0]?.seat ?? '') }}
+                    onClick={() => { setEvictArm(false); props.onEvict(holders[0]?.seat ?? '', holders[0]?.agentId ?? '') }}
                     disabled={busy}
                     style={{ ...btnStyle(false), background: '#c0392b', color: '#fff', border: 'none' }}
                     title="确认后他的密钥立刻作废"
@@ -3273,15 +3291,24 @@ function TaskCard(props: {
     }))
   }
 
-  const copyTask = (): void => {
-    const text = task.detail ? `${task.title}\n\n${task.detail}` : task.title
+  /* ★★ 2026-10-20 阿开：「领取和复制重了 —— 领取就是复制」
+     ⇒ 合并成一个按钮：未领取时叫「领取并复制」（高亮），领取后叫「复制」。
+     理由：人点这一下本来就是要「把任务交给 Agent」，复制是目的、领取是副作用；
+           拆成两个按钮，等于让人做两步才完成一件事。
+     ★ 复制内容里带上 taskId + 交付命令 —— Agent 拿到就能直接 claim/交付。 */
+  const copyTask = async (): Promise<void> => {
+    const text = [
+      task.detail ? `${task.title}\n\n${task.detail}` : task.title,
+      '',
+      `—— 工位任务 ID：${task.task_id}`,
+      `干完直接交：kai-pu-deliver.py --task ${task.task_id} --claim --attach <产物路径> --text "<结论>"`,
+    ].join('\n')
     const nav = typeof navigator !== 'undefined' ? navigator : undefined
-    if (nav?.clipboard?.writeText) {
-      void nav.clipboard.writeText(text).then(() => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      }).catch(() => undefined)
-    }
+    try {
+      if (nav?.clipboard?.writeText) await nav.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* 剪贴板不可用时静默 —— 按钮本身仍完成了领取 */ }
   }
 
   const submitAsk = (): void => {
@@ -3354,10 +3381,14 @@ function TaskCard(props: {
         </button>
         <button
           type="button"
-          onClick={copyTask}
-          title="复制这条任务的标题和内容"
+          onClick={() => { void (async () => {
+            // 未领取 ⇒ 先领取（原子占位），再复制；已领取/在干 ⇒ 只复制
+            if (st === 'posted') await run(async () => claimTask(task.task_id), '已领取')
+            await copyTask()
+          })() }}
+          title={st === 'posted' ? '领取这条任务，并把任务内容复制给 Agent' : '复制这条任务的标题和内容'}
           style={{
-            ...btnStyle(copied),
+            ...btnStyle(st === 'posted' || copied),
             padding: '2px 8px',
             fontSize: FS.tag,
             minWidth: 62,
@@ -3365,7 +3396,7 @@ function TaskCard(props: {
             transition: 'background 160ms',
           }}
         >
-          {copied ? '✓ 已复制' : '复制'}
+          {copied ? '✓ 已复制' : st === 'posted' ? '领取并复制' : '复制'}
         </button>
       </div>
       {open && task.detail ? (
@@ -3399,16 +3430,8 @@ function TaskCard(props: {
         )
       ) : null}
       <div style={{ display: ask !== null ? 'none' : 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        {st === 'posted' ? (
-          <button
-            type="button"
-            onClick={() => void run(async () => claimTask(task.task_id), '已领取')}
-            disabled={busy}
-            style={btnStyle(true)}
-          >
-            领取
-          </button>
-        ) : null}
+        {/* ★★ 2026-10-20 阿开：「领取和复制重了」⇒ 「领取」已合并进上方的「领取并复制」，
+            这里不再渲染第二个领取入口。 */}
         {/* ★ 2026-10-19 阿开：「开始按钮是干嘛用的，不点有必要留着吗」
             ⇒ 没有。服务端 `task_transition` 交付允许 claimed 与 in_progress 两种来源
               （claimed 直接交是合法的），所以「开始」只是一道仪式。

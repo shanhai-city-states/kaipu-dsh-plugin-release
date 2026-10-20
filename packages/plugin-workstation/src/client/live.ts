@@ -142,6 +142,10 @@ export interface OrgNodeView {
   holders?: Array<{ agentId: string; name: string; seat: string; seatLabel?: string; online?: boolean; lastSeen?: string | null }>
   /** 非空 = 不能删，值就是原因（如「被 4 个席位占用」） */
   undeletable?: string | null
+  /** ★ false = 不能改名（位被不可替换的席位占用，如平台签名位） */
+  renameable?: boolean
+  /** ★ 这个节点对应的 seat key（execution / audit / management / signature / strategy） */
+  seatKey?: string
 }
 
 /** 组织树快照 */
@@ -187,10 +191,10 @@ export async function createOrgNode(
 }
 
 /** ★ 请出一个位上的 Agent（只清这一个） */
-export async function evictSeat(seat: string): Promise<OrgResult<{ seat: string; evicted: { agentId: string; name: string } }>> {
+export async function evictSeat(seat: string, agentId?: string): Promise<OrgResult<{ seat: string; evicted: { agentId: string; name: string } }>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const r = await callKaipu<{ seat: string; evicted: { agentId: string; name: string } }>(
-    connection, 'seatEvict', { seat })
+    connection, 'seatEvict', agentId !== undefined && agentId !== '' ? { seat, agentId } : { seat })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }

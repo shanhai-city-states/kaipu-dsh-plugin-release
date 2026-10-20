@@ -1034,11 +1034,12 @@ export class WorkstationRemoteService extends TypertRemoteService {
     }
   }
 
-  /** ★ 请出一个位上的 Agent（只清这一个，不动别的位） */
+  /** ★ 请出一个位上的 Agent（只清这一个，不动别的位；多人同坐时必须点名） */
   @Remote('seatEvict')
-  async seatEvict(query: { seat: string }, signal?: CancelSignal): Promise<RemoteResult<{ seat: string; evicted: { agentId: string; name: string } }>> {
+  async seatEvict(query: { seat: string; agentId?: string }, signal?: CancelSignal): Promise<RemoteResult<{ seat: string; evicted: { agentId: string; name: string } }>> {
     const data = await this.requireHttp().call<{ seat?: string; evicted?: { agentId?: string; name?: string } }>(
-      'POST', `/seats/${encodeURIComponent(query.seat)}/evict`, {}, signal)
+      'POST', `/seats/${encodeURIComponent(query.seat)}/evict`,
+      query.agentId !== undefined && query.agentId !== '' ? { agentId: query.agentId } : {}, signal)
     return {
       ok: true,
       data: {
