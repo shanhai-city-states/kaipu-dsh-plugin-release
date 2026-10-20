@@ -143,7 +143,25 @@ const LAMP_COLOR: Record<BallLamp, string> = {
 
 export function WorkstationPanel(): ReactElement {
   const [snap, setSnap] = useState<Loaded>(null)
-  const [tab, setTab] = useState<'work' | 'notif' | 'help'>('work')
+  /* ★ 2026-10-20 阿开：「资料（按位）点了附件按钮之后是否单独出现一个 tab 页面与资料并列，
+     这样更干净」——把「看资料」与「传资料」拆成两个平级 tab；生成交付 ID 那行撤下（人不需要懂）。 */
+  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help'>('work')
+  /* ★ 2026-10-20：任务卡「📎 资料」→ 切到「资料（按位）」tab 并定位那次协作。
+     ★ 为什么监听要提到顶层：PackSection 现在只在 pack tab 挂载，
+       若监听留在它内部，在「任务」tab 点 📎 时没人接事件 ⇒ 点了没反应。 */
+  const [packFocus, setPackFocus] = useState<{ interactionId: string; title?: string | undefined } | null>(null)
+  useEffect(() => {
+    const onOpen = (ev: Event): void => {
+      const d = (ev as CustomEvent<{ interactionId?: string; title?: string }>).detail
+      const next = (d?.interactionId || '').trim()
+      if (!next) return
+      setPackFocus({ interactionId: next, title: d?.title })
+      setTab('pack')
+    }
+    window.addEventListener('kaipu:open-pack', onOpen as EventListener)
+    return () => window.removeEventListener('kaipu:open-pack', onOpen as EventListener)
+  }, [])
+
   /* ★ 通知（2026-10-19 阿开）：顶部 Tab 角标，30 秒轮询 */
   const [notif, setNotif] = useState<{ unread: number; items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }> }>({ unread: 0, items: [] })
   useEffect(() => {
@@ -220,7 +238,7 @@ export function WorkstationPanel(): ReactElement {
     >
       {/* ── Tab 头 ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, borderBottom: `1px solid ${C.border}`, paddingBottom: 8 }}>
-        {([['work', '工位'], ['notif', '通知'], ['help', '使用说明']] as const).map(([k, label]) => (
+        {([['work', '工位'], ['tasks', '任务'], ['pack', '资料（按位）'], ['upload', '上传附件'], ['notif', '通知'], ['help', '使用说明']] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -281,6 +299,12 @@ export function WorkstationPanel(): ReactElement {
         </Section>
       ) : tab === 'help' ? (
         <HelpTab />
+      ) : tab === 'tasks' ? (
+        <TaskSection />
+      ) : tab === 'pack' ? (
+        <PackSection onUpload={() => setTab('upload')} focus={packFocus} />
+      ) : tab === 'upload' ? (
+        <UploadTab onDone={() => setTab('pack')} />
       ) : (
         <>
           {/* ★ 2026-10-19 阿开：「本地持久化态/来源 scaffold/座位 5 位…是什么意思，有必要留着吗」
@@ -288,8 +312,6 @@ export function WorkstationPanel(): ReactElement {
                   现在真工位、真任务、真资料三条链都通了，留着只会让人以为是系统状态 ⇒ 整块撤下。
                   面板只留能真改的三块：工位 / 任务 / 资料。 */}
           <OrgSection />
-          <TaskSection />
-          <PackSection />
         </>
       )}
     </div>
@@ -2217,7 +2239,132 @@ function PackLifecycle({ iid }: { iid: string }): ReactElement | null {
   )
 }
 
-function PackSection(): ReactElement {
+/* ══════════════════════════════════════════════════════════════════
+   ★ 上传附件 —— 独立 tab（2026-10-20 阿开）
+   「资料（按位）点了附件按钮之后是否单独出现一个 tab 页面与资料并列，这样更干净」
+   —— 看资料 / 传资料分开：这一页只做上传，不摆列表、不摆技术字段。
+
+   ★ 定位（阿开同日）：「优先是 Agent 自己上传，人类是兜底」
+     所以文案先告诉人「可以让 Agent 传」，人这一页是补位用的。
+   ══════════════════════════════════════════════════════════════════ */
+function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
+  const [ctx, setCtx] = useState<WorkstationContext | null>(null)
+  const [iid, setIid] = useState('')
+  const [seat, setSeat] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [err, setErr] = useState<{ code: string; message: string } | null>(null)
+  const input = useRef<HTMLInputElement | null>(null)
+
+  /** 合规的「一次协作」ID：服务端只认 task-<uuid> / run_<uuid> / manual-<8..14>-<6..12> */
+  const makeManualIid = (): string => {
+    const d = new Date()
+    const p = (n: number): string => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    const rnd = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0')
+    return `manual-${stamp}-${rnd}`
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const r = await callPack<WorkstationContext>('contextGet', {})
+      const base: WorkstationContext = r.ok
+        ? r.data
+        : { interactionId: '', seat: '', note: '', project: '' }
+      setCtx(base)
+      // 没有现成交互 ⇒ 给一个，省得人想「交互 ID 是什么」
+      const next = (base.interactionId || '').trim() || makeManualIid()
+      setIid(next)
+      setSeat(base.seat || '')
+      if (!(base.interactionId || '').trim()) {
+        void callPack<WorkstationContext>('contextPut', { ...base, interactionId: next })
+      }
+    })()
+  }, [])
+
+  const upload = async (fl: FileList | null): Promise<void> => {
+    const list = Array.from(fl ?? [])
+    if (list.length === 0) return
+    const cur = iid.trim()
+    if (!cur) {
+      setErr({ code: 'missing_interaction_id', message: '还没准备好交互 ID，请稍等或点「重试」' })
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    setNotice(null)
+    const ok: string[] = []
+    const bad: string[] = []
+    for (const f of list) {
+      if (f.size > PACK_MAX_BYTES) {
+        bad.push(`${f.name}（${fmtBytes(f.size)} 超过界面单件上限 ${fmtBytes(PACK_MAX_BYTES)}，大件请让 Agent 用 CLI 传）`)
+        continue
+      }
+      try {
+        const b64 = await readFileAsBase64(f)
+        const r = await callPack<PackFileItem>('packUpload', {
+          interactionId: cur, seat: seat.trim(), filename: f.name, contentBase64: b64,
+        })
+        if (r.ok) ok.push(`${f.name}（${fmtBytes(f.size)}）`)
+        else bad.push(`${f.name}：${r.message}`)
+      } catch (e) {
+        bad.push(`${f.name}：${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    // 记住这次的归属（换机器也还在）
+    if (ctx !== null) void callPack<WorkstationContext>('contextPut', { ...ctx, interactionId: cur, seat: seat.trim() })
+    setBusy(false)
+    if (ok.length > 0) setNotice(`已上传 ${ok.length} 个：${ok.join('、')}`)
+    if (bad.length > 0) setErr({ code: 'partial_failed', message: bad.join('；') })
+  }
+
+  return (
+    <Section title="上传附件">
+      <div style={{
+        padding: '10px 12px', borderRadius: 8, background: 'rgba(59,111,224,.06)',
+        border: '1px solid rgba(59,111,224,.25)', fontSize: FS.small, lineHeight: 1.7, marginBottom: 10,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>首选：让你的 Agent 传</div>
+        <div style={{ opacity: 0.85 }}>
+          它是干活的，产物在它手上。对它说「把这次的成果传到工位」，或者直接给它这条命令：
+        </div>
+        <code style={{
+          display: 'block', marginTop: 6, padding: '6px 8px', borderRadius: 4,
+          background: 'rgba(0,0,0,.05)', fontSize: FS.tag, wordBreak: 'break-all',
+        }}>
+          kai-pu-deliver.py --task &lt;任务ID&gt; --claim --attach &lt;文件&gt; --text "&lt;结论&gt;"
+        </code>
+        <div style={{ opacity: 0.7, marginTop: 4 }}>下面这一页是<strong>人的兜底</strong>：Agent 传不了、或者你想补一份时用。</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: FS.small, color: C.dim }}>传到</span>
+        <code style={{ fontSize: FS.tag, padding: '3px 6px', background: 'rgba(0,0,0,.04)', borderRadius: 4, wordBreak: 'break-all' }}>
+          {iid || '准备中…'}
+        </code>
+        <span style={{ fontSize: FS.tag, color: C.dim }}>（一次协作一个目录 · Agent 与人在同一次协作里各占一个座位）</span>
+      </div>
+
+      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" onClick={() => input.current?.click()} disabled={busy} style={btnStyle(true)}>
+          {busy ? '上传中…' : '选择文件上传'}
+        </button>
+        <input ref={input} type="file" multiple onChange={(e) => { const fl = e.target.files; e.target.value = ''; void upload(fl) }} style={{ display: 'none' }} />
+        <button type="button" onClick={() => onDone()} disabled={busy} style={btnStyle(false)}>
+          去「资料（按位）」看看
+        </button>
+      </div>
+
+      {notice !== null && <div style={{ marginTop: 8, fontSize: FS.small, color: '#1f7a3d' }}>{notice}</div>}
+      {err !== null && <div style={{ marginTop: 8, fontSize: FS.small, color: '#b3261e' }}>[{err.code}] {err.message}</div>}
+    </Section>
+  )
+}
+
+function PackSection({ onUpload, focus }: {
+  onUpload: () => void
+  focus: { interactionId: string; title?: string | undefined } | null
+}): ReactElement {
   /* ★ 2026-10-19 阿开：「记住的交互 ID 和座位放服务端更方便」——
      从 localStorage 挪到 `GET/POST /workstation/context`：换机器、重装插件都还在。 */
   const [iid, setIid] = useState<string>('')
@@ -2230,7 +2377,6 @@ function PackSection(): ReactElement {
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [journal, setJournal] = useState<PackJournalPayload | null>(null)
-  const fileInput = useRef<HTMLInputElement | null>(null)
 
   /* 开局从服务端拉「上次的交互」 */
   useEffect(() => {
@@ -2292,62 +2438,16 @@ function PackSection(): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /* ★ 期6-L1（2026-10-20）：任务卡片「📎 资料」→ 自动带该任务的交互 ID 打开本区
-     —— 解决「上传成功了，但界面上不知道去哪看、也不知道是哪次任务的附件」。
-     约定：任务卡把 `interactionId` 放进 CustomEvent.detail，本区收到即切换+刷新+滚到位。 */
+  /* ★ 期6-L1：任务卡片「📎 资料」→ 定位那次协作
+     ★ 2026-10-20 改：事件监听上移到 WorkstationPanel（切 tab 的职责在它），本区只吃 focus。 */
   useEffect(() => {
-    const onOpen = (ev: Event): void => {
-      const detail = (ev as CustomEvent<{ interactionId?: string; title?: string }>).detail
-      const next = (detail?.interactionId || '').trim()
-      if (!next) return
-      setIid(next)
-      setNotice(detail?.title ? `正在看「${detail.title}」的附件` : null)
-      setErr(null)
-      void refresh({ interactionId: next })
-      const el = typeof document !== 'undefined'
-        ? document.getElementById('kaipu-pack-section') : null
-      if (el && typeof el.scrollIntoView === 'function') {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-    window.addEventListener('kaipu:open-pack', onOpen as EventListener)
-    return () => window.removeEventListener('kaipu:open-pack', onOpen as EventListener)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [iid, seat])
-
-  const onPick = async (ev: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const f = ev.target.files?.[0]
-    ev.target.value = '' // 允许再次选同一个文件
-    if (!f) return
-    if (ref.interactionId.length === 0) {
-      setErr({ code: 'missing_interaction_id', message: '先填交互 ID —— 传到哪个交互里？' })
-      return
-    }
-    if (f.size > PACK_MAX_BYTES) {
-      setErr({
-        code: 'too_large_for_ui',
-        message: `文件 ${fmtBytes(f.size)} 超过界面单件上限 ${fmtBytes(PACK_MAX_BYTES)}。大件请用 CLI 上传（界面不静默截断）。`,
-      })
-      return
-    }
-    setBusy(true)
+    if (focus === null) return
+    setIid(focus.interactionId)
+    setNotice(focus.title ? `正在看「${focus.title}」的附件` : null)
     setErr(null)
-    setNotice(null)
-    try {
-      const b64 = await readFileAsBase64(f)
-      const r = await callPack<PackFileItem>('packUpload', { ...ref, filename: f.name, contentBase64: b64 })
-      if (r.ok) {
-        setNotice(`已上传：${f.name}（${fmtBytes(f.size)}）`)
-        await refresh()
-      } else {
-        setErr({ code: r.code, message: r.message })
-      }
-    } catch (e) {
-      setErr({ code: 'read_failed', message: e instanceof Error ? e.message : String(e) })
-    } finally {
-      setBusy(false)
-    }
-  }
+    void refresh({ interactionId: focus.interactionId })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus])
 
   const onDownload = async (name: string): Promise<void> => {
     setBusy(true)
@@ -2398,65 +2498,74 @@ function PackSection(): ReactElement {
       {/* ★ 期6-L1：任务卡片「📎」跳转的落点锚 */}
       <div id="kaipu-pack-section" />
       <PackLifecycle iid={iid} />
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          value={iid}
-          onChange={(e) => setIid(e.target.value)}
-          onBlur={() => void persist({})}
-          placeholder="交互 ID（可手填，或点「生成」）"
-          title="一次协作一个 ID，资料就存在这个目录下。改 ID = 换目录，旧资料不会跟过来。"
-          style={{ flex: '1 1 220px', padding: '5px 7px', fontSize: FS.base, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            const v = makeIid()
-            setIid(v)
-            void persist({ interactionId: v })
-          }}
-          style={btnStyle(true)}
-          title="生成一个新的交互 ID（不用自己编）"
-        >
-          生成
-        </button>
-        <input
-          value={seat}
-          onChange={(e) => setSeat(e.target.value)}
-          onBlur={() => void persist({})}
-          placeholder="座位（可空）"
-          style={{ width: 100, padding: '5px 7px', fontSize: FS.base, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
-        />
-        <input
-          value={project}
-          onChange={(e) => setProject(e.target.value)}
-          onBlur={() => void persist({})}
-          placeholder="当前项目（如：011 财税）"
-          title="一个铺子同一时间跑一个项目。项目换了改这里就行。"
-          style={{ flex: '1 1 150px', padding: '5px 7px', fontSize: FS.base, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
-        />
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onBlur={() => void persist({})}
-          placeholder="备注（可选，如：和阿舟对财税）"
-          style={{ flex: '1 1 180px', padding: '5px 7px', fontSize: FS.base, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
-        />
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: FS.small, color: C.dim }}>当前交互</span>
+        <code style={{ fontSize: FS.tag, padding: '3px 6px', background: 'rgba(0,0,0,.04)', borderRadius: 4, wordBreak: 'break-all' }}>
+          {ref.interactionId || '（还没选 —— 去「上传附件」传一次就有了）'}
+        </code>
         <button type="button" onClick={() => void refresh()} disabled={busy} style={btnStyle(false)}>
           刷新
         </button>
         <button type="button" onClick={() => void onJournal()} disabled={busy || ref.interactionId.length === 0} style={btnStyle(false)}>
           流水
         </button>
-        <button
-          type="button"
-          onClick={() => fileInput.current?.click()}
-          disabled={busy || ref.interactionId.length === 0}
-          style={btnStyle(true)}
-        >
-          {busy ? '处理中…' : '上传文件'}
+        <span style={{ flex: 1 }} />
+        <button type="button" onClick={onUpload} disabled={busy} style={btnStyle(true)} title="传文件不在这一页做 —— 单独一页，免得和查看混在一起">
+          ＋ 传文件
         </button>
-        <input ref={fileInput} type="file" onChange={(e) => void onPick(e)} style={{ display: 'none' }} />
       </div>
+
+      {/* ★ 2026-10-20 阿开：「生成交付 ID 还可以生成不知道是干嘛用的，那一行都多余」
+          ⇒ 主界面不再摆技术字段，收进「高级」；日常看资料/传资料都用不到它们。 */}
+      <details style={{ marginTop: 6 }}>
+        <summary style={{ fontSize: FS.tag, color: C.dim, cursor: 'pointer' }}>
+          高级（换一个交互 / 座位 / 项目 / 备注）
+        </summary>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+          <input
+            value={iid}
+            onChange={(e) => setIid(e.target.value)}
+            onBlur={() => void persist({})}
+            placeholder="交互 ID（看哪一次协作的资料）"
+            title="一次协作一个目录。改这里 = 换目录查看，旧资料不会跟过来。"
+            style={{ flex: '1 1 220px', padding: '5px 7px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const v = makeIid()
+              setIid(v)
+              void persist({ interactionId: v })
+            }}
+            style={btnStyle(false)}
+            title="新建一次协作（生成一个新的目录）"
+          >
+            新建协作
+          </button>
+          <input
+            value={seat}
+            onChange={(e) => setSeat(e.target.value)}
+            onBlur={() => void persist({})}
+            placeholder="座位（可空）"
+            style={{ width: 100, padding: '5px 7px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          />
+          <input
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            onBlur={() => void persist({})}
+            placeholder="当前项目（如：011 财税）"
+            title="一个铺子同一时间跑一个项目。项目换了改这里就行。"
+            style={{ flex: '1 1 150px', padding: '5px 7px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={() => void persist({})}
+            placeholder="备注（可选，如：和阿舟对财税）"
+            style={{ flex: '1 1 180px', padding: '5px 7px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          />
+        </div>
+      </details>
 
       {notice !== null && (
         <div style={{ marginTop: 6, fontSize: FS.small, color: '#1f7a3d' }}>{notice}</div>
@@ -2789,7 +2898,7 @@ function TaskSection(): ReactElement {
             fontSize: FS.tag, color: C.dim, lineHeight: 1.5,
             padding: '6px 8px', borderRadius: 6, border: `1px dashed ${C.border}`,
           }}>
-            💡 也可以让你的 Agent 发：对阿里星月这类管理位说一句「发个帖子：&lt;标题&gt;」，它会代你发布（任务卡标注来源 · 管理位每分钟可发 10 条）。
+            💡 也可以让你的 Agent 发：对管理位的 Agent 说一句「发个帖子：&lt;标题&gt;」，它会代你发布（任务卡标注来源 · 管理位每分钟可发 10 条）。
           </div>
           <input
             autoFocus
@@ -3313,44 +3422,60 @@ function TaskCard(props: {
       {ask !== null ? (
         <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: ask === 'done' ? 'stretch' : 'center', flexDirection: ask === 'done' ? 'column' : 'row' }}>
           {ask === 'done' ? (
-            <>
-              <textarea
-                autoFocus
-                value={askText}
-                onChange={(e) => setAskText(e.target.value)}
-                rows={4}
-                placeholder={hasFiles
-                  ? '可选：补充说明（这个任务已有附件，说明可以留空，也可写结论/遗留）'
-                  : '交付说明：做了什么、结论是什么、还差什么（至少 100 字）'}
-                style={{ width: '100%', padding: 8, borderRadius: 6, border: `1px solid ${C.border}`,
-                         background: 'transparent', color: C.text, fontSize: FS.small, resize: 'vertical' }}
-              />
-              {(() => {
-                const fromResult = String(task.result ?? '').trim()
-                const fromDetail = String(task.detail ?? '').trim()
-                const prefill = fromResult || fromDetail
-                if (!prefill || askText.trim() !== prefill) return null
-                return (
-                  <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.5 }}>
-                    {fromResult
-                      ? '↑ 已带入 Agent 提交的交付说明 —— 你在这里做的是审核确认（可直接提交，也可改后提交）'
-                      : '↑ 已带入任务说明（Agent 若另有交付结果，请替换成结果）—— 确认后提交'}
-                  </div>
-                )
-              })()}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: FS.tag, color: (hasFiles || askText.trim().length >= 100) ? '#16a34a' : C.faint }}>
-                  {hasFiles ? `有附件 ${task.fileCount} 个 · 说明可留空` : `${askText.trim().length} / 100`}
-                </span>
-                <button type="button" onClick={submitAsk}
-                  disabled={busy || (!hasFiles && askText.trim().length < 100)} style={btnStyle(true)}>
-                  提交
-                </button>
-                <button type="button" onClick={() => { setAsk(null); setAskText('') }} disabled={busy} style={btnStyle(false)}>
-                  取消
-                </button>
+            /* ★ 2026-10-20 阿开：「窗口太小，能不能做成弹窗页面大一些方便浏览」
+               ⇒ 全屏遮罩 + 居中大卡片（宽 760、正文区 260+ 高），点遮罩/取消关闭。 */
+            <div
+              onClick={(e) => { if (e.target === e.currentTarget) { setAsk(null); setAskText('') } }}
+              style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.45)',
+                       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+            >
+              <div style={{ width: 'min(760px, 100%)', maxHeight: '86vh', display: 'flex', flexDirection: 'column',
+                            gap: 10, padding: 18, borderRadius: 12, border: `1px solid ${C.border}`,
+                            background: 'var(--dsh-bg, #fff)', boxShadow: '0 16px 48px rgba(0,0,0,.35)' }}>
+                <div style={{ fontSize: FS.heading, fontWeight: 600, lineHeight: 1.4 }}>交付 · {task.title}</div>
+                <div style={{ fontSize: FS.tag, color: C.dim }}>
+                  {hasFiles ? `这个任务已有 ${task.fileCount} 个附件 · 说明可以留空` : '这个任务没有附件 · 需要至少 100 字说明'}
+                </div>
+                {(() => {
+                  const fromResult = String(task.result ?? '').trim()
+                  const fromDetail = String(task.detail ?? '').trim()
+                  const prefill = fromResult || fromDetail
+                  if (!prefill || askText.trim() !== prefill) return null
+                  return (
+                    <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.5 }}>
+                      {fromResult
+                        ? '已带入 Agent 提交的交付说明 —— 你在这里做的是审核确认（可直接提交，也可改后提交）'
+                        : '已带入任务说明（Agent 若另有交付结果，请替换成结果）—— 确认后提交'}
+                    </div>
+                  )
+                })()}
+                <textarea
+                  autoFocus
+                  value={askText}
+                  onChange={(e) => setAskText(e.target.value)}
+                  rows={14}
+                  placeholder={hasFiles
+                    ? '可选：补充说明（这个任务已有附件，说明可以留空，也可写结论/遗留）'
+                    : '交付说明：做了什么、结论是什么、还差什么（至少 100 字）'}
+                  style={{ width: '100%', flex: 1, minHeight: 260, padding: 10, borderRadius: 8,
+                           border: `1px solid ${C.border}`, background: 'transparent', color: C.text,
+                           fontSize: FS.base, lineHeight: 1.6, resize: 'vertical' }}
+                />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: FS.tag, color: (hasFiles || askText.trim().length >= 100) ? '#16a34a' : C.faint }}>
+                    {hasFiles ? `有附件 ${task.fileCount} 个 · 说明可留空` : `${askText.trim().length} / 100`}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <button type="button" onClick={submitAsk}
+                    disabled={busy || (!hasFiles && askText.trim().length < 100)} style={btnStyle(true)}>
+                    确认交付
+                  </button>
+                  <button type="button" onClick={() => { setAsk(null); setAskText('') }} disabled={busy} style={btnStyle(false)}>
+                    取消
+                  </button>
+                </div>
               </div>
-            </>
+            </div>
           ) : (
             <>
           <input
@@ -3377,6 +3502,7 @@ function TaskCard(props: {
           </button>
             </>
           )}
+          {ask === 'done' ? null : (
           <button
             type="button"
             onClick={() => {
@@ -3388,6 +3514,7 @@ function TaskCard(props: {
           >
             取消
           </button>
+          )}
         </div>
       ) : null}
     </div>
