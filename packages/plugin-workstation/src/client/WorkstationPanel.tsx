@@ -2254,7 +2254,31 @@ function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [err, setErr] = useState<{ code: string; message: string } | null>(null)
+  const [copied, setCopied] = useState(false)
   const input = useRef<HTMLInputElement | null>(null)
+
+  /* ★ 2026-10-20 阿开：给这条指令加「一键复制」——省得人手动选中一长串 */
+  const copyCmd = async (text: string): Promise<void> => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        // Electron/非安全上下文回退（navigator.clipboard 可能没有）
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setErr({ code: 'copy_failed', message: '复制没成功，请手动选中命令复制' })
+    }
+  }
 
   /** 合规的「一次协作」ID：服务端只认 task-<uuid> / run_<uuid> / manual-<8..14>-<6..12> */
   const makeManualIid = (): string => {
@@ -2318,6 +2342,12 @@ function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
     if (bad.length > 0) setErr({ code: 'partial_failed', message: bad.join('；') })
   }
 
+  /* 这条命令能填实就填实：当前协作若就是某个工位任务，直接把 taskId 写进去 */
+  const taskUuid = (/^task-([0-9a-fA-F-]{36})$/.exec(iid.trim()) || [])[1] || ''
+  const cmdText = taskUuid
+    ? `kai-pu-deliver.py --task ${taskUuid} --claim --attach <产物路径> --text "<结论>"`
+    : 'kai-pu-deliver.py --task <任务ID> --claim --attach <产物路径> --text "<结论>"'
+
   return (
     <Section title="上传附件">
       <div style={{
@@ -2328,12 +2358,28 @@ function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
         <div style={{ opacity: 0.85 }}>
           它是干活的，产物在它手上。对它说「把这次的成果传到工位」，或者直接给它这条命令：
         </div>
-        <code style={{
-          display: 'block', marginTop: 6, padding: '6px 8px', borderRadius: 4,
-          background: 'rgba(0,0,0,.05)', fontSize: FS.tag, wordBreak: 'break-all',
-        }}>
-          kai-pu-deliver.py --task &lt;任务ID&gt; --claim --attach &lt;文件&gt; --text "&lt;结论&gt;"
-        </code>
+        <div style={{ position: 'relative', marginTop: 6 }}>
+          <code style={{
+            display: 'block', padding: '6px 62px 6px 8px', borderRadius: 4,
+            background: 'rgba(0,0,0,.05)', fontSize: FS.tag, wordBreak: 'break-all',
+          }}>
+            {cmdText}
+          </code>
+          <button
+            type="button"
+            onClick={() => void copyCmd(cmdText)}
+            title="复制这条命令"
+            style={{
+              position: 'absolute', right: 6, top: 6, padding: '2px 9px',
+              fontSize: FS.tag, lineHeight: 1.6, borderRadius: 4, cursor: 'pointer',
+              border: `1px solid ${copied ? 'rgba(31,122,61,.45)' : 'rgba(0,0,0,.18)'}`,
+              background: copied ? 'rgba(31,122,61,.10)' : '#fff',
+              color: copied ? '#1f7a3d' : C.dim,
+            }}
+          >
+            {copied ? '✓ 已复制' : '复制'}
+          </button>
+        </div>
         <div style={{ opacity: 0.7, marginTop: 4 }}>下面这一页是<strong>人的兜底</strong>：Agent 传不了、或者你想补一份时用。</div>
       </div>
 
