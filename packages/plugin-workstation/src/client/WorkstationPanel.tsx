@@ -982,7 +982,15 @@ function OrgSection(): ReactElement {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{ fontSize: FS.title, fontWeight: 600 }}>工位布局</div>
         <span style={{ fontSize: FS.small, color: C.dim }}>
-          {nodes.length === 0 ? '' : `${nodes.length} 个工位`}
+          {/* ★ 2026-10-21 阿开：「右边 5 个工位应该改成『已有 3 位 Agent 加入工位』」
+              ⇒ 用户关心的是「有几个人在干活」，不是场地有几格。没人时退回工位总数。 */}
+          {nodes.length === 0 ? '' : (() => {
+            const joined = nodes.reduce(
+              (n, node) => n + (node.holders ?? []).filter((h) => (h.agentId ?? '') !== '').length, 0)
+            return joined > 0
+              ? `已有 ${joined} 位 Agent 加入工位`
+              : `${nodes.length} 个工位 · 还没有 Agent 入位`
+          })()}
         </span>
         <span style={{ flex: 1 }} />
         <button
@@ -2758,6 +2766,12 @@ function TaskSection(): ReactElement {
   const [projNew, setProjNew] = useState(false)
   const [projName, setProjName] = useState('')
   const [projNotice, setProjNotice] = useState<string | null>(null)
+  /* ★ 2026-10-21 阿开：「＋发布 改成 ＋新项目，项目的问题就解决了」
+     ⇒ 我的判断：那按钮是**发任务**，改名会误导；但他的真实需求是「有个明确的建项目入口」
+     ⇒ 做法：发任务按钮改叫「＋ 新任务」，旁边**独立**加「＋ 新项目」。
+     不改「＋ 发布」的字面，是因为点开它不是建项目 —— 按钮说什么，就该做什么。 */
+  const [topProjOpen, setTopProjOpen] = useState(false)
+  const [topProjName, setTopProjName] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   /* 身份与两个折叠区（块 C / 块 D） */
@@ -2901,6 +2915,22 @@ function TaskSection(): ReactElement {
     }, '项目已建')
   }
 
+  /** ★ 2026-10-21：任务页顶部的「＋ 新项目」（不依赖发布表单） */
+  const onTopCreateProject = (): void => {
+    const n = topProjName.trim()
+    if (n.length === 0) return
+    void run(async () => {
+      const r = await createProject(n)
+      if (r.ok) {
+        setTopProjName('')
+        setTopProjOpen(false)
+        const pr = await loadProjects()
+        if (pr.ok) setProjects(pr.data.projects)
+      }
+      return r
+    }, '项目已建')
+  }
+
   /** 归档项目：打包 + manifest（不删原件） */
   const onArchive = (p: ProjectItem): void => {
     void run(async () => {
@@ -2979,10 +3009,31 @@ function TaskSection(): ReactElement {
         >
           {showAll ? '只看未完成' : '含已完成'}
         </button>
+        <button type="button" onClick={() => setTopProjOpen((v) => !v)} disabled={busy} style={btnStyle(false)}
+          title="新建一个项目（同一铺子里可以并行多个项目）">
+          {topProjOpen ? '取消' : '＋ 新项目'}
+        </button>
         <button type="button" onClick={() => setComposing((v) => !v)} disabled={busy} style={btnStyle(true)}>
-          {composing ? '收起' : '＋ 发布'}
+          {composing ? '收起' : '＋ 新任务'}
         </button>
       </div>
+
+      {/* ★ 2026-10-21：独立的新建项目入口（不必先发任务才能建项目） */}
+      {topProjOpen ? (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <input
+            value={topProjName}
+            onChange={(e) => setTopProjName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') onTopCreateProject() }}
+            placeholder="项目名，如「财税专家工作台」"
+            style={inputStyle}
+          />
+          <button type="button" onClick={onTopCreateProject}
+            disabled={busy || topProjName.trim().length === 0} style={btnStyle(true)}>
+            建
+          </button>
+        </div>
+      ) : null}
 
       {/* 发布表单 */}
       {composing ? (
@@ -3150,7 +3201,7 @@ function TaskSection(): ReactElement {
         <div style={{ ...cardStyle, color: C.dim, fontSize: FS.small }}>正在读取任务…</div>
       ) : tasks.length === 0 ? (
         <div style={{ ...cardStyle, color: C.dim, fontSize: FS.small }}>
-          还没有任务 —— 点右上「＋ 发布」发第一条。
+          还没有任务 —— 点右上「＋ 新任务」发第一条。
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
