@@ -2537,6 +2537,30 @@ function PackSection({ onUpload, focus }: {
   const [joinBusy, setJoinBusy] = useState(false)
   const [joinCopied, setJoinCopied] = useState(false)
 
+  /* ★ 2026-10-21（阿里星月建议）：设备台账 = 白名单本体（入册/撤销/流水） */
+  type DeviceRow = {
+    deviceId: string; fpHash8: string; fpHash: string; status: string
+    clientVersion: string; firstSeen: string | null; lastSeen: string | null; issueCount: number
+  }
+  const [devices, setDevices] = useState<{ items: DeviceRow[]; count: number; activeCount: number } | null>(null)
+
+  const loadDevices = async (): Promise<void> => {
+    const r = await callPack<{ items: DeviceRow[]; count: number; activeCount: number }>('devicesList', {})
+    if (r.ok) setDevices(r.data)
+  }
+
+  const revokeDevice = async (fpHash: string, revoked: boolean): Promise<void> => {
+    const r = await callPack<{ fpHash8: string; status: string }>('deviceRevoke', { fpHash, revoked })
+    if (!r.ok) {
+      setErr({ code: r.code, message: r.message })
+      return
+    }
+    setNotice(revoked ? '已移出：这台设备下次连不进来（记录保留）' : '已恢复：这台设备可以再连')
+    await loadDevices()
+  }
+
+  useEffect(() => { void loadDevices() }, [])
+
   const makeJoinCode = (): void => {
     setJoinBusy(true)
     void (async () => {
@@ -2767,6 +2791,43 @@ function PackSection({ onUpload, focus }: {
               另一台设备（同事的机器 / 客户机）要用本铺时，给它这个码
             </span>
           )}
+        </div>
+      </details>
+
+      {/* ★ 2026-10-21（阿里星月建议 · 阿开要「进出记录」）：设备台账 = 白名单本体
+          —— 入册 = 用码进来过一次；移出 = 只改状态不删记录（流水能对上）。 */}
+      <details style={{ marginTop: 8 }}>
+        <summary style={{ cursor: 'pointer', fontSize: FS.small, color: 'rgba(0,0,0,.6)' }}>
+          设备台账
+          {devices !== null ? `（在册 ${devices.activeCount} 台 · 共 ${devices.count} 条记录）` : ''}
+        </summary>
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {devices === null ? (
+            <span style={{ fontSize: FS.tag, color: C.dim }}>加载中…</span>
+          ) : devices.items.length === 0 ? (
+            <span style={{ fontSize: FS.tag, color: C.dim }}>还没有设备入册</span>
+          ) : devices.items.map((d) => (
+            <div key={d.deviceId} style={{
+              display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+              fontSize: FS.tag, color: d.status === 'active' ? C.text : C.dim,
+            }}>
+              <code style={{ padding: '1px 5px', background: C.soft, borderRadius: 3 }}>{d.fpHash8}</code>
+              <span style={{ color: C.dim }}>{d.clientVersion || '—'}</span>
+              <span style={{ color: C.dim }}>
+                首次 {fmtWhen(d.firstSeen)} · 最近 {fmtWhen(d.lastSeen)}
+              </span>
+              {d.status === 'active' ? (
+                <button type="button" style={btnStyle(false)}
+                  onClick={() => void revokeDevice(d.fpHash, true)}>移出</button>
+              ) : (
+                <>
+                  <span style={{ color: '#b3261e' }}>已移出</span>
+                  <button type="button" style={btnStyle(false)}
+                    onClick={() => void revokeDevice(d.fpHash, false)}>恢复</button>
+                </>
+              )}
+            </div>
+          ))}
         </div>
       </details>
 

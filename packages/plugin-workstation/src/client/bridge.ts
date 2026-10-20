@@ -106,6 +106,12 @@ export const ENDPOINTS = {
   inviteCreate: 'inviteCreate',
   /** ★ 2026-10-21：签发一次性「设备加入码」· `POST /device-join-codes` */
   deviceJoinCodeCreate: 'deviceJoinCodeCreate',
+  /** 设备台账（= 白名单）· `GET /devices` */
+  devicesList: 'devicesList',
+  /** 撤销 / 恢复一台设备 · `POST /devices/{fp}/revoke` */
+  deviceRevoke: 'deviceRevoke',
+  /** 设备进出流水 · `GET /devices/events` */
+  deviceEvents: 'deviceEvents',
 
   /* ── 工位当前交互（存服务端）── */
   contextGet: 'contextGet',

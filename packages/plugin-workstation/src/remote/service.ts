@@ -1084,6 +1084,58 @@ export class WorkstationRemoteService extends TypertRemoteService {
     return { ok: true, data }
   }
 
+  /**
+   * ★ 2026-10-21（阿里星月建议）：设备台账 —— 本铺在册设备就是「白名单本体」。
+   *   入册 = 用码进来过一次；出册 = 撤销（status=revoked），记录保留留痕。
+   */
+  @Remote('devicesList')
+  async devicesList(query: EmptyQuery, signal?: CancelSignal): Promise<RemoteResult<{
+    items: Array<{
+      deviceId: string; fpHash8: string; fpHash: string; status: string
+      clientVersion: string; firstSeen: string | null; lastSeen: string | null; issueCount: number
+    }>
+    count: number; activeCount: number
+  }>> {
+    void query
+    const data = await this.requireHttp().call<{
+      items: Array<{
+        deviceId: string; fpHash8: string; fpHash: string; status: string
+        clientVersion: string; firstSeen: string | null; lastSeen: string | null; issueCount: number
+      }>
+      count: number; activeCount: number
+    }>('GET', '/devices', undefined, signal)
+    return { ok: true, data }
+  }
+
+  /** 撤销 / 恢复一台设备（只改状态，不删记录） */
+  @Remote('deviceRevoke')
+  async deviceRevoke(
+    query: { fpHash: string; revoked?: boolean }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ fpHash8: string; status: string }>> {
+    const fp = typeof query.fpHash === 'string' ? query.fpHash.trim() : ''
+    if (fp.length < 8) throw new KaipuHttpError(400, 'missing_fp', '缺设备指纹')
+    const data = await this.requireHttp().call<{ fpHash8: string; status: string }>(
+      'POST', `/devices/${encodeURIComponent(fp)}/revoke`,
+      { revoked: query.revoked !== false }, signal)
+    return { ok: true, data }
+  }
+
+  /** 设备进出流水（含被挡下的） */
+  @Remote('deviceEvents')
+  async deviceEvents(
+    query: { limit?: number }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{
+    items: Array<{ id: number; fpHash8: string; event: string; note: string; at: string }>
+    count: number
+  }>> {
+    const limit = typeof query.limit === 'number' && Number.isFinite(query.limit) ? query.limit : 50
+    const data = await this.requireHttp().call<{
+      items: Array<{ id: number; fpHash8: string; event: string; note: string; at: string }>
+      count: number
+    }>('GET', `/devices/events?limit=${limit}`, undefined, signal)
+    return { ok: true, data }
+  }
+
   @Remote('inviteCreate')
   async inviteCreate(query: InviteCreateQuery, signal?: CancelSignal): Promise<RemoteResult<InviteCreated>> {
     const lamp = typeof query.lamp === 'string' ? query.lamp.trim() : ''
