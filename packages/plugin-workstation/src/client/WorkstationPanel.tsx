@@ -3234,6 +3234,25 @@ function TaskCard(props: {
    *   会让「求助」按钮看上去点了没反应。行内输入在 DSH 各宿主里都能用。
    */
   const [ask, setAsk] = useState<null | 'block' | 'reject' | 'done'>(null)
+  /* ★ 2026-10-20 阿开：「交付弹窗边框太靠右，没居中」。
+     宿主容器若带 transform / containment，`position:fixed` 会退化成「相对该祖先」而不是视口
+     ⇒ 卡片肉眼偏右。这里不猜宿主结构，直接用实测 rect 把卡片拉回视口中心（本来居中则不动）。 */
+  const dlgRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (ask !== 'done') return
+    const el = dlgRef.current
+    if (el === null) return
+    const fix = (): void => {
+      const r = el.getBoundingClientRect()
+      const dx = window.innerWidth / 2 - (r.left + r.width / 2)
+      const dy = window.innerHeight / 2 - (r.top + r.height / 2)
+      el.style.transform = (Math.abs(dx) > 2 || Math.abs(dy) > 2)
+        ? `translate(${Math.round(dx)}px, ${Math.round(dy)}px)` : ''
+    }
+    const t = window.setTimeout(fix, 0)
+    window.addEventListener('resize', fix)
+    return () => { window.clearTimeout(t); window.removeEventListener('resize', fix) }
+  }, [ask])
   const [askText, setAskText] = useState('')
   /* ★ 2026-10-19 阿开：「先显示标题，点开才是详情；还要有复制按钮」
      默认收起 —— 十条任务铺满一屏时，先看标题才选得动。 */
@@ -3475,7 +3494,7 @@ function TaskCard(props: {
               style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.45)',
                        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
             >
-              <div style={{ width: 'min(760px, 100%)', maxHeight: '86vh', display: 'flex', flexDirection: 'column',
+              <div ref={dlgRef} style={{ width: 'min(760px, 100%)', maxHeight: '86vh', display: 'flex', flexDirection: 'column',
                             gap: 10, padding: 18, borderRadius: 12, border: `1px solid ${C.border}`,
                             background: 'var(--dsh-bg, #fff)', boxShadow: '0 16px 48px rgba(0,0,0,.35)' }}>
                 <div style={{ fontSize: FS.heading, fontWeight: 600, lineHeight: 1.4 }}>交付 · {task.title}</div>
