@@ -3388,11 +3388,19 @@ function TaskCard(props: {
           })() }}
           title={st === 'posted' ? '领取这条任务，并把任务内容复制给 Agent' : '复制这条任务的标题和内容'}
           style={{
-            ...btnStyle(st === 'posted' || copied),
+            /* ★ 2026-10-20 阿开：「领取并复制 白字看不清，背景调成交付一样的蓝底」
+               ⇒ 不再依赖 `undefined` 去“沿用” btnStyle 的底色，直接写死：
+                 主态＝C.accent（与「交付」同一个蓝）+ 纯白字；复制成功＝绿底白字。 */
+            ...btnStyle(true),
             padding: '2px 8px',
             fontSize: FS.tag,
             minWidth: 62,
-            background: copied ? '#1f7a3d' : undefined,
+            background: copied ? '#1f7a3d' : C.accent,
+            color: '#ffffff',
+            border: '1px solid transparent',
+            ...(st === 'posted' || copied ? {} : {
+              background: 'transparent', color: C.text, border: `1px solid ${C.border}`,
+            }),
             transition: 'background 160ms',
           }}
         >
