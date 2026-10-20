@@ -2789,7 +2789,7 @@ function TaskSection(): ReactElement {
             fontSize: FS.tag, color: C.dim, lineHeight: 1.5,
             padding: '6px 8px', borderRadius: 6, border: `1px dashed ${C.border}`,
           }}>
-            💡 也可以让你的 Agent 发布：对它说「帮我在工位发个任务：&lt;标题&gt;」，它会代你发布（任务卡会标注来源）。
+            💡 也可以让你的 Agent 发：对阿里星月这类管理位说一句「发个帖子：&lt;标题&gt;」，它会代你发布（任务卡标注来源 · 管理位每分钟可发 10 条）。
           </div>
           <input
             autoFocus
