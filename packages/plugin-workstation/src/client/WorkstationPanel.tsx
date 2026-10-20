@@ -2784,6 +2784,13 @@ function TaskSection(): ReactElement {
       {/* 发布表单 */}
       {composing ? (
         <div style={{ ...cardStyle, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* ★ 2026-10-20 阿开：发布不必手动填 —— 让 Agent 代发 */}
+          <div style={{
+            fontSize: FS.tag, color: C.dim, lineHeight: 1.5,
+            padding: '6px 8px', borderRadius: 6, border: `1px dashed ${C.border}`,
+          }}>
+            💡 也可以让你的 Agent 发布：对它说「帮我在工位发个任务：&lt;标题&gt;」，它会代你发布（任务卡会标注来源）。
+          </div>
           <input
             autoFocus
             value={title}
@@ -3077,6 +3084,9 @@ function TaskCard(props: {
      默认收起 —— 十条任务铺满一屏时，先看标题才选得动。 */
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  /** ★ 2026-10-20 阿开：「Agent 已经把交付说明写上去了，提交还要再写一遍」
+      ⇒ 有附件时说明可空（服务端判据就是「有附件 或 ≥100 字」，前端不该更严）。 */
+  const hasFiles = (task.fileCount ?? 0) > 0
 
   /* ★ 期6-L1（2026-10-20）：从任务卡直达「这次任务的附件」
      —— 约定 interactionId = 服务端回的 `interactionId`（= task-<id>）；
@@ -3240,7 +3250,13 @@ function TaskCard(props: {
         {(st === 'in_progress' || st === 'claimed') && ask !== 'done' ? (
           <button
             type="button"
-            onClick={() => { setOpen(true); setAsk('done'); setAskText('') }}
+            onClick={() => {
+              setOpen(true)
+              setAsk('done')
+              /* ★ 2026-10-20 阿开：Agent 已写好交付说明 ⇒ 带入，人来「审核确认」而不是重写。
+                 优先 result（已提交的交付内容），其次 detail（Agent 写的任务说明）。 */
+              setAskText(String(task.result ?? task.detail ?? '').trim())
+            }}
             disabled={busy}
             style={btnStyle(true)}
           >
@@ -3303,16 +3319,31 @@ function TaskCard(props: {
                 value={askText}
                 onChange={(e) => setAskText(e.target.value)}
                 rows={4}
-                placeholder="交付说明：做了什么、结论是什么、还差什么（至少 100 字；有附件的写文件名）"
+                placeholder={hasFiles
+                  ? '可选：补充说明（这个任务已有附件，说明可以留空，也可写结论/遗留）'
+                  : '交付说明：做了什么、结论是什么、还差什么（至少 100 字）'}
                 style={{ width: '100%', padding: 8, borderRadius: 6, border: `1px solid ${C.border}`,
                          background: 'transparent', color: C.text, fontSize: FS.small, resize: 'vertical' }}
               />
+              {(() => {
+                const fromResult = String(task.result ?? '').trim()
+                const fromDetail = String(task.detail ?? '').trim()
+                const prefill = fromResult || fromDetail
+                if (!prefill || askText.trim() !== prefill) return null
+                return (
+                  <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.5 }}>
+                    {fromResult
+                      ? '↑ 已带入 Agent 提交的交付说明 —— 你在这里做的是审核确认（可直接提交，也可改后提交）'
+                      : '↑ 已带入任务说明（Agent 若另有交付结果，请替换成结果）—— 确认后提交'}
+                  </div>
+                )
+              })()}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: FS.tag, color: askText.trim().length >= 100 ? '#16a34a' : C.faint }}>
-                  {askText.trim().length} / 100
+                <span style={{ fontSize: FS.tag, color: (hasFiles || askText.trim().length >= 100) ? '#16a34a' : C.faint }}>
+                  {hasFiles ? `有附件 ${task.fileCount} 个 · 说明可留空` : `${askText.trim().length} / 100`}
                 </span>
                 <button type="button" onClick={submitAsk}
-                  disabled={busy || askText.trim().length < 100} style={btnStyle(true)}>
+                  disabled={busy || (!hasFiles && askText.trim().length < 100)} style={btnStyle(true)}>
                   提交
                 </button>
                 <button type="button" onClick={() => { setAsk(null); setAskText('') }} disabled={busy} style={btnStyle(false)}>
