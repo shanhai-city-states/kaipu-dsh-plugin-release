@@ -2945,6 +2945,9 @@ function TaskSection(): ReactElement {
   const [detail, setDetail] = useState('')
   /* ★ 期6-L2：项目归属（空 = 未归类） */
   const [projects, setProjects] = useState<ProjectItem[]>([])
+  // ★ 2026-10-21：按项目筛选任务。此前只能看到「全部任务」，项目只是一张贴纸 ——
+  //   「一个项目现在到哪了」要自己一条条认。空串 = 全部，'__none__' = 未归类。
+  const [projFilter, setProjFilter] = useState<string>('')
   const [projId, setProjId] = useState('')
   const [projNew, setProjNew] = useState(false)
   const [projName, setProjName] = useState('')
@@ -3133,6 +3136,12 @@ function TaskSection(): ReactElement {
   }
 
   const tasks = data?.tasks ?? []
+  // ★ 2026-10-21：项目筛选（客户端过滤，不动接口；服务端 `?project_id=` 已支持，供 Agent 用）
+  const visibleTasks = projFilter === ''
+    ? tasks
+    : projFilter === '__none__'
+      ? tasks.filter((t) => !t.projectId)
+      : tasks.filter((t) => t.projectId === projFilter)
   const counts = data?.counts ?? {}
 
   /** 计数取值：优先九态键，回落旧键（后端可能仍只回 open/done） */
@@ -3372,6 +3381,24 @@ function TaskSection(): ReactElement {
         <div style={{ fontSize: FS.small, color: '#16a34a', marginBottom: 6 }}>{notice}</div>
       ) : null}
 
+      {/* ★ 2026-10-21：按项目筛选 —— 「这个项目现在到哪了」一眼看到底 */}
+      {projects.length > 0 ? (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>项目</span>
+          <select
+            value={projFilter}
+            onChange={(e) => setProjFilter(e.target.value)}
+            style={{ ...inputStyle, width: 'auto', flex: 1, minWidth: 140 }}
+          >
+            <option value="">全部（{tasks.length}）</option>
+            <option value="__none__">未归类</option>
+            {projects.filter((p) => p.status !== 'archived').map((p) => (
+              <option key={p.projectId} value={p.projectId}>{p.name}（{p.taskCount ?? 0}）</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {/* 未接入 / 出错 */}
       {err !== null ? (
         <div style={{ ...cardStyle, fontSize: FS.small, color: err.code === 'not_configured' ? C.dim : '#d97706' }}>
@@ -3382,13 +3409,13 @@ function TaskSection(): ReactElement {
         </div>
       ) : data === null ? (
         <div style={{ ...cardStyle, color: C.dim, fontSize: FS.small }}>正在读取任务…</div>
-      ) : tasks.length === 0 ? (
+      ) : visibleTasks.length === 0 ? (
         <div style={{ ...cardStyle, color: C.dim, fontSize: FS.small }}>
-          还没有任务 —— 点右上「＋ 新任务」发第一条。
+          {tasks.length === 0 ? '还没有任务 —— 点右上「＋ 新任务」发第一条。' : '这个项目下还没有任务（换「全部」看看别的）。'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {tasks.map((t) => (
+          {visibleTasks.map((t) => (
             <CardBoundary key={t.task_id}>
               <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} />
             </CardBoundary>
