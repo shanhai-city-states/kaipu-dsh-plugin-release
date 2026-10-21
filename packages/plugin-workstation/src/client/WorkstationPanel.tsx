@@ -3938,7 +3938,14 @@ function TaskSection(): ReactElement {
       {err !== null ? (
         <div style={{ ...cardStyle, fontSize: FS.small, color: err.code === 'not_configured' ? C.dim : '#d97706' }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {err.title ?? (err.code === 'not_configured' ? '任务面板还没接服务端' : '任务读不到')}
+            {/* ★ 2026-10-21：兜底文案不能撒谎 —— 动作失败说「读不到」，会把人带去查错方向。
+                读失败才叫「任务读不到」；动作失败叫「操作没成功」；有 title 的（心跳等）照旧。 */}
+            {err.title ??
+              (err.code === 'not_configured'
+                ? '任务面板还没接服务端'
+                : err.source === 'action'
+                  ? '操作没成功'
+                  : '任务读不到')}
           </div>
           <div>{err.message}</div>
         </div>

@@ -60,10 +60,37 @@ interface ProcessLike {
 
 /** 服务端返回的错误形状（与 platform 同源） */
 export interface KaipuErrorBody {
-  error?: string
+  /** ★ 契约 §1.2 是**对象** `{code,message}`；旧形态是字符串 —— 两种都要认 */
+  error?: string | { code?: string; message?: string; detail?: string }
   message?: string
   code?: string
   detail?: string
+}
+
+/**
+ * 从错误体里取 `(code, message)` —— 单一取法，避免两处各写一遍再各自漂移。
+ *
+ * ★★ 2026-10-21 真根因：后端契约明文是 `{"error":{"code":..,"message":..}}`，
+ *   而这里原先只认 `typeof error === 'string'`、message 只从**顶层**取
+ *   ⇒ 所有业务码（project_incomplete / project_frozen / invalid_transition /
+ *   not_approver / deps_unmet …）在客户端统统退化成 `http_400` + 「服务端返回 400」，
+ *   前端所有按 code 走的分支（归档两段式「仍要暂存」就是其一）**全部失效**，
+ *   最后落进 err.title 缺省文案「任务读不到」。
+ * ⇒ 三种形状都认：① error 是对象 ② error 是字符串 ③ 顶层 code。
+ */
+export function readApiError(res: { status: number }, parsed: unknown): { code: string; message: string } {
+  const body: KaipuErrorBody =
+    parsed !== null && typeof parsed === 'object' ? (parsed as KaipuErrorBody) : {}
+  const nested = typeof body.error === 'object' && body.error !== null ? body.error : null
+  const pick = (...vals: Array<string | undefined>): string | undefined =>
+    vals.find((v) => typeof v === 'string' && v.length > 0)
+  const code =
+    pick(nested?.code, typeof body.error === 'string' ? body.error : undefined, body.code) ??
+    `http_${res.status}`
+  const message =
+    pick(nested?.message, nested?.detail, body.message, body.detail) ??
+    `服务端返回 ${res.status}`
+  return { code, message }
 }
 
 /** 取全局 fetch（Node 18+ 提供）。取不到就回 null，由调用方报清楚 */
@@ -79,11 +106,22 @@ function getProcess(): ProcessLike | undefined {
 export class KaipuHttpError extends Error {
   readonly status: number
   readonly code: string
-  constructor(status: number, code: string, message: string) {
+  /**
+   * ★★ DSH Gateway 的**结构性识别标记**（2026-10-21）：
+   *   协议 `remoteErrorOf()` 只认 `isDSHRemoteError === true && typeof code === 'string'`
+   *   （`@deepseek-ai/dsh-typert-protocol/lib/types/remote-error.js`）。
+   *   没有这个标记，**任何自定义异常都会被网关折叠成 `gateway/internal`** ——
+   *   业务 code 在 host→client 这一段就丢了，前端只能看到「服务端返回 400」。
+   *   ⇒ 加标记，让网关把 code/message **原样编码**过 wire。
+   */
+  readonly isDSHRemoteError: true = true
+  readonly details: Record<string, unknown> | undefined
+  constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
     super(message)
     this.name = 'KaipuHttpError'
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -351,13 +389,7 @@ export class KaipuHttpClient {
       }
     }
     if (!res.ok) {
-      const eb = (parsed || {}) as KaipuErrorBody
-      const code =
-        typeof eb.error === 'string' ? eb.error : typeof eb.code === 'string' ? eb.code : `http_${res.status}`
-      const message =
-        (typeof eb.message === 'string' && eb.message) ||
-        (typeof eb.detail === 'string' && eb.detail) ||
-        `服务端返回 ${res.status}`
+      const { code, message } = readApiError(res, parsed)
       throw new KaipuHttpError(res.status, code, message)
     }
     if (parsed !== null && typeof parsed === 'object' && 'data' in (parsed as Record<string, unknown>)) {
@@ -410,13 +442,7 @@ export class KaipuHttpClient {
     }
 
     if (!res.ok) {
-      const eb = (parsed || {}) as KaipuErrorBody
-      const code =
-        typeof eb.error === 'string' ? eb.error : typeof eb.code === 'string' ? eb.code : `http_${res.status}`
-      const message =
-        (typeof eb.message === 'string' && eb.message) ||
-        (typeof eb.detail === 'string' && eb.detail) ||
-        `服务端返回 ${res.status}`
+      const { code, message } = readApiError(res, parsed)
       throw new KaipuHttpError(res.status, code, message)
     }
 

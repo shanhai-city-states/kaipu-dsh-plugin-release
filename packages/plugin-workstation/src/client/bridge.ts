@@ -273,12 +273,19 @@ export async function callKaipu<T>(
     return { ok: false, error: { kind: 'gateway', code: 'empty_value', detail: 'host 方法没有返回值' } }
   }
   if (v.ok !== true) {
+    /* ★ 2026-10-21：`error` 可能是字符串（旧形态）也可能是 `{code,message}`（契约 §1.2 形态）。
+       只认字符串 ⇒ 业务 message 也会丢，前端只剩「服务端没有说明原因」。两种都认。 */
+    const vErr = (v as { error?: unknown }).error
+    const vErrObj = vErr !== null && typeof vErr === 'object' ? (vErr as { code?: unknown; message?: unknown }) : null
+    const code0 = typeof v.code === 'string' ? v.code : typeof vErrObj?.code === 'string' ? vErrObj.code : 'unknown'
+    const msg0 = typeof vErr === 'string'
+      ? vErr
+      : typeof vErrObj?.message === 'string'
+        ? vErrObj.message
+        : '服务端没有说明原因'
     return {
       ok: false,
-      business: {
-        code: typeof v.code === 'string' ? v.code : 'unknown',
-        message: typeof v.error === 'string' ? v.error : '服务端没有说明原因',
-      },
+      business: { code: code0, message: msg0 },
     }
   }
   return { ok: true, data: v.data as T }
