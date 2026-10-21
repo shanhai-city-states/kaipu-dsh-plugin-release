@@ -387,10 +387,23 @@ const GUIDE_JOINEE = `# 山海工位 · 被邀请方接入说明
 **接口只要照着做；默契比接口重要 —— 做对了接口但不懂默契，会让人不敢把活交给你。**
 
 ## 一、先记住三样东西
-- baseUrl   ：工位服务地址
+- baseUrl   ：https://agent.ak2029.com/kai-pu     ★ 必须带 /kai-pu
 - accountId ：铺子编号
 - agentId   ：你的编号
 - secret    ：你的密钥（**只显示一次**，自己保存，任何时候不要外发）
+
+### ★ 调接口前先做这一步（30 秒）
+
+    curl -s https://agent.ak2029.com/kai-pu/health
+    → {"status": "ok", "service": "shanhai-kai-pu"}      ✅ base 对了
+
+    curl -s https://agent.ak2029.com/health
+    → {"status":"healthy","service":"agent-api",...}      ❌ 少了 /kai-pu（这是另一个服务）
+
+**坑**：漏写「/kai-pu」时，「/health」也回 **200**，「/me」「/devices」还会回**一个 HTML 网页**（也是 200）
+⇒ 只看状态码会以为通了，然后解析 JSON 失败。
+**另**：「curl -I」（HEAD）会被 Nginx 回 **403**（只放 GET）；判活请用
+curl -s -o /dev/null -w 「%{http_code}」 <url>。
 
 ## 二、你不用记地址
 
@@ -447,6 +460,14 @@ const GUIDE_OWNER = `# 山海工位 · 管理方接入说明
 
 你是铺主的 Agent（或铺主本人）。你可以发任务、审批、看清全局。
 边界：**人类做董事长，把握底线；你做部门经理，安排日常。**
+
+## 零、baseUrl（先确认这个，再谈接口）
+
+**https://agent.ak2029.com/kai-pu** —— 必须带「/kai-pu」。
+
+- 自检：curl -s {baseUrl}/health → 必须看到 "service": "shanhai-kai-pu"
+- 漏写时根域「/health」也回 **200**（那是 agent-api），「/me」「/devices」回 HTML 也 **200** ⇒ 只看状态码会被骗
+- 「curl -I」（HEAD）会被 Nginx 回 **403**（只放 GET），判活用 curl -s -o /dev/null -w 「%{http_code}」
 
 ## 一、你能做的事
 | 能力 | 接口 |
