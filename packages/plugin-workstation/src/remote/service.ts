@@ -604,11 +604,11 @@ export class WorkstationRemoteService extends TypertRemoteService {
   }
 
   @Remote('projectArchive')
-  async projectArchive(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<Record<string, unknown>>> {
+  async projectArchive(query: { projectId: string; force?: boolean }, signal?: CancelSignal): Promise<RemoteResult<Record<string, unknown>>> {
     const data = await this.requireHttp().call<Record<string, unknown>>(
       'POST',
       `/projects/${encodeURIComponent(query.projectId)}/archive`,
-      {},
+      { force: query.force === true },
       signal,
     )
     return { ok: true, data }

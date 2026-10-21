@@ -391,9 +391,9 @@ export async function downloadProjectArchive(projectId: string): Promise<OrgResu
   return orgError(r)
 }
 
-export async function archiveProject(projectId: string): Promise<OrgResult<Record<string, unknown>>> {
+export async function archiveProject(projectId: string, force = false): Promise<OrgResult<Record<string, unknown>>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<Record<string, unknown>>(connection, 'projectArchive', { projectId })
+  const r = await callKaipu<Record<string, unknown>>(connection, 'projectArchive', { projectId, force })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }

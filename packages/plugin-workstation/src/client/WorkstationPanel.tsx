@@ -3492,7 +3492,20 @@ function TaskSection(): ReactElement {
   /** 归档项目：打包 + manifest（不删原件） */
   const onArchive = (p: ProjectItem): void => {
     void run(async () => {
-      const r = await archiveProject(p.projectId)
+      let r = await archiveProject(p.projectId)
+      /* ★ 2026-10-21 阿开拍板甲：**默认拦截，显式暂存**。
+         没做完 ⇒ 后端 400 project_incomplete ⇒ 这里问一句，用户确认才带 force 重试。
+         目的：不许「手一滑就把半成品当成定稿」。 */
+      if (!r.ok && r.code === 'project_incomplete') {
+        const go = window.confirm(
+          `${r.message}\n\n点「确定」= 暂存（包里会标 complete=false，不能当定稿送审）；\n点「取消」= 先去把活干完。`,
+        )
+        if (!go) {
+          setProjNotice('已取消归档 —— 先把剩下的活干完，再正式归档。')
+          return { ok: false, code: 'cancelled', message: '用户取消' }
+        }
+        r = await archiveProject(p.projectId, true)
+      }
       if (r.ok) {
         const d = r.data as { files?: number; bytes?: number; archive?: string; tasks?: number;
           complete?: boolean; doneTasks?: number; unfinished?: Array<{ title: string; status: string }> }
