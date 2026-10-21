@@ -634,7 +634,7 @@ function HelpTab(): ReactElement {
         <div style={{ fontSize: FS.small, marginBottom: 8 }}>
           <strong>三步上手</strong>
           <ol style={{ margin: '6px 0 0 18px', padding: 0, lineHeight: 1.8 }}>
-            <li>铺主在「工位」页给某个位点「邀请」，把链接发给你</li>
+            <li>铺主在「工位」页给某个位置点「邀请」，把链接发给你</li>
             <li>你打开链接、填名字 → 当场拿到 agentId + secret</li>
             <li>读完这份说明（尤其第二节协作默契）再开始领活</li>
           </ol>
@@ -1118,7 +1118,7 @@ function OrgSection(): ReactElement {
               (n, node) => n + (node.holders ?? []).filter((h) => (h.agentId ?? '') !== '').length, 0)
             return joined > 0
               ? `已有 ${joined} 位 Agent 加入工位`
-              : `10 个工位位次 · 已建 ${nodes.length} 个 · 还没有 Agent 入位`
+              : `10 个位置 · 已建 ${nodes.length} 个 · 还没有成员进来`
           })()}
         </span>
         <span style={{ flex: 1 }} />
@@ -1283,14 +1283,14 @@ function OrgSection(): ReactElement {
                 const r = await evictSeat(seat, agentId)
                 if (!r.ok) {
                   /* 失败就别 refresh —— 一刷新就可能把这条错误盖掉 */
-                  const title = r.code === 'seat_vacant' ? '这个位本来就空着'
+                  const title = r.code === 'seat_vacant' ? '这个位置本来就空着'
                     : r.code === 'seat_protected' ? '系统内置位，不能请出'
                     : '请出没成功'
                   setErr({ code: r.code, message: r.message, source: 'action', title })
                   return
                 }
                 await refresh()
-                setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位现在空了`)
+                setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位置现在空了`)
               })() }}
               inviteOpen={inviting === n.node_id}
             />
@@ -1320,7 +1320,7 @@ function OrgSection(): ReactElement {
         </div>
         {gridNodes.length > 10 ? (
           <div style={{ fontSize: FS.small, color: C.dim, marginTop: 6 }}>
-            还有 {gridNodes.length - 10} 个位未显示（先显示前 10 个）
+            还有 {gridNodes.length - 10} 个位置未显示（先显示前 10 个）
           </div>
         ) : null}
         <TaskStatsBar />
@@ -1684,7 +1684,7 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
           /* ★ 2026-10-20 阿开：「签名位不能换人吗？如果必须，把改名按钮去掉」
              ⇒ 不给「必然失败/不该做」的按钮，直接把原因写出来。 */
           <span
-            title="这个位由平台席位占用（不可替换），名字不能改"
+            title="这个位置由平台席位占用（不可替换），名字不能改"
             style={{ flex: '0 0 auto', fontSize: FS.tag, color: C.faint, whiteSpace: 'nowrap' }}
           >
             平台位 · 不可改名
@@ -1969,6 +1969,42 @@ function normStatus(status: string): string {
   if (status === 'done') return 'accepted'
   return status
 }
+
+/* ★ 2026-10-21 第二批（阿开定）：任务页四段分组 —— 打开第一眼只看到「要我干什么」。
+   验收：打开到点「领取」≤ 2 次点击（默认展开第一段，卡片上直接有「领取」= 1 次）。 */
+const TASK_SECTIONS = [
+  {
+    key: 'todo',
+    title: '待我处理',
+    match: (t: TaskUi, _myId: string | null) => ['posted', 'rejected'].includes(normStatus(t.status)),
+    empty: '没有要你处理的。有新任务时，卡片上直接有「领取」，一点就开工。',
+    openByDefault: true,
+  },
+  {
+    key: 'doing',
+    title: '我在做',
+    match: (t: TaskUi, myId: string | null) =>
+      ['claimed', 'in_progress', 'blocked'].includes(normStatus(t.status)) &&
+      (myId === null || t.claimed_by === myId),
+    empty: '手上没有在做的任务。',
+    openByDefault: false,
+  },
+  {
+    key: 'review',
+    title: '已交待审',
+    match: (t: TaskUi, _myId: string | null) => normStatus(t.status) === 'submitted',
+    empty: '没有等审的交付。交了件会自动出现在这里。',
+    openByDefault: false,
+  },
+  {
+    key: 'done',
+    title: '已完成',
+    match: (t: TaskUi, _myId: string | null) =>
+      ['accepted', 'cancelled', 'timeout'].includes(normStatus(t.status)),
+    empty: '还没有完成的。',
+    openByDefault: false,
+  },
+] as const
 
 /** 状态色：沿用本文件既有色值（LAMP_COLOR / C），不引入新主题 */
 function statusTone(status: string): string {
@@ -3062,6 +3098,8 @@ function TaskSection(): ReactElement {
   // ★ 2026-10-21：按项目筛选任务。此前只能看到「全部任务」，项目只是一张贴纸 ——
   //   「一个项目现在到哪了」要自己一条条认。空串 = 全部，'__none__' = 未归类。
   const [projFilter, setProjFilter] = useState<string>('')
+  /* 四段折叠：默认只展开「待我处理」（其余段显示条数，点开看） */
+  const [openSec, setOpenSec] = useState<Record<string, boolean>>({})
   /* ★ 2026-10-23（古茶 002「一键挂载」）：项目 → 审计 → 带签名报告。
      服务端建单后立刻返回，跑审在后台（四灯场景，几分钟）⇒ 这里只存 id/status，
      由 effect 每 5 秒问一次；`report` 到了才渲染结论。 */
@@ -3653,12 +3691,41 @@ function TaskSection(): ReactElement {
           {tasks.length === 0 ? '还没有任务 —— 点右上「＋ 新任务」发第一条。' : '这个项目下还没有任务（换「全部」看看别的）。'}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {visibleTasks.map((t) => (
-            <CardBoundary key={t.task_id}>
-              <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} />
-            </CardBoundary>
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {TASK_SECTIONS.map((sec) => {
+            const list = visibleTasks.filter((t) => sec.match(t, myId))
+            const open = openSec[sec.key] ?? sec.openByDefault
+            return (
+              <div key={sec.key}>
+                <button
+                  type="button"
+                  onClick={() => setOpenSec((p) => ({ ...p, [sec.key]: !open }))}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    padding: '3px 2px', fontFamily: 'inherit', fontSize: FS.tag, color: C.dim,
+                  }}
+                >
+                  <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>›</span>
+                  <b style={{ color: list.length > 0 ? undefined : C.dim }}>{sec.title}</b>
+                  <span>{list.length}</span>
+                </button>
+                {open ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                    {list.length === 0 ? (
+                      <div style={{ ...cardStyle, fontSize: FS.tag, color: C.dim }}>{sec.empty}</div>
+                    ) : (
+                      list.map((t) => (
+                        <CardBoundary key={t.task_id}>
+                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} />
+                        </CardBoundary>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       )}
 
