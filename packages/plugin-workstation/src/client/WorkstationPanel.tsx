@@ -1123,6 +1123,9 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
           : code === 'deliverable_missing' ? '附件没找到'
           : code === 'deliver_first' ? '这个工位还有没交付的任务'
           : code === 'needs_approval' ? '要铺主确认后才能领'
+          : code === 'project_frozen' ? '项目已归档，改不了'
+          : code === 'project_incomplete' ? '还有任务没完成'
+          : code === 'project_not_frozen' ? '要先归档才能送审'
           : '这个操作没成功'
         setErr({ code, message: r.message ?? '操作失败', source: 'action', title })
       } else setErr(null)
@@ -3322,6 +3325,11 @@ function TaskSection(): ReactElement {
   const [projNew, setProjNew] = useState(false)
   const [projName, setProjName] = useState('')
   const [projNotice, setProjNotice] = useState<string | null>(null)
+  /* ★ 2026-10-21 阿开：「取消归档后再点归档，提示任务读不到 / 服务端返回 400」
+     —— 真实原因：还有未完成任务，后端拒了（project_incomplete），
+        而前端用 window.confirm 二次确认，在宿主里不可靠 ⇒ 报错被当成「读不到任务」。
+     ⇒ 改成**页内两段式**：先说清有几个没完成，给一个「仍要暂存」按钮。 */
+  const [pendingArchive, setPendingArchive] = useState<{ projectId: string; name: string; message: string } | null>(null)
   /* ★ 2026-10-21 阿开：「＋发布 改成 ＋新项目，项目的问题就解决了」
      ⇒ 我的判断：那按钮是**发任务**，改名会误导；但他的真实需求是「有个明确的建项目入口」
      ⇒ 做法：发任务按钮改叫「＋ 新任务」，旁边**独立**加「＋ 新项目」。
@@ -3502,19 +3510,13 @@ function TaskSection(): ReactElement {
   /** 归档项目：打包 + manifest（不删原件） */
   const onArchive = (p: ProjectItem): void => {
     void run(async () => {
-      let r = await archiveProject(p.projectId)
-      /* ★ 2026-10-21 阿开拍板甲：**默认拦截，显式暂存**。
-         没做完 ⇒ 后端 400 project_incomplete ⇒ 这里问一句，用户确认才带 force 重试。
-         目的：不许「手一滑就把半成品当成定稿」。 */
+      const r = await archiveProject(p.projectId)
+      /* ★ 甲案：默认拦截、显式暂存。没做完 ⇒ 页内给「仍要暂存」按钮，
+         不用 window.confirm（宿主里不可靠，会让 400 被显示成「任务读不到」）。 */
       if (!r.ok && r.code === 'project_incomplete') {
-        const go = window.confirm(
-          `${r.message}\n\n点「确定」= 暂存（包里会标 complete=false，不能当定稿送审）；\n点「取消」= 先去把活干完。`,
-        )
-        if (!go) {
-          setProjNotice('已取消归档 —— 先把剩下的活干完，再正式归档。')
-          return { ok: false, code: 'cancelled', message: '用户取消' }
-        }
-        r = await archiveProject(p.projectId, true)
+        setPendingArchive({ projectId: p.projectId, name: p.name, message: r.message ?? '' })
+        setProjNotice(null)
+        return { ok: true }
       }
       if (r.ok) {
         const d = r.data as { files?: number; bytes?: number; archive?: string; tasks?: number;
@@ -3994,6 +3996,43 @@ function TaskSection(): ReactElement {
             <span style={{ flex: 1 }} />
             <span style={{ fontSize: FS.tag, color: C.dim }}>归档 = 打包资料 + 清单，不删原件</span>
           </div>
+          {pendingArchive !== null ? (
+            <div style={{ ...cardStyle, marginBottom: 6, borderLeft: '3px solid #c9a227', padding: '9px 11px' }}>
+              <div style={{ fontSize: FS.small, marginBottom: 6 }}>
+                <b>「{pendingArchive.name}」还不能正式归档</b>
+                <div style={{ opacity: 0.75, marginTop: 3 }}>{pendingArchive.message}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const t = pendingArchive
+                    setPendingArchive(null)
+                    void run(async () => {
+                      const rr = await archiveProject(t.projectId, true)
+                      if (rr.ok) {
+                        setProjNotice(`「${t.name}」已暂存 —— 包里标了「不完整」，不能当定稿送审；活干完再正式归档。`)
+                        const pr = await loadProjects()
+                        if (pr.ok) setProjects(pr.data.projects)
+                      }
+                      return rr
+                    })
+                  }}
+                  style={btnStyle(true)}
+                >
+                  ⚠ 仍要暂存（标为不完整）
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPendingArchive(null); setProjNotice('已取消 —— 先把剩下的活干完，再正式归档。') }}
+                  style={btnStyle(false)}
+                >
+                  先不归档
+                </button>
+              </div>
+            </div>
+          ) : null}
           {projNotice ? (
             <div style={{ ...cardStyle, marginBottom: 6, fontSize: FS.small }}>{projNotice}</div>
           ) : null}
