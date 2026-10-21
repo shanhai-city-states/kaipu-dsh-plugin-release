@@ -2790,7 +2790,16 @@ function PackSection({ onUpload, focus, advTick }: {
     let alive = true
     void (async () => {
       const r = await loadPackInteractions()
-      if (alive && r.ok) setPackIids(r.data.interactions)
+      if (alive && r.ok) {
+        setPackIids(r.data.interactions)
+        /* ★ 2026-10-21：手里这个 iid 没有资料、但别处有 ⇒ **自动切到最近那个**。
+           否则用户永远停在「无资料可下载」，明明下面那一排就有东西。 */
+        const first = r.data.interactions[0]
+        if (first !== undefined && !r.data.interactions.some((x) => x.interactionId === iid)) {
+          setIid(first.interactionId)
+          void persist({ interactionId: first.interactionId })
+        }
+      }
     })()
     return () => { alive = false }
   }, [])
