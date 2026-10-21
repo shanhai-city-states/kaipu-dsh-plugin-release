@@ -3260,6 +3260,8 @@ function TaskSection(): ReactElement {
      由 effect 每 5 秒问一次；`report` 到了才渲染结论。 */
   const [audit, setAudit] = useState<{
     id: string
+    /** ★ 记住这张单属于哪个项目 —— 审计提示要贴在**那一行按钮**旁边，不能全表都显示。 */
+    projectId: string
     status: string
     report: AuditReportUi | null
   } | null>(null)
@@ -3276,6 +3278,11 @@ function TaskSection(): ReactElement {
          直接把「先去归档」这条路指出来（用户点的是审计按钮，脑子里想的是送审）。
          ★★ 2026-10-21 阿开：这类提示要跟「已取消 —— 先把剩下的活干完」放在**同一个位置**
             （项目区 `projNotice`）—— 全局提示离归档按钮太远，看见也不知道往哪点。 */
+      if (r.code === 'project_draft_only') {
+        setProjNotice('这份是「暂存」包，不能当定稿送审 —— 把剩下的活干完，正式归档一次再送审。')
+        setNotice(null)
+        return
+      }
       if (r.code === 'project_not_frozen') {
         setProjNotice('请先归档，定稿后送审 —— 审计要针对一个确定的版本。点本项目的「归档」，归档完再回来点审计。')
         setNotice(null)
@@ -3294,12 +3301,10 @@ function TaskSection(): ReactElement {
       })
       return
     }
-    setAudit({ id: r.data.id, status: r.data.status ?? 'queued', report: null })
-    setNotice(
-      r.data.reused
-        ? '这个项目已经在审了 —— 等它出结论就行。'
-        : '已送去审计 —— 四灯在看资料，几分钟后出结论。',
-    )
+    /* ★ 2026-10-21 阿开：「已送去审计 —— 四灯在看资料…」别放页面顶部，
+       要贴在**审计按钮旁边**（点完就在原地看见，不用抬头找）。 */
+    setAudit({ id: r.data.id, projectId, status: r.data.status ?? 'queued', report: null })
+    setNotice(null)
   }
 
   /* 审计单轮询：只在 queued/running 时跑，出结论就停 */
@@ -4065,17 +4070,23 @@ function TaskSection(): ReactElement {
                     <button
                       type="button"
                       onClick={() => void requestAudit(p.projectId)}
-                      disabled={busy || (audit !== null && (audit.status === 'queued' || audit.status === 'running'))}
+                      disabled={busy || (audit !== null && audit.projectId === p.projectId && (audit.status === 'queued' || audit.status === 'running'))}
                       style={{
                         padding: '5px 11px', borderRadius: 6, border: 'none',
-                        background: audit !== null && (audit.status === 'queued' || audit.status === 'running') ? 'rgba(0,0,0,.12)' : '#1f2937',
+                        background: audit !== null && audit.projectId === p.projectId && (audit.status === 'queued' || audit.status === 'running') ? 'rgba(0,0,0,.12)' : '#1f2937',
                         color: '#fff', cursor: busy ? 'default' : 'pointer',
                         fontSize: FS.tag, fontWeight: 600, whiteSpace: 'nowrap',
                       }}
                       title="把这份定稿送去审 —— 四灯审完给一份带密码学签名的报告"
                     >
-                      {audit !== null && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
+                      {audit !== null && audit.projectId === p.projectId && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
                     </button>
+                    {/* ★ 2026-10-21 阿开：送审后的那句话贴在按钮旁边（原来在页面顶部，点完看不见）。 */}
+                    {audit !== null && audit.projectId === p.projectId && (audit.status === 'queued' || audit.status === 'running') ? (
+                      <span style={{ fontSize: FS.tag, color: C.dim, whiteSpace: 'nowrap' }}>
+                        已送去审计 —— 四灯在看资料，几分钟后出结论
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => onDownloadArchive(p)}
