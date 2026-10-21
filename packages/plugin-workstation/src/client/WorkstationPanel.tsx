@@ -145,7 +145,11 @@ export function WorkstationPanel(): ReactElement {
   const [snap, setSnap] = useState<Loaded>(null)
   /* ★ 2026-10-20 阿开：「资料（按位）点了附件按钮之后是否单独出现一个 tab 页面与资料并列，
      这样更干净」——把「看资料」与「传资料」拆成两个平级 tab；生成交付 ID 那行撤下（人不需要懂）。 */
-  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help'>('work')
+  // ★ 2026-10-22（新定案 · 见 `定案-kaipu定位与UI-2026-10-22.md`）：
+  //   「最轻的铲子」= 第一屏只有一个动作。tab 从 6 个收到 3+1，
+  //   默认落地「任务」（打开第一眼该看到"要我干什么"，不是"有几个座位"）。
+  //   upload / notif / help 仍可达，但不再占主栏（一年用两次的东西不该占最贵的界面位置）。
+  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help' | 'more'>('tasks')
   /* ★ 2026-10-20：任务卡「📎 资料」→ 切到「资料（按位）」tab 并定位那次协作。
      ★ 为什么监听要提到顶层：PackSection 现在只在 pack tab 挂载，
        若监听留在它内部，在「任务」tab 点 📎 时没人接事件 ⇒ 点了没反应。 */
@@ -238,7 +242,16 @@ export function WorkstationPanel(): ReactElement {
     >
       {/* ── Tab 头 ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, borderBottom: `1px solid ${C.border}`, paddingBottom: 8 }}>
-        {([['work', '工位'], ['tasks', '任务'], ['pack', '资料（按位）'], ['upload', '上传附件'], ['notif', '通知'], ['help', '使用说明']] as const).map(([k, label]) => (
+        {tab !== 'tasks' && tab !== 'pack' && tab !== 'work' && tab !== 'more' ? (
+          <button
+            type="button"
+            onClick={() => setTab('more')}
+            style={{ padding: '5px 10px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: FS.small }}
+          >
+            ←
+          </button>
+        ) : null}
+        {([['tasks', '任务'], ['pack', '资料'], ['work', '工位'], ['more', '⋯']] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -255,7 +268,8 @@ export function WorkstationPanel(): ReactElement {
             }}
           >
             {label}
-            {k === 'notif' && notif.unread > 0 ? (
+            {/* ★ 2026-10-22：通知不再占 tab ⇒ 角标移到「⋯」上（有未读才出现） */}
+            {k === 'more' && notif.unread > 0 ? (
               <span style={{
                 marginLeft: 5, padding: '0 5px', borderRadius: 9, fontSize: FS.tag,
                 background: '#c0392b', color: '#fff', fontWeight: 700,
@@ -271,7 +285,21 @@ export function WorkstationPanel(): ReactElement {
         </span>
       </div>
 
-      {tab === 'notif' ? (
+      {tab === 'more' ? (
+        <Section title="更多">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: FS.small }}>
+            <button type="button" onClick={() => setTab('notif')} style={{ ...btnStyle(false), textAlign: 'left' }}>
+              通知{notif.unread > 0 ? `（${notif.unread} 条新的）` : ''}
+            </button>
+            <button type="button" onClick={() => setTab('help')} style={{ ...btnStyle(false), textAlign: 'left' }}>
+              接入说明（给要调接口的人看）
+            </button>
+            <div style={{ color: C.dim, lineHeight: 1.7, paddingTop: 4 }}>
+              设备与权限：<b>资料</b> 页最下方「高级」—— 设备台账 / 给新设备开门
+            </div>
+          </div>
+        </Section>
+      ) : tab === 'notif' ? (
         <Section title="通知">
           {notif.items.length === 0 ? (
             <div style={{ fontSize: FS.small, opacity: 0.7 }}>没有待处理的事。</div>
