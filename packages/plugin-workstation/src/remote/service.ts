@@ -645,6 +645,42 @@ export class WorkstationRemoteService extends TypertRemoteService {
     return { ok: true, data }
   }
 
+  /**
+   * ★ 2026-10-23（古茶 002「一键挂载」）：把这个项目送去审计。
+   *
+   * 服务端建单后立刻返回 202，跑审在后台（四灯场景，几分钟）——
+   * 所以这里**不等结果**，前端拿 `id` 去轮询 `auditGet`。
+   * `reused: true` = 同项目同套餐已有一张在跑的单（防手抖点两下）。
+   */
+  @Remote('projectAuditRequest')
+  async projectAuditRequest(
+    query: { projectId: string; package?: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<Record<string, unknown>>> {
+    const data = await this.requireHttp().call<Record<string, unknown>>(
+      'POST',
+      `/projects/${encodeURIComponent(query.projectId)}/audit-request`,
+      { package: query.package ?? 'standard' },
+      signal,
+    )
+    return { ok: true, data }
+  }
+
+  /** 查审计单状态与报告 · `GET /audit/{id}` */
+  @Remote('auditGet')
+  async auditGet(
+    query: { auditId: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<Record<string, unknown>>> {
+    const data = await this.requireHttp().call<Record<string, unknown>>(
+      'GET',
+      `/audit/${encodeURIComponent(query.auditId)}`,
+      undefined,
+      signal,
+    )
+    return { ok: true, data }
+  }
+
   /** 解除求助阻塞（`blocked` → `in_progress`；`deps` 类由系统解 ⇒ 403）· `POST /tasks/{id}/unblock` */
   @Remote('tasksUnblock')
   async tasksUnblock(query: TaskUnblockQuery, signal?: CancelSignal): Promise<RemoteResult<Record<string, unknown>>> {

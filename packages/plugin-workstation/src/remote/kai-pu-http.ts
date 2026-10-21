@@ -134,6 +134,50 @@ export class KaipuHttpClient {
   }
 
   /**
+   * ★ 2026-10-23（古茶 002「一键挂载」）：把一个项目送去审计。
+   *
+   * 服务端建单后**立刻返回**（202），跑审在后台（要调四灯场景，几分钟）；
+   * 前端拿 `id` 轮询 `getAudit()` 即可，不要在这里等。
+   * `reused: true` = 同项目同套餐已有一张在跑的单（防手抖点两下）。
+   */
+  async requestProjectAudit(
+    projectId: string,
+    pkg: 'light' | 'standard' | 'deep' = 'standard',
+  ): Promise<{ id: string; status: string; reused?: boolean; project_name?: string }> {
+    const token = await this.ensureToken()
+    const r = await this.request(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/audit-request`,
+      { package: pkg },
+      token,
+    )
+    return r as { id: string; status: string; reused?: boolean; project_name?: string }
+  }
+
+  /** 查审计单状态与报告（`status` = queued/running/done/failed） */
+  async getAudit(id: string): Promise<{
+    id: string
+    status: string
+    package: string
+    project_id: string
+    created_at: string
+    finished_at: string
+    report: AuditReportLike | null
+  }> {
+    const token = await this.ensureToken()
+    const r = await this.request('GET', `/audit/${encodeURIComponent(id)}`, undefined, token)
+    return r as {
+      id: string
+      status: string
+      package: string
+      project_id: string
+      created_at: string
+      finished_at: string
+      report: AuditReportLike | null
+    }
+  }
+
+  /**
    * ★ 主动握手并返回本铺 `account_id`（期5b-1 加）。
    * 为什么需要：心跳只能对**本人持有**的任务发（`claimed_by == 本人`），
    * 而面板侧唯一可信的「本人」就是服务端在 `/auth/device` 回的 `accountId`。
@@ -449,6 +493,28 @@ function credFile(baseUrl: string): string {
 }
 
 /** 读本地设备凭据；取不到 / 坏了 ⇒ null（退回指纹，不抛） */
+
+/** ★ 2026-10-23（一键挂载）：审计报告的最小形状（字段全部可选 —— 失败时有 error） */
+export interface AuditReportLike {
+  verdict?: string
+  summary?: string
+  precheck?: {
+    verdict?: string
+    counts?: Record<string, number>
+    findings?: Array<{ code?: string; level?: string; detail?: string }>
+  }
+  review?: {
+    scene?: string
+    aborted?: boolean
+    elapsed_ms?: number
+    lights?: Record<string, string>
+    error?: string
+  }
+  files?: Array<{ path?: string; bytes?: number; sha256?: string }>
+  error?: string
+  message?: string
+}
+
 export function readDeviceCred(baseUrl: string): DeviceCred | null {
   try {
     const fs = builtin<{ existsSync(p: string): boolean; readFileSync(p: string, enc: string): string }>('node:fs')

@@ -56,6 +56,10 @@ export const ENDPOINTS = {
   projectsCreate: 'projectsCreate',
   /** ★ 期6-L2 项目层：归档（打包 + manifest） */
   projectArchive: 'projectArchive',
+  /** ★ 2026-10-23（古茶 002「一键挂载」）：把这个项目送去审计 · `POST /projects/{id}/audit-request` */
+  projectAuditRequest: 'projectAuditRequest',
+  /** ★ 审计单状态与报告 · `GET /audit/{id}` */
+  auditGet: 'auditGet',
 
   /* ── ★ 期5b-1 任务层补齐（后端已实现 · 本轮接线）──
      ★ 值是**网关方法名**（host `service.ts` 的 `@Remote`），**不是** HTTP 路径。

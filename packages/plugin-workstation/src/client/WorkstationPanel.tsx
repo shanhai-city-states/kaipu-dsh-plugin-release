@@ -1997,6 +1997,24 @@ function rowReason(row: Record<string, unknown>): string {
 
 type ActionOutcome = { ok: boolean; code?: string; message?: string }
 
+/** ★ 2026-10-23（一键挂载）：审计报告的最小形状（失败时只有 error/message） */
+interface AuditReportUi {
+  verdict?: string
+  summary?: string
+  precheck?: {
+    counts?: Record<string, number>
+    findings?: Array<{ code?: string; level?: string; detail?: string }>
+  }
+  review?: {
+    scene?: string
+    aborted?: boolean
+    lights?: Record<string, string>
+    error?: string
+  }
+  error?: string
+  message?: string
+}
+
 async function callAction(method: EndpointName, query: Record<string, unknown>): Promise<ActionOutcome> {
   const conn = panelConn
   if (conn === null) {
@@ -2004,6 +2022,19 @@ async function callAction(method: EndpointName, query: Record<string, unknown>):
   }
   const r = await callKaipu<unknown>(conn, method, query)
   if (r.ok === true) return { ok: true }
+  if ('business' in r) return { ok: false, code: r.business.code, message: r.business.message }
+  return { ok: false, code: r.error.code, message: r.error.detail }
+}
+
+/** 同 `callAction`，但要拿回 `data`（审计要 id / 报告） */
+async function callActionData<T>(
+  method: EndpointName,
+  query: Record<string, unknown>,
+): Promise<{ ok: true; data: T } | { ok: false; code?: string; message?: string }> {
+  const conn = panelConn
+  if (conn === null) return { ok: false, code: 'no_channel', message: '没有数据通道 —— 工位 host 未加载。' }
+  const r = await callKaipu<T>(conn, method, query)
+  if (r.ok === true) return { ok: true, data: r.data }
   if ('business' in r) return { ok: false, code: r.business.code, message: r.business.message }
   return { ok: false, code: r.error.code, message: r.error.detail }
 }
@@ -2976,6 +3007,62 @@ function TaskSection(): ReactElement {
   // ★ 2026-10-21：按项目筛选任务。此前只能看到「全部任务」，项目只是一张贴纸 ——
   //   「一个项目现在到哪了」要自己一条条认。空串 = 全部，'__none__' = 未归类。
   const [projFilter, setProjFilter] = useState<string>('')
+  /* ★ 2026-10-23（古茶 002「一键挂载」）：项目 → 审计 → 带签名报告。
+     服务端建单后立刻返回，跑审在后台（四灯场景，几分钟）⇒ 这里只存 id/status，
+     由 effect 每 5 秒问一次；`report` 到了才渲染结论。 */
+  const [audit, setAudit] = useState<{
+    id: string
+    status: string
+    report: AuditReportUi | null
+  } | null>(null)
+
+  /** 一键挂载：把当前项目送去审计（建单即返回，结论靠轮询） */
+  const requestAudit = async (projectId: string): Promise<void> => {
+    setErr(null)
+    const r = await callActionData<{ id: string; status: string; reused?: boolean }>(
+      'projectAuditRequest',
+      { projectId, package: 'standard' },
+    )
+    if (!r.ok) {
+      setErr({
+        code: r.code ?? 'audit_failed',
+        message: r.message ?? '审计申请没发出去',
+        source: 'action',
+        title: '审计申请没发出去',
+      })
+      return
+    }
+    setAudit({ id: r.data.id, status: r.data.status ?? 'queued', report: null })
+    setNotice(
+      r.data.reused
+        ? '这个项目已经在审了 —— 等它出结论就行。'
+        : '已送去审计 —— 四灯在看资料，几分钟后出结论。',
+    )
+  }
+
+  /* 审计单轮询：只在 queued/running 时跑，出结论就停 */
+  useEffect(() => {
+    if (audit === null) return
+    if (audit.status !== 'queued' && audit.status !== 'running') return
+    const id = audit.id
+    let alive = true
+    const timer = setInterval(() => {
+      void callActionData<{ status: string; report: AuditReportUi | null }>('auditGet', {
+        auditId: id,
+      }).then((r) => {
+        if (!alive || !r.ok) return
+        setAudit((prev) =>
+          prev === null || prev.id !== id
+            ? prev
+            : { ...prev, status: r.data.status ?? prev.status, report: r.data.report ?? prev.report },
+        )
+      })
+    }, 5000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [audit?.id, audit?.status])
   const [projId, setProjId] = useState('')
   const [projNew, setProjNew] = useState(false)
   const [projName, setProjName] = useState('')
@@ -3424,6 +3511,48 @@ function TaskSection(): ReactElement {
               <option key={p.projectId} value={p.projectId}>{p.name}（{p.taskCount ?? 0}）</option>
             ))}
           </select>
+          {/* ★ 2026-10-23（古茶 002「一键挂载」）：选中具体项目才能送审 */}
+          {projFilter !== '' && projFilter !== '__none__' ? (
+            <button
+              type="button"
+              onClick={() => void requestAudit(projFilter)}
+              disabled={busy || (audit !== null && (audit.status === 'queued' || audit.status === 'running'))}
+              style={{ padding: '4px 9px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: FS.tag, whiteSpace: 'nowrap' }}
+              title="把这个项目攒下的资料送去审 —— 四灯审完给一份带密码学签名的报告"
+            >
+              {audit !== null && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* ★ 一键挂载：审计结论（四灯场景 + 资料预检；报告带 Ed25519 签名可验） */}
+      {audit !== null ? (
+        <div style={{ ...cardStyle, marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4, fontSize: FS.small }}>
+            {audit.status === 'queued' || audit.status === 'running'
+              ? '⏳ 审计中 —— 四灯在看资料，几分钟'
+              : audit.report?.verdict === 'pass'
+                ? '✅ 审计通过'
+                : audit.report?.verdict === 'fail'
+                  ? '❌ 审计没通过'
+                  : audit.report?.verdict === 'warn'
+                    ? '⚡ 有条件通过（有需要处理的提醒）'
+                    : '审计未完成'}
+          </div>
+          {audit.report?.summary ? (
+            <div style={{ fontSize: FS.tag, color: C.dim, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto', lineHeight: 1.6 }}>
+              {String(audit.report.summary).slice(0, 3000)}
+            </div>
+          ) : null}
+          {audit.report?.error ? (
+            <div style={{ fontSize: FS.tag, color: '#d97706', marginTop: 4 }}>
+              场景未跑完：{String(audit.report.message || audit.report.error)}
+            </div>
+          ) : null}
+          <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 6 }}>
+            审计单 {audit.id}（结论可验签）
+          </div>
         </div>
       ) : null}
 
