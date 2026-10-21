@@ -583,6 +583,26 @@ export class WorkstationRemoteService extends TypertRemoteService {
   }
 
   /** 归档项目：打包全部任务资料 + manifest（只读原件，不删） */
+  /** ★ 2026-10-21：取消归档（阿开拍板：归档能回来，像 DeepSeek 会话那样） */
+  @Remote('projectUnarchive')
+  async projectUnarchive(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<{ projectId: string; status: string }>> {
+    const pid = typeof query.projectId === 'string' ? query.projectId : ''
+    if (pid.length === 0) throw new KaipuHttpError(400, 'missing_project_id', '取消归档缺项目 id')
+    const data = await this.requireHttp().call<{ projectId: string; status: string }>(
+      'POST', `/projects/${encodeURIComponent(pid)}/unarchive`, {}, signal)
+    return { ok: true, data }
+  }
+
+  /** ★ 2026-10-21：下载最近一次归档包（base64 —— @Remote 只走 JSON，拿不了二进制流） */
+  @Remote('projectArchiveDownload')
+  async projectArchiveDownload(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<{ filename: string; bytes: number; sha256: string; dataBase64: string }>> {
+    const pid = typeof query.projectId === 'string' ? query.projectId : ''
+    if (pid.length === 0) throw new KaipuHttpError(400, 'missing_project_id', '下载归档缺项目 id')
+    const data = await this.requireHttp().call<{ filename: string; bytes: number; sha256: string; dataBase64: string }>(
+      'GET', `/projects/${encodeURIComponent(pid)}/archive/base64`, undefined, signal)
+    return { ok: true, data }
+  }
+
   @Remote('projectArchive')
   async projectArchive(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<Record<string, unknown>>> {
     const data = await this.requireHttp().call<Record<string, unknown>>(

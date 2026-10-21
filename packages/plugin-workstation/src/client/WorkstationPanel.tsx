@@ -16,6 +16,8 @@ import {
 } from './bridge.js'
 import {
   archiveProject,
+  unarchiveProject,
+  downloadProjectArchive,
   claimTask,
   createOrgNode,
   createProject,
@@ -3492,9 +3494,47 @@ function TaskSection(): ReactElement {
     void run(async () => {
       const r = await archiveProject(p.projectId)
       if (r.ok) {
-        const d = r.data as { files?: number; bytes?: number; archive?: string }
-        setProjNotice(`「${p.name}」已归档：${d.files ?? 0} 个文件 / ${d.bytes ?? 0} 字节（含 manifest）`)
+        const d = r.data as { files?: number; bytes?: number; archive?: string; tasks?: number }
+        setProjNotice(
+          `「${p.name}」已归档：${d.tasks ?? p.taskCount ?? 0} 个任务 / ${d.files ?? 0} 个文件 / ${d.bytes ?? 0} 字节（含 manifest 清单）`,
+        )
+        /* ★ 关键：不刷新的话按钮还是「归档」，用户以为没成功 */
+        const pr = await loadProjects()
+        if (pr.ok) setProjects(pr.data.projects)
       }
+      return r
+    })
+  }
+
+  /** ★ 2026-10-21：取消归档（阿开拍板：归档能回来） */
+  const onUnarchive = (p: ProjectItem): void => {
+    void run(async () => {
+      const r = await unarchiveProject(p.projectId)
+      if (r.ok) {
+        /* ★ 2026-10-21 阿开：「不知道取消归档之后能干嘛」⇒ 提示里直接说清能做什么，
+           而不是只报一句「已取消」。 */
+        setProjNotice(
+          `「${p.name}」已取消归档 —— 回到项目列表。现在可以继续加任务 / 传资料 / 申请审计 / 再次归档；归档包还在，随时能下载。`,
+        )
+        const pr = await loadProjects()
+        if (pr.ok) setProjects(pr.data.projects)
+      }
+      return r
+    })
+  }
+
+  /** ★ 2026-10-21：下载归档包（含 manifest 清单） */
+  const onDownloadArchive = (p: ProjectItem): void => {
+    void run(async () => {
+      const r = await downloadProjectArchive(p.projectId)
+      if (!r.ok) {
+        setProjNotice(`下载失败：${r.message}`)
+        return r
+      }
+      triggerDownload(r.data.dataBase64, r.data.filename, 'application/zip')
+      setProjNotice(
+        `已下载「${p.name}」的归档包：${Math.max(1, Math.round(r.data.bytes / 1024))} KB · sha256 ${r.data.sha256.slice(0, 12)}…（压缩包里的 manifest.json 就是归档清单）`,
+      )
       return r
     })
   }
@@ -3941,18 +3981,45 @@ function TaskSection(): ReactElement {
                 <span style={{ fontSize: FS.small, fontWeight: 600 }}>{p.name}</span>
                 <span style={{ fontSize: FS.tag, color: C.dim }}>{p.taskCount ?? 0} 个任务</span>
                 {p.status === 'archived' ? (
-                  <span style={{ fontSize: FS.tag, color: C.dim }}>已归档</span>
+                  <span style={{ fontSize: FS.tag, color: '#8a6d3b' }}>已归档（资料照旧，随时能取消）</span>
                 ) : null}
                 <span style={{ flex: 1 }} />
-                <button
-                  type="button"
-                  onClick={() => onArchive(p)}
-                  disabled={busy}
-                  style={btnStyle(true)}
-                  title="打包这个项目的全部任务资料 + manifest（不删原件）"
-                >
-                  归档
-                </button>
+                {/* ★ 2026-10-21 阿开：
+                    ① 归档之后按钮不该还是「归档」⇒ 换「取消归档」
+                    ② 「下载资料 + 清单」应该紧挨着归档之后 ⇒ 归档后出现下载按钮
+                    ⇒ 归档与取消归档是**一对状态**，下载只在有包时才出现。 */}
+                {p.status === 'archived' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onDownloadArchive(p)}
+                      disabled={busy}
+                      style={btnStyle(true)}
+                      title="下载归档包：压缩文件 + manifest.json 清单（谁交的 / 什么时候 / 多大 / sha256）"
+                    >
+                      ⬇ 下载归档包
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUnarchive(p)}
+                      disabled={busy}
+                      style={btnStyle(false)}
+                      title="取消归档：项目回到列表，任务与资料都不动"
+                    >
+                      取消归档
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onArchive(p)}
+                    disabled={busy}
+                    style={btnStyle(true)}
+                    title="打包这个项目的全部任务资料 + manifest 清单（不删原件）"
+                  >
+                    归档
+                  </button>
+                )}
               </div>
             ))}
           </div>
