@@ -23,6 +23,8 @@
  * ★ 本文件不 import platform 的任何东西 —— 两包必须能独立安装。
  */
 
+import { PLUGIN_VERSION } from './version.js'
+
 /** 最小 fetch 形状（运行时由 Node 18+ 全局提供） */
 interface HttpResponseLike {
   ok: boolean
@@ -97,6 +99,9 @@ interface DeviceAuthPayload {
   deviceToken: string
   accountId: string
   expiresAt?: string
+  /** ★ B 案：首次入册/补发时返回，明文只此一次 */
+  deviceId?: string
+  deviceSecret?: string
 }
 
 /**
@@ -144,13 +149,44 @@ export class KaipuHttpClient {
     const now = Date.now()
     if (this.token !== null && now < this.expiresAt - 60_000) return this.token
 
-    const body: Record<string, string> = { fingerprint: this.fingerprint }
-    if (this.clientVersion) body.clientVersion = this.clientVersion
+    // ★★ B 案（2026-10-21 阿开拍板）：**先凭据，后指纹**。
+    //   指纹是客户端自报的（改 USER/HOSTNAME 或手填 fingerprint 就能冒充已入册设备）；
+    //   凭据是服务端签发的随机串，只存本地 600。指纹只用于「第一次入册」。
+    const cred = readDeviceCred(this.baseUrl)
+    const fpBody = (): Record<string, string> => ({
+      fingerprint: this.fingerprint,
+      // ★ B 案配套：**总是**报版本。服务端据此判断「这个客户端会不会保存 deviceSecret」——
+      //   不报版本 = 旧客户端 = 不强制凭据（否则升级当天旧客户端会被自己的指纹拒绝，全挂）。
+      clientVersion: this.clientVersion || PLUGIN_VERSION,
+    })
 
-    const res = await this.request('POST', '/auth/device', body, undefined, signal)
+    let res: unknown
+    if (cred) {
+      try {
+        res = await this.request('POST', '/auth/device',
+          { deviceId: cred.deviceId, deviceSecret: cred.deviceSecret }, undefined, signal)
+      } catch (e) {
+        // 凭据失效（被铺主重签 / 被撤销 / 服务端库重建）⇒ 清本地，退回指纹重试一次。
+        // ★ 只有 401/403 才这样退；网络错误照原样抛 —— 否则会把「网断了」误判成「凭据坏了」。
+        if (e instanceof KaipuHttpError && (e.status === 401 || e.status === 403)) {
+          clearDeviceCred(this.baseUrl)
+          res = await this.request('POST', '/auth/device', fpBody(), undefined, signal)
+        } else {
+          throw e
+        }
+      }
+    } else {
+      res = await this.request('POST', '/auth/device', fpBody(), undefined, signal)
+    }
+
     const data = res as DeviceAuthPayload
     if (typeof data.deviceToken !== 'string' || data.deviceToken.length === 0) {
       throw new KaipuHttpError(502, 'bad_device_auth', '服务端没有返回设备令牌 —— 接入地址可能不是开铺服务端。')
+    }
+    // ★ 服务端签发/补发了凭据 ⇒ 立刻落盘。明文只在这一次响应里，丢了要重新入册。
+    if (typeof data.deviceId === 'string' && data.deviceId.length > 0 &&
+        typeof data.deviceSecret === 'string' && data.deviceSecret.length > 0) {
+      writeDeviceCred(this.baseUrl, { deviceId: data.deviceId, deviceSecret: data.deviceSecret })
     }
     this.token = data.deviceToken
     this.accountId = typeof data.accountId === 'string' ? data.accountId : null
@@ -366,6 +402,94 @@ function deriveFingerprint(): string {
     h |= 0
   }
   return `dsh-${Math.abs(h).toString(16).padStart(12, '0').slice(0, 12)}`
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * ★ B 案（2026-10-21 阿开拍板）：设备凭据（本地落盘）
+ *
+ * 为什么：指纹是**客户端自报**的 —— `deriveFingerprint()` = hash(HOSTNAME|USER|
+ * platform|arch)，改环境变量、或在配置里手填 `fingerprint`，就能冒充一台
+ * **已入册**设备。凭据是服务端签发的随机串，客户端只存本地（600）。
+ *
+ * ★ 不 import node 模块：本包 host tsconfig `types: []`，且 client bundle 会内联
+ *   本文件 —— 用 `process.getBuiltinModule()` 运行时取，形状手写（同
+ *   `plugin-platform/src/remote/shop-files.ts` 的做法）。
+ * ★ 取不到就**降级为不存**（仍可用指纹），绝不假装存上了。
+ * ══════════════════════════════════════════════════════════════════ */
+
+export interface DeviceCred {
+  deviceId: string
+  deviceSecret: string
+}
+
+type ProcLike = { getBuiltinModule?: (id: string) => unknown }
+
+function builtin<T>(id: string): T {
+  const p = (globalThis as { process?: ProcLike }).process
+  const get = p?.getBuiltinModule
+  if (typeof get !== 'function') throw new Error(`运行时未暴露内置模块（${id}）`)
+  const mod = get.call(p, id) as T | undefined
+  if (mod === undefined || mod === null) throw new Error(`无法载入内置模块（${id}）`)
+  return mod
+}
+
+function shortHash(s: string): string {
+  let h = 0
+  for (let i = 0; i < s.length; i += 1) {
+    h = (h << 5) - h + s.charCodeAt(i)
+    h |= 0
+  }
+  return Math.abs(h).toString(16).padStart(8, '0').slice(0, 8)
+}
+
+function credFile(baseUrl: string): string {
+  const path = builtin<{ join(...p: string[]): string }>('node:path')
+  const os = builtin<{ homedir(): string }>('node:os')
+  return path.join(os.homedir(), '.kai-pu', `device-${shortHash(baseUrl)}.json`)
+}
+
+/** 读本地设备凭据；取不到 / 坏了 ⇒ null（退回指纹，不抛） */
+export function readDeviceCred(baseUrl: string): DeviceCred | null {
+  try {
+    const fs = builtin<{ existsSync(p: string): boolean; readFileSync(p: string, enc: string): string }>('node:fs')
+    const f = credFile(baseUrl)
+    if (!fs.existsSync(f)) return null
+    const j = JSON.parse(fs.readFileSync(f, 'utf8')) as Partial<DeviceCred>
+    if (typeof j.deviceId === 'string' && j.deviceId.length > 0 &&
+        typeof j.deviceSecret === 'string' && j.deviceSecret.length > 0) {
+      return { deviceId: j.deviceId, deviceSecret: j.deviceSecret }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 落盘（600）；失败返回 false，由调用方决定要不要提示 */
+export function writeDeviceCred(baseUrl: string, c: DeviceCred): boolean {
+  try {
+    const fs = builtin<{
+      mkdirSync(p: string, o?: { recursive?: boolean; mode?: number }): void
+      writeFileSync(p: string, d: string, o?: { mode?: number }): void
+    }>('node:fs')
+    const path = builtin<{ dirname(p: string): string }>('node:path')
+    const f = credFile(baseUrl)
+    fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(f, JSON.stringify(c), { mode: 0o600 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function clearDeviceCred(baseUrl: string): void {
+  try {
+    const fs = builtin<{ existsSync(p: string): boolean; unlinkSync(p: string): void }>('node:fs')
+    const f = credFile(baseUrl)
+    if (fs.existsSync(f)) fs.unlinkSync(f)
+  } catch {
+    /* 清不掉不阻断：服务端已拒绝，下次会再试 */
+  }
 }
 
 /**
