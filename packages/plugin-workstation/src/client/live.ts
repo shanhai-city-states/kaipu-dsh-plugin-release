@@ -200,9 +200,9 @@ export async function evictSeat(seat: string, agentId?: string): Promise<OrgResu
 }
 
 /** ★ 通知列表 */
-export async function loadNotifications(): Promise<OrgResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>> {
+export async function loadNotifications(): Promise<OrgResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean; projectId?: string; projectName?: string }>; unread: number; total: number; seenAt: string }>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>(
+  const r = await callKaipu<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean; projectId?: string; projectName?: string }>; unread: number; total: number; seenAt: string }>(
     connection, 'notifications', {})
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
@@ -230,6 +230,17 @@ export async function exportPack(interactionId: string): Promise<OrgResult<{ fil
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const r = await callKaipu<{ filename: string; dataBase64: string; files: number; bytes: number }>(
     connection, 'packExport', { interactionId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** ★ 2026-10-21：本铺**有资料**的交互清单（打包下载前先看这个，别猜 iid） */
+export async function loadPackInteractions(): Promise<
+  OrgResult<{ interactions: Array<{ interactionId: string; files: number; seats: number; lastAt: string }> }>
+> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ interactions: Array<{ interactionId: string; files: number; seats: number; lastAt: string }> }>(
+    connection, 'packsInteractions', {})
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }

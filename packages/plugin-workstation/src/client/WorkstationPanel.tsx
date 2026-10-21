@@ -21,6 +21,7 @@ import {
   createProject,
   createTask,
   loadProjects,
+  loadPackInteractions,
   type ProjectItem,
   deleteOrgNode,
   checkPluginVersion,
@@ -169,7 +170,7 @@ export function WorkstationPanel(): ReactElement {
   }, [])
 
   /* ★ 通知（2026-10-19 阿开）：顶部 Tab 角标，30 秒轮询 */
-  const [notif, setNotif] = useState<{ unread: number; items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }> }>({ unread: 0, items: [] })
+  const [notif, setNotif] = useState<{ unread: number; items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean; projectId?: string; projectName?: string }> }>({ unread: 0, items: [] })
   useEffect(() => {
     let alive = true
     const tick = async (): Promise<void> => {
@@ -338,17 +339,43 @@ export function WorkstationPanel(): ReactElement {
           {notif.items.length === 0 ? (
             <div style={{ fontSize: FS.small, opacity: 0.7 }}>没有待处理的事。</div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {notif.items.map((it) => (
-                <div key={`${it.kind}:${it.taskId}`} style={{
-                  padding: '7px 9px', borderRadius: 5, fontSize: FS.small,
-                  background: it.unread ? 'rgba(192,57,43,.07)' : 'rgba(0,0,0,.03)',
-                  borderLeft: it.unread ? '3px solid #c0392b' : '3px solid transparent',
-                }}>
-                  <div style={{ fontWeight: it.unread ? 600 : 400 }}>{it.text}</div>
-                  <div style={{ opacity: 0.6, marginTop: 2 }}>{it.at.replace('T', ' ').replace('Z', '')}</div>
-                </div>
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* ★ 2026-10-21 阿开：「通知应该按项目分类，别人就方便知道哪个项目来的」 */}
+              {(() => {
+                const groups = new Map<string, { name: string; items: typeof notif.items }>()
+                for (const it of notif.items) {
+                  const key = it.projectId && it.projectId.length > 0 ? it.projectId : '__none__'
+                  const name = it.projectId && it.projectId.length > 0 ? (it.projectName || it.projectId) : '未归类'
+                  const g = groups.get(key)
+                  if (g === undefined) groups.set(key, { name, items: [it] })
+                  else g.items.push(it)
+                }
+                return [...groups.entries()].map(([key, g]) => (
+                  <div key={key}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: FS.tag, fontWeight: 600 }}>{g.name}</span>
+                      <span style={{ fontSize: FS.tag, color: C.dim }}>{g.items.length}</span>
+                      {g.items.some((x) => x.unread) ? (
+                        <span style={{ fontSize: FS.tag, color: '#c0392b' }}>
+                          {g.items.filter((x) => x.unread).length} 条新的
+                        </span>
+                      ) : null}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {g.items.map((it) => (
+                        <div key={`${it.kind}:${it.taskId}`} style={{
+                          padding: '7px 9px', borderRadius: 5, fontSize: FS.small,
+                          background: it.unread ? 'rgba(192,57,43,.07)' : 'rgba(0,0,0,.03)',
+                          borderLeft: it.unread ? '3px solid #c0392b' : '3px solid transparent',
+                        }}>
+                          <div style={{ fontWeight: it.unread ? 600 : 400 }}>{it.text}</div>
+                          <div style={{ opacity: 0.6, marginTop: 2 }}>{it.at.replace('T', ' ').replace('Z', '')}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              })()}
               <button type="button" onClick={() => { void (async () => {
                 await markNotificationsRead()
                 const r = await loadNotifications()
@@ -2757,6 +2784,16 @@ function PackSection({ onUpload, focus, advTick }: {
     if ((advTick ?? 0) > 0 && advRef.current !== null) advRef.current.open = true
   }, [advTick])
   const [iid, setIid] = useState<string>('')
+  /* ★ 2026-10-21：有资料的交互清单 —— 打包下载 404 是因为手里的 iid 是历史遗留的 */
+  const [packIids, setPackIids] = useState<Array<{ interactionId: string; files: number; seats: number; lastAt: string }>>([])
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const r = await loadPackInteractions()
+      if (alive && r.ok) setPackIids(r.data.interactions)
+    })()
+    return () => { alive = false }
+  }, [])
   const [seat, setSeat] = useState<string>('')
   const [note, setNote] = useState<string>('')
   const [project, setProject] = useState<string>('')
@@ -2948,6 +2985,34 @@ function PackSection({ onUpload, focus, advTick }: {
 
       {/* ★ 2026-10-20 阿开：「生成交付 ID 还可以生成不知道是干嘛用的，那一行都多余」
           ⇒ 主界面不再摆技术字段，收进「高级」；日常看资料/传资料都用不到它们。 */}
+      {/* ★ 2026-10-21 阿开：「打包下载提示目录不存在」—— 不用再猜 iid，这里列出真有东西的 */}
+      {packIids.length > 0 ? (
+        <div style={{ marginTop: 8, display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>有资料的协作</span>
+          {packIids.slice(0, 8).map((x) => {
+            const active = x.interactionId === iid
+            const label = x.interactionId.length > 24 ? `${x.interactionId.slice(0, 22)}…` : x.interactionId
+            return (
+              <button
+                key={x.interactionId}
+                type="button"
+                onClick={() => { setIid(x.interactionId); void persist({ interactionId: x.interactionId }) }}
+                title={`${x.interactionId} · ${x.files} 个文件 · 最近 ${x.lastAt.replace('T', ' ').replace('Z', ' UTC')}`}
+                style={{
+                  padding: '3px 9px', borderRadius: 999, cursor: 'pointer',
+                  fontSize: FS.tag, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                  border: `1px solid ${active ? '#1f2937' : C.border}`,
+                  background: active ? '#1f2937' : 'transparent',
+                  color: active ? '#fff' : C.dim,
+                }}
+              >
+                {label} · {x.files}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
       <details ref={advRef} style={{ marginTop: 6 }}>
         <summary style={{ fontSize: FS.tag, color: C.dim, cursor: 'pointer' }}>
           高级（换一个交互 / 座位 / 项目 / 备注）

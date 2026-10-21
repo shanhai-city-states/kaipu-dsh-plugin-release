@@ -132,6 +132,7 @@ export const ENDPOINTS = {
   pluginVersion: 'pluginVersion',
   /** 交互包打包下载 */
   packExport: 'packExport',
+  packsInteractions: 'packsInteractions',
   /** 交互包排定删除（24h） */
   packPurge: 'packPurge',
   /** 取消排定删除 */

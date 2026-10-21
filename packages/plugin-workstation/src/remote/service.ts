@@ -896,7 +896,7 @@ export class WorkstationRemoteService extends TypertRemoteService {
   /** 下载（二进制 ⇒ base64 回渲染层） */
   /** ★ 通知：有什么在等我处理 */
   @Remote('notifications')
-  async notifications(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>> {
+  async notifications(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean; projectId?: string; projectName?: string }>; unread: number; total: number; seenAt: string }>> {
     const d = await this.requireHttp().call<{ items?: Array<Record<string, unknown>>; unread?: number; total?: number; seenAt?: string }>('GET', '/notifications', undefined, signal)
     return { ok: true, data: {
       items: (Array.isArray(d?.items) ? d.items : []).map((r) => ({
@@ -931,6 +931,15 @@ export class WorkstationRemoteService extends TypertRemoteService {
   }
 
   /** ★ 把一个交互包（所有座位）打包下载成 zip */
+  /** ★ 2026-10-21：列出「有资料的交互」—— 打包下载失败，多半是 iid 是历史遗留/从没传过文件 */
+  @Remote('packsInteractions')
+  async packsInteractions(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ interactions: Array<{ interactionId: string; files: number; seats: number; lastAt: string }> }>> {
+    void query
+    const data = await this.requireHttp().call<{ interactions?: Array<{ interactionId: string; files: number; seats: number; lastAt: string }> }>(
+      'GET', '/packs/interactions', undefined, signal)
+    return { ok: true, data: { interactions: Array.isArray(data?.interactions) ? data.interactions : [] } }
+  }
+
   @Remote('packExport')
   async packExport(query: { interactionId: string }, signal?: CancelSignal): Promise<RemoteResult<{ filename: string; dataBase64: string; files: number; bytes: number }>> {
     const iid = typeof query.interactionId === 'string' ? query.interactionId : ''
