@@ -3255,6 +3255,13 @@ function TaskSection(): ReactElement {
         setErr({ code: 'bad_payload', message: `任务列表格式异常（tasks=${raw === undefined ? 'undefined' : typeof raw}）`, source: 'read' })
       }
       setData({ tasks: list.map(toTaskUi), counts: (r.data?.counts ?? {}) as Record<string, number> })
+      /* ★ 2026-10-21：项目清单随任务一起回来（后端 `tasksList` 新加的字段）——
+         不再依赖那条在真实客户端里没发出的 `GET /projects`。 */
+      const projs = (r.data as { projects?: unknown } | null)?.projects
+      if (Array.isArray(projs)) {
+        setProjects(projs as ProjectItem[])
+        setProjErr(null)
+      }
       /* ★ 只清「读失败」；动作失败要留在屏上（否则 409/403 一闪就没） */
       setErr((prev) => (prev !== null && prev.source === 'action' ? prev : null))
     } else {
