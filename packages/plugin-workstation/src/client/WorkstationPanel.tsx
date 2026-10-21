@@ -150,6 +150,8 @@ export function WorkstationPanel(): ReactElement {
   //   默认落地「任务」（打开第一眼该看到"要我干什么"，不是"有几个座位"）。
   //   upload / notif / help 仍可达，但不再占主栏（一年用两次的东西不该占最贵的界面位置）。
   const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help' | 'more'>('tasks')
+  /* ★ 2026-10-21 阿开：从工位页点「🔑 设备」跳过来时，自动展开「高级」（设备台账在里面） */
+  const [advTick, setAdvTick] = useState(0)
   /* ★ 2026-10-20：任务卡「📎 资料」→ 切到「资料（按位）」tab 并定位那次协作。
      ★ 为什么监听要提到顶层：PackSection 现在只在 pack tab 挂载，
        若监听留在它内部，在「任务」tab 点 📎 时没人接事件 ⇒ 点了没反应。 */
@@ -362,7 +364,7 @@ export function WorkstationPanel(): ReactElement {
       ) : tab === 'tasks' ? (
         <TaskSection />
       ) : tab === 'pack' ? (
-        <PackSection onUpload={() => setTab('upload')} focus={packFocus} />
+        <PackSection onUpload={() => setTab('upload')} focus={packFocus} advTick={advTick} />
       ) : tab === 'upload' ? (
         <UploadTab onDone={() => setTab('pack')} />
       ) : (
@@ -371,7 +373,7 @@ export function WorkstationPanel(): ReactElement {
                —— 那些是期1 开发期的诚实标注，读的是 scaffold 演示数据（发起人位/协作方甲乙丙）。
                   现在真工位、真任务、真资料三条链都通了，留着只会让人以为是系统状态 ⇒ 整块撤下。
                   面板只留能真改的三块：工位 / 任务 / 资料。 */}
-          <OrgSection onGoDevices={() => setTab('pack')} />
+          <OrgSection onGoDevices={() => { setTab('pack'); setAdvTick((t) => t + 1) }} />
         </>
       )}
     </div>
@@ -2733,12 +2735,18 @@ function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
   )
 }
 
-function PackSection({ onUpload, focus }: {
+function PackSection({ onUpload, focus, advTick }: {
   onUpload: () => void
   focus: { interactionId: string; title?: string | undefined } | null
+  /** 每次 +1 就展开「高级」（从工位页跳过来时用） */
+  advTick?: number
 }): ReactElement {
   /* ★ 2026-10-19 阿开：「记住的交互 ID 和座位放服务端更方便」——
      从 localStorage 挪到 `GET/POST /workstation/context`：换机器、重装插件都还在。 */
+  const advRef = useRef<HTMLDetailsElement | null>(null)
+  useEffect(() => {
+    if ((advTick ?? 0) > 0 && advRef.current !== null) advRef.current.open = true
+  }, [advTick])
   const [iid, setIid] = useState<string>('')
   const [seat, setSeat] = useState<string>('')
   const [note, setNote] = useState<string>('')
@@ -2931,7 +2939,7 @@ function PackSection({ onUpload, focus }: {
 
       {/* ★ 2026-10-20 阿开：「生成交付 ID 还可以生成不知道是干嘛用的，那一行都多余」
           ⇒ 主界面不再摆技术字段，收进「高级」；日常看资料/传资料都用不到它们。 */}
-      <details style={{ marginTop: 6 }}>
+      <details ref={advRef} style={{ marginTop: 6 }}>
         <summary style={{ fontSize: FS.tag, color: C.dim, cursor: 'pointer' }}>
           高级（换一个交互 / 座位 / 项目 / 备注）
         </summary>
@@ -2985,8 +2993,16 @@ function PackSection({ onUpload, focus }: {
           paddingTop: 8, borderTop: `1px dashed ${C.border}`,
         }}>
           <span style={{ fontSize: FS.tag, color: C.dim }}>新设备要进这个铺：</span>
-          <button type="button" onClick={makeJoinCode} disabled={joinBusy} style={btnStyle(false)}>
-            {joinBusy ? '生成中…' : '生成设备加入码'}
+          <button
+            type="button"
+            onClick={makeJoinCode}
+            disabled={joinBusy}
+            style={{
+              padding: '6px 13px', borderRadius: 7, border: 'none', cursor: joinBusy ? 'default' : 'pointer',
+              background: '#1f2937', color: '#fff', fontSize: FS.small, fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >
+            {joinBusy ? '生成中…' : '🔑 生成设备加入码'}
           </button>
           {joinCode !== null ? (
             <>
@@ -3141,6 +3157,9 @@ function TaskSection(): ReactElement {
   const [detail, setDetail] = useState('')
   /* ★ 期6-L2：项目归属（空 = 未归类） */
   const [projects, setProjects] = useState<ProjectItem[]>([])
+  /* ★ 2026-10-21：项目清单读失败以前是**静默**的（「读失败不清空」）⇒
+     阿开连着两次说「项目不见了」却没有任何提示。现在把失败摆出来。 */
+  const [projErr, setProjErr] = useState<{ code: string; message: string } | null>(null)
   // ★ 2026-10-21：按项目筛选任务。此前只能看到「全部任务」，项目只是一张贴纸 ——
   //   「一个项目现在到哪了」要自己一条条认。空串 = 全部，'__none__' = 未归类。
   const [projFilter, setProjFilter] = useState<string>('')
@@ -3148,10 +3167,6 @@ function TaskSection(): ReactElement {
   const [openSec, setOpenSec] = useState<Record<string, boolean>>({})
   /* ★ 2026-10-21：只有一个项目时**自动选中它** —— 否则「全部」状态下看不到项目条，
      也就看不到「申请审计」，阿开连着两次说「找不到按钮」就是这个原因。 */
-  useEffect(() => {
-    const only = projects.length === 1 ? projects[0] : null
-    if (projFilter === '' && only !== null && only !== undefined) setProjFilter(only.projectId)
-  }, [projects, projFilter])
   /* ★ 2026-10-23（古茶 002「一键挂载」）：项目 → 审计 → 带签名报告。
      服务端建单后立刻返回，跑审在后台（四灯场景，几分钟）⇒ 这里只存 id/status，
      由 effect 每 5 秒问一次；`report` 到了才渲染结论。 */
@@ -3249,7 +3264,12 @@ function TaskSection(): ReactElement {
     }
     /* ★ 期6-L2：项目清单与任务同批刷新（读失败不清空，保留上次可用值） */
     const pr = await loadProjects()
-    if (pr.ok) setProjects(pr.data.projects)
+    if (pr.ok) {
+      setProjects(pr.data.projects)
+      setProjErr(null)
+    } else {
+      setProjErr({ code: pr.code, message: pr.message })
+    }
     /* ★ 两个徽标与任务列表同批刷新：计数取自服务端列表本身，不在前端另算 */
     const [blockedNext, pendingNext] = await Promise.all([
       fetchFlagged('tasksBlocked'),
@@ -3397,6 +3417,33 @@ function TaskSection(): ReactElement {
 
   const tasks = data?.tasks ?? []
   // ★ 2026-10-21：项目筛选（客户端过滤，不动接口；服务端 `?project_id=` 已支持，供 Agent 用）
+  /* ★ 2026-10-21 兜底：`GET /projects` 读失败时，从任务自带的 projectId 反推项目列表 ——
+     项目行和「申请审计」不该因为一个列表接口挂了就整块消失。
+     名字拿不到就先显示 id（审计只认 id，能用）。 */
+  const shownProjects: ProjectItem[] = (() => {
+    if (projects.length > 0) return projects
+    const m = new Map<string, number>()
+    for (const t of tasks) {
+      const pid = t.projectId
+      if (typeof pid === 'string' && pid.length > 0) m.set(pid, (m.get(pid) ?? 0) + 1)
+    }
+    return [...m.entries()].map(([projectId, taskCount]) => ({
+      projectId,
+      name: projectId,
+      status: 'active',
+      createdAt: '',
+      taskCount,
+    }))
+  })()
+
+  useEffect(() => {
+    if (projFilter !== '') return
+    const ids = projects.length > 0
+      ? projects.map((p) => p.projectId)
+      : [...new Set(tasks.map((t) => t.projectId).filter((x): x is string => typeof x === 'string' && x.length > 0))]
+    if (ids.length === 1 && ids[0] !== undefined) setProjFilter(ids[0])
+  }, [projects, projFilter, tasks])
+
   const visibleTasks = projFilter === ''
     ? tasks
     : projFilter === '__none__'
@@ -3523,7 +3570,7 @@ function TaskSection(): ReactElement {
               style={{ ...inputStyle, width: 'auto', flex: 1, minWidth: 140 }}
             >
               <option value="">未归类</option>
-              {projects.filter((p) => p.status !== 'archived').map((p) => (
+              {shownProjects.filter((p) => p.status !== 'archived').map((p) => (
                 <option key={p.projectId} value={p.projectId}>
                   {p.name}（{p.taskCount ?? 0}）
                 </option>
@@ -3642,7 +3689,12 @@ function TaskSection(): ReactElement {
       ) : null}
 
       {/* ★ 2026-10-21：按项目筛选 —— 「这个项目现在到哪了」一眼看到底 */}
-      {projects.length > 0 ? (
+      {projErr !== null ? (
+        <div style={{ ...cardStyle, marginBottom: 6, borderColor: '#e5b4b4', fontSize: FS.tag, color: '#9b2c2c' }}>
+          项目清单读不到（{projErr.code}）：{projErr.message}
+        </div>
+      ) : null}
+      {shownProjects.length > 0 ? (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
           <span style={{ fontSize: FS.tag, color: C.dim }}>项目</span>
           {/* ★ 2026-10-21 阿开：「任务页要能看到有哪些项目、各几个任务」——
@@ -3677,7 +3729,7 @@ function TaskSection(): ReactElement {
           gap: 10, marginBottom: 6, padding: '9px 12px',
         }}>
           <span style={{ fontSize: FS.tag, color: C.dim }}>
-            <b style={{ color: 'inherit' }}>{projects.find((p) => p.projectId === projFilter)?.name ?? projFilter}</b>
+            <b style={{ color: 'inherit' }}>{shownProjects.find((p) => p.projectId === projFilter)?.name ?? projFilter}</b>
             {' · '}
             {visibleTasks.length} 个任务
           </span>
