@@ -383,9 +383,9 @@ export async function unarchiveProject(projectId: string): Promise<OrgResult<{ p
   return orgError(r)
 }
 
-export async function downloadProjectArchive(projectId: string): Promise<OrgResult<{ filename: string; bytes: number; sha256: string; dataBase64: string }>> {
+export async function downloadProjectArchive(projectId: string): Promise<OrgResult<{ filename: string; bytes: number; sha256: string; stale?: boolean; staleSince?: string; dataBase64: string }>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<{ filename: string; bytes: number; sha256: string; dataBase64: string }>(
+  const r = await callKaipu<{ filename: string; bytes: number; sha256: string; stale?: boolean; staleSince?: string; dataBase64: string }>(
     connection, 'projectArchiveDownload', { projectId })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)

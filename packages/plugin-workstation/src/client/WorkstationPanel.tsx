@@ -3494,9 +3494,15 @@ function TaskSection(): ReactElement {
     void run(async () => {
       const r = await archiveProject(p.projectId)
       if (r.ok) {
-        const d = r.data as { files?: number; bytes?: number; archive?: string; tasks?: number }
+        const d = r.data as { files?: number; bytes?: number; archive?: string; tasks?: number;
+          complete?: boolean; doneTasks?: number; unfinished?: Array<{ title: string; status: string }> }
+        const unf = d.unfinished ?? []
+        /* ★ 2026-10-21 阿开：「担心任务还没完成就归档」—— 包是快照，不会自己更新；
+           所以归档那一刻就把「完成度」打进包里、也当场说清。 */
         setProjNotice(
-          `「${p.name}」已归档：${d.tasks ?? p.taskCount ?? 0} 个任务 / ${d.files ?? 0} 个文件 / ${d.bytes ?? 0} 字节（含 manifest 清单）`,
+          unf.length > 0
+            ? `「${p.name}」已归档：${d.tasks ?? 0} 个任务（${d.doneTasks ?? 0} 个已完成 · ⚠ 还有 ${unf.length} 个未完成）/ ${d.files ?? 0} 个文件 / ${d.bytes ?? 0} 字节。包里已标注「不完整」，未完成的任务清单也在 manifest 里。`
+            : `「${p.name}」已归档：${d.tasks ?? 0} 个任务（全部已完成 ✓）/ ${d.files ?? 0} 个文件 / ${d.bytes ?? 0} 字节（含 manifest 清单）`,
         )
         /* ★ 关键：不刷新的话按钮还是「归档」，用户以为没成功 */
         const pr = await loadProjects()
@@ -3532,8 +3538,12 @@ function TaskSection(): ReactElement {
         return r
       }
       triggerDownload(r.data.dataBase64, r.data.filename, 'application/zip')
+      /* ★ 2026-10-21 阿开：「取消归档继续完成，会影响下载包的资料版本」
+         ⇒ 包不可能自动更新。归档后又取消归档的，这个包就是**旧快照**，必须当场说。 */
       setProjNotice(
-        `已下载「${p.name}」的归档包：${Math.max(1, Math.round(r.data.bytes / 1024))} KB · sha256 ${r.data.sha256.slice(0, 12)}…（压缩包里的 manifest.json 就是归档清单）`,
+        r.data.stale
+          ? `已下载「${p.name}」的归档包，但 ⚠ 这是**旧快照**：归档之后又取消过归档（${(r.data.staleSince ?? '').replace('T', ' ')}），期间新增的任务和资料不在包里。需要最新版就再归档一次。`
+          : `已下载「${p.name}」的归档包：${Math.max(1, Math.round(r.data.bytes / 1024))} KB · sha256 ${r.data.sha256.slice(0, 12)}…（压缩包里的 manifest.json 就是归档清单）`,
       )
       return r
     })

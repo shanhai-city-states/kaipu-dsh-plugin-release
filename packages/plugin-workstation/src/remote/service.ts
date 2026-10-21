@@ -595,10 +595,10 @@ export class WorkstationRemoteService extends TypertRemoteService {
 
   /** ★ 2026-10-21：下载最近一次归档包（base64 —— @Remote 只走 JSON，拿不了二进制流） */
   @Remote('projectArchiveDownload')
-  async projectArchiveDownload(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<{ filename: string; bytes: number; sha256: string; dataBase64: string }>> {
+  async projectArchiveDownload(query: { projectId: string }, signal?: CancelSignal): Promise<RemoteResult<{ filename: string; bytes: number; sha256: string; stale?: boolean; staleSince?: string; dataBase64: string }>> {
     const pid = typeof query.projectId === 'string' ? query.projectId : ''
     if (pid.length === 0) throw new KaipuHttpError(400, 'missing_project_id', '下载归档缺项目 id')
-    const data = await this.requireHttp().call<{ filename: string; bytes: number; sha256: string; dataBase64: string }>(
+    const data = await this.requireHttp().call<{ filename: string; bytes: number; sha256: string; stale?: boolean; staleSince?: string; dataBase64: string }>(
       'GET', `/projects/${encodeURIComponent(pid)}/archive/base64`, undefined, signal)
     return { ok: true, data }
   }
