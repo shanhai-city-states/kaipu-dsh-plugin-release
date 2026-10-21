@@ -559,7 +559,14 @@ export class WorkstationRemoteService extends TypertRemoteService {
 
   /** 项目清单（带 task_count） */
   @Remote('projectsList')
-  async projectsList(_query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<ProjectsListPayload>> {
+  /* ★★ 2026-10-21 真根因：参数名原来是 `_query`，**装饰器生成的 descriptor 字段名就是 `_query`**，
+     客户端按约定传 `{args:{query:{}}}` ⇒ Gateway 直接拒绝：
+       `typert gateway: kaipu-workstation/projectsList: args fields do not match the
+        descriptor: unexpected "query"`
+     于是项目清单请求**在网关成帧阶段就被打回，连 HTTP 都没发出**（所以 nginx 里 0 条记录）。
+     ⇒ 参数名必须与客户端约定一致（`query`），不能带下划线。 */
+  async projectsList(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<ProjectsListPayload>> {
+    void query
     const data = await this.requireHttp().call<{ projects?: ProjectRow[] }>('GET', '/projects', undefined, signal)
     return { ok: true, data: { projects: Array.isArray(data?.projects) ? data.projects : [] } }
   }
@@ -889,7 +896,7 @@ export class WorkstationRemoteService extends TypertRemoteService {
   /** 下载（二进制 ⇒ base64 回渲染层） */
   /** ★ 通知：有什么在等我处理 */
   @Remote('notifications')
-  async notifications(_q: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>> {
+  async notifications(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ items: Array<{ kind: string; taskId: string; title: string; at: string; text: string; unread: boolean }>; unread: number; total: number; seenAt: string }>> {
     const d = await this.requireHttp().call<{ items?: Array<Record<string, unknown>>; unread?: number; total?: number; seenAt?: string }>('GET', '/notifications', undefined, signal)
     return { ok: true, data: {
       items: (Array.isArray(d?.items) ? d.items : []).map((r) => ({
@@ -904,7 +911,8 @@ export class WorkstationRemoteService extends TypertRemoteService {
 
   /** ★ 全部标为已看 */
   @Remote('notificationsRead')
-  async notificationsRead(_q: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ seen: boolean }>> {
+  async notificationsRead(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ seen: boolean }>> {
+    void query
     const d = await this.requireHttp().call<{ seen?: boolean }>('POST', '/notifications/read', {}, signal)
     return { ok: true, data: { seen: d?.seen === true } }
   }

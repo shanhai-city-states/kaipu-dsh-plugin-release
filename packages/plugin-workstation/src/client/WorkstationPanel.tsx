@@ -2496,7 +2496,16 @@ function PackLifecycle({ iid }: { iid: string }): ReactElement | null {
     setBusy(true); setMsg(null)
     const r = await exportPack(iid.trim())
     setBusy(false)
-    if (!r.ok) { setMsg(`下载失败：${r.message}`); return }
+    if (!r.ok) {
+      /* ★ 2026-10-21 阿开遇到「下载失败：服务端返回 404」——
+         真实原因是**这次协作的资料目录不存在**（交互 ID 是历史留下的 / 从没传过文件），
+         不是权限问题。文案要说人话，并给出下一步。 */
+      const gone = r.code === 'not_found' || /404/.test(r.message)
+      setMsg(gone
+        ? `这次协作（${iid.trim()}）没有资料可下载 —— 目录不存在，可能是历史交互 ID 或从没传过文件。换一个交互 ID 试试，或先「＋ 传文件」。`
+        : `下载失败：${r.message}`)
+      return
+    }
     triggerDownload(r.data.dataBase64, r.data.filename, 'application/zip')
     setMsg(`已下载 ${Math.max(1, Math.round(r.data.bytes / 1024))} KB。需要清理时点右边「删除这个包」。`)
   }
