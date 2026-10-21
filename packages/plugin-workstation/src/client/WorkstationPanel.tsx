@@ -288,11 +288,39 @@ export function WorkstationPanel(): ReactElement {
       {tab === 'more' ? (
         <Section title="更多">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: FS.small }}>
-            <button type="button" onClick={() => setTab('notif')} style={{ ...btnStyle(false), textAlign: 'left' }}>
-              通知{notif.unread > 0 ? `（${notif.unread} 条新的）` : ''}
+            {/* ★ 2026-10-21 阿开：「原来是按钮，但样式看不出能点，像输入框」⇒ 改卡片式：
+                整块可点、左标题右箭头、下面一行说清「点进去是什么」。 */}
+            <button
+              type="button"
+              onClick={() => setTab('notif')}
+              style={{
+                ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 10, cursor: 'pointer', textAlign: 'left', width: '100%',
+                fontFamily: 'inherit', fontSize: FS.small, padding: '11px 13px',
+              }}
+            >
+              <span>
+                <b style={{ display: 'block', marginBottom: 2 }}>通知</b>
+                <span style={{ color: C.dim, fontSize: FS.tag }}>
+                  {notif.unread > 0 ? `${notif.unread} 条新的 —— 谁交了、谁被驳了` : '有人交件、被驳回时在这里'}
+                </span>
+              </span>
+              <span style={{ color: C.dim, fontSize: 18, lineHeight: 1 }}>›</span>
             </button>
-            <button type="button" onClick={() => setTab('help')} style={{ ...btnStyle(false), textAlign: 'left' }}>
-              接入说明（给要调接口的人看）
+            <button
+              type="button"
+              onClick={() => setTab('help')}
+              style={{
+                ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 10, cursor: 'pointer', textAlign: 'left', width: '100%',
+                fontFamily: 'inherit', fontSize: FS.small, padding: '11px 13px',
+              }}
+            >
+              <span>
+                <b style={{ display: 'block', marginBottom: 2 }}>接入说明</b>
+                <span style={{ color: C.dim, fontSize: FS.tag }}>给要调接口的人看（CLI / MCP / HTTP）</span>
+              </span>
+              <span style={{ color: C.dim, fontSize: 18, lineHeight: 1 }}>›</span>
             </button>
             <div style={{ color: C.dim, lineHeight: 1.7, paddingTop: 4 }}>
               设备与权限：<b>资料</b> 页最下方「高级」—— 设备台账 / 给新设备开门
@@ -1432,6 +1460,33 @@ function InviteBar(props: { node: OrgNodeView; made: { url: string; expiresAt: s
         </div>
       )}
     </div>
+  )
+}
+
+/** 项目卡片（任务页顶部一排）—— 比下拉更直观：一眼看到有几个项目、各几个任务 */
+function ProjectChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+        fontSize: FS.tag, whiteSpace: 'nowrap', fontFamily: 'inherit',
+        border: `1px solid ${active ? '#1f2937' : C.border}`,
+        background: active ? '#1f2937' : 'transparent',
+        color: active ? '#fff' : C.dim,
+      }}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -3500,29 +3555,56 @@ function TaskSection(): ReactElement {
       {projects.length > 0 ? (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
           <span style={{ fontSize: FS.tag, color: C.dim }}>项目</span>
-          <select
-            value={projFilter}
-            onChange={(e) => setProjFilter(e.target.value)}
-            style={{ ...inputStyle, width: 'auto', flex: 1, minWidth: 140 }}
-          >
-            <option value="">全部（{tasks.length}）</option>
-            <option value="__none__">未归类</option>
+          {/* ★ 2026-10-21 阿开：「任务页要能看到有哪些项目、各几个任务」——
+              下拉要展开才看得见 ⇒ 改成一排项目卡片，一眼扫完。 */}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', flex: 1 }}>
+            <ProjectChip active={projFilter === ''} onClick={() => setProjFilter('')}>
+              全部 · {tasks.length}
+            </ProjectChip>
             {projects.filter((p) => p.status !== 'archived').map((p) => (
-              <option key={p.projectId} value={p.projectId}>{p.name}（{p.taskCount ?? 0}）</option>
+              <ProjectChip
+                key={p.projectId}
+                active={projFilter === p.projectId}
+                onClick={() => setProjFilter(p.projectId)}
+              >
+                {p.name} · {p.taskCount ?? 0}
+              </ProjectChip>
             ))}
-          </select>
-          {/* ★ 2026-10-23（古茶 002「一键挂载」）：选中具体项目才能送审 */}
-          {projFilter !== '' && projFilter !== '__none__' ? (
-            <button
-              type="button"
-              onClick={() => void requestAudit(projFilter)}
-              disabled={busy || (audit !== null && (audit.status === 'queued' || audit.status === 'running'))}
-              style={{ padding: '4px 9px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: FS.tag, whiteSpace: 'nowrap' }}
-              title="把这个项目攒下的资料送去审 —— 四灯审完给一份带密码学签名的报告"
-            >
-              {audit !== null && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
-            </button>
-          ) : null}
+            {tasks.filter((t) => !t.projectId).length > 0 ? (
+              <ProjectChip active={projFilter === '__none__'} onClick={() => setProjFilter('__none__')}>
+                未归类 · {tasks.filter((t) => !t.projectId).length}
+              </ProjectChip>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* ★ 2026-10-21：选中项目后给一条**项目条** —— 项目名 + 规模 + 申请审计。
+          原来按钮挤在下拉右边，阿开说「选了项目没找到按钮」⇒ 挪到这里，实心更显眼。 */}
+      {projFilter !== '' && projFilter !== '__none__' ? (
+        <div style={{
+          ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 10, marginBottom: 6, padding: '9px 12px',
+        }}>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>
+            <b style={{ color: 'inherit' }}>{projects.find((p) => p.projectId === projFilter)?.name ?? projFilter}</b>
+            {' · '}
+            {visibleTasks.length} 个任务
+          </span>
+          <button
+            type="button"
+            onClick={() => void requestAudit(projFilter)}
+            disabled={busy || (audit !== null && (audit.status === 'queued' || audit.status === 'running'))}
+            style={{
+              padding: '6px 13px', borderRadius: 7, border: 'none',
+              background: audit !== null && (audit.status === 'queued' || audit.status === 'running') ? 'rgba(0,0,0,.12)' : '#1f2937',
+              color: '#fff', cursor: busy ? 'default' : 'pointer',
+              fontSize: FS.tag, fontWeight: 600, whiteSpace: 'nowrap',
+            }}
+            title="把这个项目攒下的资料送去审 —— 四灯审完给一份带密码学签名的报告"
+          >
+            {audit !== null && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
+          </button>
         </div>
       ) : null}
 
