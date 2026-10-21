@@ -323,7 +323,7 @@ export function WorkstationPanel(): ReactElement {
               <span style={{ color: C.dim, fontSize: 18, lineHeight: 1 }}>›</span>
             </button>
             <div style={{ color: C.dim, lineHeight: 1.7, paddingTop: 4 }}>
-              设备与权限：<b>资料</b> 页最下方「高级」—— 设备台账 / 给新设备开门
+              设备与权限：<b>资料</b> 页（或工位页右上「🔑 设备」）—— 设备台账 / 给新设备开门
             </div>
             {/* ★ 2026-10-21：把版本号摆出来 —— 以后「你装的是不是新版」不用猜 */}
             <div style={{ textAlign: 'center', fontSize: FS.tag, color: C.dim, opacity: 0.6, paddingTop: 6 }}>
@@ -371,7 +371,7 @@ export function WorkstationPanel(): ReactElement {
                —— 那些是期1 开发期的诚实标注，读的是 scaffold 演示数据（发起人位/协作方甲乙丙）。
                   现在真工位、真任务、真资料三条链都通了，留着只会让人以为是系统状态 ⇒ 整块撤下。
                   面板只留能真改的三块：工位 / 任务 / 资料。 */}
-          <OrgSection />
+          <OrgSection onGoDevices={() => setTab('pack')} />
         </>
       )}
     </div>
@@ -1040,7 +1040,7 @@ function TaskStatsBar(): ReactElement {
   )
 }
 
-function OrgSection(): ReactElement {
+function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
   const [tree, setTree] = useState<OrgTreeView | null>(null)
   const [err, setErr] = useState<{ code: string; message: string; source?: 'action' | 'read'; title?: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1167,6 +1167,16 @@ function OrgSection(): ReactElement {
         >
           刷新
         </button>
+        {props.onGoDevices !== undefined ? (
+          <button
+            type="button"
+            onClick={props.onGoDevices}
+            style={btnStyle(false)}
+            title="设备台账 / 给新设备开门 —— 换设备、加同事的机器都在这"
+          >
+            🔑 设备
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {
