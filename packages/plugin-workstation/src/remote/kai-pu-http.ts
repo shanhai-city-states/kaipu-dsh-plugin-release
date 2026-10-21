@@ -201,7 +201,11 @@ export class KaipuHttpClient {
       fingerprint: this.fingerprint,
       // ★ B 案配套：**总是**报版本。服务端据此判断「这个客户端会不会保存 deviceSecret」——
       //   不报版本 = 旧客户端 = 不强制凭据（否则升级当天旧客户端会被自己的指纹拒绝，全挂）。
-      clientVersion: this.clientVersion || PLUGIN_VERSION,
+      /* ★ 2026-10-21 修：这里原来报 `this.clientVersion`（宿主传的是
+         `dsh-plugin-workstation/0.1.0`）⇒ 服务端永远解析不出插件版本，
+         B 案的「>= 0.2.35 才强制设备凭据」门槛**一直没生效**，
+         而且客服端排查时也查不到用户装的是哪版。⇒ 一律报插件自己的版本。 */
+      clientVersion: PLUGIN_VERSION,
     })
 
     let res: unknown

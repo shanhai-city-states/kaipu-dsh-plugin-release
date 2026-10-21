@@ -325,6 +325,10 @@ export function WorkstationPanel(): ReactElement {
             <div style={{ color: C.dim, lineHeight: 1.7, paddingTop: 4 }}>
               设备与权限：<b>资料</b> 页最下方「高级」—— 设备台账 / 给新设备开门
             </div>
+            {/* ★ 2026-10-21：把版本号摆出来 —— 以后「你装的是不是新版」不用猜 */}
+            <div style={{ textAlign: 'center', fontSize: FS.tag, color: C.dim, opacity: 0.6, paddingTop: 6 }}>
+              工位插件 v{PLUGIN_VERSION}
+            </div>
           </div>
         </Section>
       ) : tab === 'notif' ? (
@@ -962,6 +966,8 @@ function Section({ title, children }: { title: string; children: ReactNode }): R
    ══════════════════════════════════════════════════════════════════ */
 function TaskStatsBar(): ReactElement {
   const [counts, setCounts] = useState<Record<string, number> | null>(null)
+  /* ★ 2026-10-21 阿开：「统计按阶段没问题，但没有按项目区分」⇒ 同一份任务再按项目分一次 */
+  const [byProj, setByProj] = useState<Array<{ name: string; n: number }> | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -969,8 +975,24 @@ function TaskStatsBar(): ReactElement {
       const r = await loadTasks(true)
       if (!alive || !r.ok) return
       const m: Record<string, number> = {}
-      for (const t of r.data.tasks) m[t.status] = (m[t.status] ?? 0) + 1
+      const pm: Record<string, number> = {}
+      for (const t of r.data.tasks) {
+        m[t.status] = (m[t.status] ?? 0) + 1
+        const k = t.projectId || '__none__'
+        pm[k] = (pm[k] ?? 0) + 1
+      }
       setCounts(m)
+      const pr = await loadProjects()
+      if (!alive) return
+      if (pr.ok) {
+        const nameOf = (id: string): string =>
+          id === '__none__' ? '未归类' : (pr.data.projects.find((p) => p.projectId === id)?.name ?? id)
+        setByProj(
+          Object.entries(pm)
+            .map(([k, n]) => ({ name: nameOf(k), n }))
+            .sort((a, b) => b.n - a.n),
+        )
+      }
     })()
     return () => { alive = false }
   }, [])
@@ -989,8 +1011,9 @@ function TaskStatsBar(): ReactElement {
   return (
     <div style={{
       ...cardStyle, marginTop: 8, padding: '8px 12px',
-      display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+      display: 'flex', flexDirection: 'column', gap: 6,
     }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
       <span style={{ fontSize: FS.small, color: C.dim }}>任务</span>
       {items.map((it) => (
         <span key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: FS.small }}>
@@ -1000,6 +1023,19 @@ function TaskStatsBar(): ReactElement {
         </span>
       ))}
       <span style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.dim }}>共 {total} 条</span>
+      </div>
+      {/* ★ 2026-10-21：第二维 —— 按项目。同一批任务，换个切法看分布 */}
+      {byProj !== null && byProj.length > 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
+          <span style={{ fontSize: FS.small, color: C.dim }}>按项目</span>
+          {byProj.map((x) => (
+            <span key={x.name} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: FS.tag }}>
+              <span style={{ color: C.dim, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span>
+              <span style={{ fontWeight: 600, color: C.text }}>{x.n}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -3100,6 +3136,12 @@ function TaskSection(): ReactElement {
   const [projFilter, setProjFilter] = useState<string>('')
   /* 四段折叠：默认只展开「待我处理」（其余段显示条数，点开看） */
   const [openSec, setOpenSec] = useState<Record<string, boolean>>({})
+  /* ★ 2026-10-21：只有一个项目时**自动选中它** —— 否则「全部」状态下看不到项目条，
+     也就看不到「申请审计」，阿开连着两次说「找不到按钮」就是这个原因。 */
+  useEffect(() => {
+    const only = projects.length === 1 ? projects[0] : null
+    if (projFilter === '' && only !== null && only !== undefined) setProjFilter(only.projectId)
+  }, [projects, projFilter])
   /* ★ 2026-10-23（古茶 002「一键挂载」）：项目 → 审计 → 带签名报告。
      服务端建单后立刻返回，跑审在后台（四灯场景，几分钟）⇒ 这里只存 id/status，
      由 effect 每 5 秒问一次；`report` 到了才渲染结论。 */
