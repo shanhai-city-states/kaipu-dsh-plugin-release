@@ -3278,6 +3278,11 @@ function TaskSection(): ReactElement {
          直接把「先去归档」这条路指出来（用户点的是审计按钮，脑子里想的是送审）。
          ★★ 2026-10-21 阿开：这类提示要跟「已取消 —— 先把剩下的活干完」放在**同一个位置**
             （项目区 `projNotice`）—— 全局提示离归档按钮太远，看见也不知道往哪点。 */
+      if (r.code === 'audit_not_enabled') {
+        setProjNotice('审计功能还没开通 —— 请联系管理员开通后再送审。')
+        setNotice(null)
+        return
+      }
       if (r.code === 'project_draft_only') {
         setProjNotice('这份是「暂存」包，不能当定稿送审 —— 把剩下的活干完，正式归档一次再送审。')
         setNotice(null)
