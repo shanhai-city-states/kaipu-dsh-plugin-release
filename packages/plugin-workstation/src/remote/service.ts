@@ -19,6 +19,9 @@
  */
 
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+/* ★ `remoteMethods` 只在运行时入口导出、**类型声明里没有**（tsc 会报 TS2305）。
+   ⇒ 走命名空间 + 结构断言取它：host half 不经打包，运行时确实拿得到。 */
+import * as dshProtocol from '@deepseek-ai/dsh-typert-protocol'
 // ★ 只 import type —— host half 不经打包，契约包是构建期依赖（用户机上没有），
 //   类型被 tsc 擦除 ⇒ 不产生运行时依赖（由桥接检查脚本看护）。
 import type {
@@ -362,6 +365,56 @@ export interface TasksListPayload {
 }
 
 /**
+ * ★★ 2026-10-21（0.2.54）· 所有 `@Remote` 方法的统一**错误边界**
+ *
+ * 为什么不能靠抛异常跨网关：
+ *   0.2.53 实测 —— host 抛出的自定义异常被标记成 DSH `RemoteError` 后，
+ *   点归档直接得到 `connection: invalid server-response failure`
+ *   （网关无法编码它），用户只看到一句笼统失败。
+ *   协议里**业务失败的正规载体是返回值**（contract `RemoteErr`），不是异常。
+ *
+ * 为什么能在这里包：`@Remote` 的 marker 记的是**方法名**（挂在 prototype 的
+ *   `@deepseek-ai/dsh-typert-protocol/remote-methods` descriptor 上），
+ *   网关按 `service[name](…)` 取名调用 ⇒ 在实例上覆盖同名方法即生效，marker 不受影响。
+ *   一次覆盖 47 处调用点，不用逐方法 try/catch。
+ *
+ * 边界规则：
+ *   · `KaipuHttpError`（服务端 4xx/5xx 业务错）⇒ `{ok:false, kind, error, code}` 正常返回
+ *     （纯 JSON，一定过 wire；`code` 保住，前端按码分支才有效）
+ *   · 其它异常照旧抛 —— 那是真 bug，要让它炸出来，别吞。
+ */
+type RemoteMethodMarker = { readonly method: string }
+type RemoteMethodsFn = (service: object) => ReadonlyArray<RemoteMethodMarker>
+
+/** 运行时取 `remoteMethods`（见上方 import 注释）；取不到返回 empty（边界不装，但不崩） */
+function listRemoteMethods(service: object): ReadonlyArray<RemoteMethodMarker> {
+  const fn = (dshProtocol as unknown as { remoteMethods?: RemoteMethodsFn }).remoteMethods
+  return typeof fn === 'function' ? fn(service) : []
+}
+
+export function installErrorBoundary(target: object): void {
+  const holder = target as unknown as Record<string, unknown>
+  for (const marker of listRemoteMethods(target)) {
+    const name = marker.method
+    const orig = holder[name]
+    if (typeof orig !== 'function') continue
+    const callOriginal = orig as (...args: unknown[]) => Promise<unknown>
+    holder[name] = async (...args: unknown[]): Promise<unknown> => {
+      try {
+        return await callOriginal.apply(target, args)
+      } catch (e) {
+        if (e instanceof KaipuHttpError) {
+          /* 4xx = 业务拒绝（denied）；5xx/0 = 故障（error）—— 前端据此决定措辞与去路 */
+          const kind = e.status >= 400 && e.status < 500 ? 'denied' : 'error'
+          return { ok: false, kind, error: e.message, code: e.code }
+        }
+        throw e
+      }
+    }
+  }
+}
+
+/**
  * 工位数据通道服务。
  * 第 2 个构造参数 `REMOTE_NS` 同时是：cordis 服务键 + 默认 wire namespace
  * （客户端端点即 `kaipu-workstation/status` / `kaipu-workstation/state`）。
@@ -387,6 +440,9 @@ export class WorkstationRemoteService extends TypertRemoteService {
     } else {
       this.http = null
     }
+    /* ★ 0.2.54：装统一错误边界 —— 必须**在构造末尾**（此时 @Remote marker 已由
+       类字段初始化器写到 prototype 上，方法也都就位）。 */
+    installErrorBoundary(this)
   }
 
   /** 通道是否可选（供面板判断能否操作） */

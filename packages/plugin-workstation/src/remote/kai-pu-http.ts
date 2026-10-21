@@ -106,15 +106,6 @@ function getProcess(): ProcessLike | undefined {
 export class KaipuHttpError extends Error {
   readonly status: number
   readonly code: string
-  /**
-   * ★★ DSH Gateway 的**结构性识别标记**（2026-10-21）：
-   *   协议 `remoteErrorOf()` 只认 `isDSHRemoteError === true && typeof code === 'string'`
-   *   （`@deepseek-ai/dsh-typert-protocol/lib/types/remote-error.js`）。
-   *   没有这个标记，**任何自定义异常都会被网关折叠成 `gateway/internal`** ——
-   *   业务 code 在 host→client 这一段就丢了，前端只能看到「服务端返回 400」。
-   *   ⇒ 加标记，让网关把 code/message **原样编码**过 wire。
-   */
-  readonly isDSHRemoteError: true = true
   readonly details: Record<string, unknown> | undefined
   constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
     super(message)
