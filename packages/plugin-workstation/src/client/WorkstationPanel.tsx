@@ -3269,6 +3269,16 @@ function TaskSection(): ReactElement {
       { projectId, package: 'standard' },
     )
     if (!r.ok) {
+      /* ★ 2026-10-21 甲案：送审必归档 ⇒ 没归档被拒时，别只报一个错误码，
+         直接把「先去归档」这条路指出来（用户点的是审计按钮，脑子里想的是送审）。 */
+      if (r.code === 'project_not_frozen') {
+        setNotice('请先归档，定稿后送审 —— 审计要针对一个确定的版本。右侧「归档」按钮就在旁边。')
+        return
+      }
+      if (r.code === 'archive_stale') {
+        setNotice('解冻过 ⇒ 之前的归档包已作废。请重新归档（生成新的 sha256）后再送审。')
+        return
+      }
       setErr({
         code: r.code ?? 'audit_failed',
         message: r.message ?? '审计申请没发出去',
@@ -3886,20 +3896,9 @@ function TaskSection(): ReactElement {
             {' · '}
             {visibleTasks.length} 个任务
           </span>
-          <button
-            type="button"
-            onClick={() => void requestAudit(projFilter)}
-            disabled={busy || (audit !== null && (audit.status === 'queued' || audit.status === 'running'))}
-            style={{
-              padding: '6px 13px', borderRadius: 7, border: 'none',
-              background: audit !== null && (audit.status === 'queued' || audit.status === 'running') ? 'rgba(0,0,0,.12)' : '#1f2937',
-              color: '#fff', cursor: busy ? 'default' : 'pointer',
-              fontSize: FS.tag, fontWeight: 600, whiteSpace: 'nowrap',
-            }}
-            title="把这个项目攒下的资料送去审 —— 四灯审完给一份带密码学签名的报告"
-          >
-            {audit !== null && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
-          </button>
+          {/* ★ 2026-10-21 阿开：「申请审计按钮搬到项目归档按钮旁边更方便」
+              —— 送审本来就要求先归档，两个动作是一对，放一起才顺手。
+              这里只留项目名与规模，按钮统一在项目卡片上。 */}
         </div>
       ) : null}
 
@@ -4015,6 +4014,20 @@ function TaskSection(): ReactElement {
                   <>
                     <button
                       type="button"
+                      onClick={() => void requestAudit(p.projectId)}
+                      disabled={busy || (audit !== null && (audit.status === 'queued' || audit.status === 'running'))}
+                      style={{
+                        padding: '5px 11px', borderRadius: 6, border: 'none',
+                        background: audit !== null && (audit.status === 'queued' || audit.status === 'running') ? 'rgba(0,0,0,.12)' : '#1f2937',
+                        color: '#fff', cursor: busy ? 'default' : 'pointer',
+                        fontSize: FS.tag, fontWeight: 600, whiteSpace: 'nowrap',
+                      }}
+                      title="把这份定稿送去审 —— 四灯审完给一份带密码学签名的报告"
+                    >
+                      {audit !== null && (audit.status === 'queued' || audit.status === 'running') ? '审计中…' : '🔍 申请审计'}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => onDownloadArchive(p)}
                       disabled={busy}
                       style={btnStyle(true)}
@@ -4033,15 +4046,26 @@ function TaskSection(): ReactElement {
                     </button>
                   </>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => onArchive(p)}
-                    disabled={busy}
-                    style={btnStyle(true)}
-                    title="打包这个项目的全部任务资料 + manifest 清单（不删原件）"
-                  >
-                    归档
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onArchive(p)}
+                      disabled={busy}
+                      style={btnStyle(true)}
+                      title="打包这个项目的全部任务资料 + manifest 清单（不删原件）"
+                    >
+                      归档
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void requestAudit(p.projectId)}
+                      disabled={busy}
+                      style={btnStyle(false)}
+                      title="送审要求先归档 —— 点它会提示你先归档，定稿后再送"
+                    >
+                      🔍 申请审计
+                    </button>
+                  </>
                 )}
               </div>
             ))}
