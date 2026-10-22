@@ -649,11 +649,45 @@ function DeviceTab(): ReactElement {
   const [cred, setCred] = useState<{ deviceId: string; deviceSecret: string } | null>(null)
   const [done, setDone] = useState('')
   const [manual, setManual] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetMsg, setResetMsg] = useState('')
+  /* ★ 2026-10-22（丙）：铺主可剔除 —— 「后悔分享出去」的入口就在这里。
+     默认收起，不影响普通用户看自己那一行码。 */
+  type DRow = {
+    deviceId: string; fpHash8: string; fpHash: string; status: string
+    clientVersion: string; firstSeen: string | null; lastSeen: string | null; issueCount: number
+  }
+  const [devs, setDevs] = useState<{ items: DRow[]; count: number; activeCount: number } | null>(null)
+  const loadDevs = async (): Promise<void> => {
+    const r = await callPack<{ items: DRow[]; count: number; activeCount: number }>('devicesList', {})
+    if (r.ok) setDevs(r.data)
+  }
+  useEffect(() => { void loadDevs() }, [])
+  const revoke = (row: DRow, off: boolean): void => {
+    void callPack<{ fpHash8: string; status: string }>('deviceRevoke', { fpHash: row.fpHash8, revoked: off })
+      .then((r) => { if (r.ok) void loadDevs() })
+  }
   useEffect(() => {
     void callActionData<{ deviceId: string; deviceSecret: string } | null>('deviceCred', {}).then((r) => {
       if (r.ok) setCred(r.data)
     })
   }, [])
+
+  /* ★ 2026-10-22（丙）：本人主动重置设备码 —— 旧 secret 立刻作废，页面还是一条码。 */
+  const doReset = (): void => {
+    setResetBusy(true); setResetMsg('')
+    void callActionData<{ deviceId: string; deviceSecret: string; expiresAt?: string }>(
+      'deviceResetSecret', {},
+    ).then((r) => {
+      setResetBusy(false)
+      if (r.ok) {
+        setCred({ deviceId: r.data.deviceId, deviceSecret: r.data.deviceSecret })
+        setResetMsg(r.data.expiresAt ? `已换新码 · 有效至 ${String(r.data.expiresAt).slice(0, 10)}` : '已换新码')
+      } else {
+        setResetMsg(`重置失败：${r.message || r.code || '未知原因'}`)
+      }
+    })
+  }
 
   const copy = (text: string, tag: string): void => {
     const nav = (globalThis as { navigator?: { clipboard?: { writeText(t: string): Promise<void> } } }).navigator
@@ -688,6 +722,21 @@ function DeviceTab(): ReactElement {
             <button type="button" onClick={() => copy(cred.deviceId, 'id')} style={{ ...btnStyle(false), fontSize: FS.small }}>
               {done === 'id' ? '已复制' : '复制设备码'}
             </button>
+            {/* ★ 2026-10-22（丙）：设备丢了/借人了/怕泄露 —— 一键换新，旧码立刻作废 */}
+            <button
+              type="button"
+              onClick={doReset}
+              disabled={resetBusy}
+              title="换一个新码；旧的立刻作废（别人手里的那份就失效了）"
+              style={{ ...btnStyle(false), fontSize: FS.small }}
+            >
+              {resetBusy ? '重置中…' : '重置'}
+            </button>
+            {resetMsg !== '' ? (
+              <span style={{ fontSize: FS.tag, color: resetMsg.startsWith('重置失败') ? '#b3261e' : '#1f7a3d' }}>
+                {resetMsg}
+              </span>
+            ) : null}
           </div>
           <div style={{ padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
             想给某个山海 Skill 开权限？<b style={{ color: C.text }}>点下面的按钮，把整段话复制给你的 Agent</b>，

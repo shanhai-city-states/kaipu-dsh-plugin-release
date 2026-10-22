@@ -1208,6 +1208,15 @@ export class WorkstationRemoteService extends TypertRemoteService {
    * ★ 2026-10-21（阿开拍板 L3）：铺主给本铺签一次性「设备加入码」。
    *   用途：另一台设备要用本铺 accountId 时，必须持码 —— 否则知道铺名就能进。
    */
+  /** ★ 2026-10-22（丙）：本人重置设备码（旧 secret 立即作废，新 secret 写回本地） */
+  @Remote('deviceResetSecret')
+  async deviceResetSecret(
+    query: EmptyQuery, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ deviceId: string; deviceSecret: string; expiresAt?: string }>> {
+    const data = await this.requireHttp().resetDeviceSecret(signal)
+    return { ok: true, data }
+  }
+
   @Remote('deviceJoinCodeCreate')
   async deviceJoinCodeCreate(
     query: { note?: string; ttlHours?: number }, signal?: CancelSignal,

@@ -141,6 +141,19 @@ export class KaipuHttpClient {
   private readonly baseUrl: string
   private readonly fingerprint: string
   private readonly clientVersion: string
+  /** ★ 2026-10-22（丙）：本人主动重置设备码。旧 secret 立刻作废，新 secret 写回本地文件。 */
+  async resetDeviceSecret(signal?: unknown): Promise<{ deviceId: string; deviceSecret: string; expiresAt?: string }> {
+    const cred = readAnyDeviceCred()
+    if (!cred) {
+      throw new KaipuHttpError(0, 'no_device_cred',
+        '找不到本机设备凭据：先在工位里登录一次，再回来重置。')
+    }
+    const data = await this.call<{ deviceId: string; deviceSecret: string; expiresAt?: string }>(
+      'POST', '/auth/device/reset', cred as unknown as Record<string, unknown>, signal as never)
+    updateDeviceCredById(cred.deviceId, { deviceSecret: data.deviceSecret })
+    return data
+  }
+
   private token: string | null = null
   private accountId: string | null = null
   private expiresAt = 0
@@ -485,6 +498,8 @@ function deriveFingerprint(): string {
 export interface DeviceCred {
   deviceId: string
   deviceSecret: string
+  /** ★ 2026-10-22（丙）：绑定到这台机器的指纹 —— 复制走 deviceSecret 也用不了 */
+  fingerprint?: string
 }
 
 type ProcLike = { getBuiltinModule?: (id: string) => unknown }
@@ -544,11 +559,42 @@ export function readDeviceCred(baseUrl: string): DeviceCred | null {
     const j = JSON.parse(fs.readFileSync(f, 'utf8')) as Partial<DeviceCred>
     if (typeof j.deviceId === 'string' && j.deviceId.length > 0 &&
         typeof j.deviceSecret === 'string' && j.deviceSecret.length > 0) {
-      return { deviceId: j.deviceId, deviceSecret: j.deviceSecret }
+      return { deviceId: j.deviceId, deviceSecret: j.deviceSecret,
+        ...(typeof (j as { fingerprint?: string }).fingerprint === 'string'
+          ? { fingerprint: (j as { fingerprint?: string }).fingerprint } : {}) }
     }
     return null
   } catch {
     return null
+  }
+}
+
+/** ★ 2026-10-22（丙）：把新 secret 写回**原来那个** device-*.json（按 deviceId 匹配）。
+ *  为什么不直接用 credFile(baseUrl)：readAnyDeviceCred 可能读到别的 baseUrl 的文件，
+ *  写错文件会导致「重置成功但 skill 还读旧 secret」。 */
+export function updateDeviceCredById(deviceId: string, patch: Partial<DeviceCred>): boolean {
+  try {
+    const fs = builtin<{
+      readdirSync(p: string): string[]
+      readFileSync(p: string, enc: string): string
+      writeFileSync(p: string, d: string, o?: { mode?: number }): void
+    }>('node:fs')
+    const os = builtin<{ homedir(): string }>('node:os')
+    const path = builtin<{ join(...p: string[]): string }>('node:path')
+    const dir = path.join(os.homedir(), '.kai-pu')
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith('device-') || !f.endsWith('.json')) continue
+      const fp = path.join(dir, f)
+      try {
+        const j = JSON.parse(fs.readFileSync(fp, 'utf8'))
+        if (j.deviceId !== deviceId) continue
+        fs.writeFileSync(fp, JSON.stringify({ ...j, ...patch }), { mode: 0o600 })
+        return true
+      } catch { continue }
+    }
+    return false
+  } catch {
+    return false
   }
 }
 
@@ -571,7 +617,9 @@ export function readAnyDeviceCred(): DeviceCred | null {
         const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Partial<DeviceCred>
         if (typeof j.deviceId === 'string' && j.deviceId.length > 0 &&
             typeof j.deviceSecret === 'string' && j.deviceSecret.length > 0) {
-          return { deviceId: j.deviceId, deviceSecret: j.deviceSecret }
+          return { deviceId: j.deviceId, deviceSecret: j.deviceSecret,
+            ...(typeof (j as { fingerprint?: string }).fingerprint === 'string'
+              ? { fingerprint: (j as { fingerprint?: string }).fingerprint } : {}) }
         }
       } catch { continue }
     }
@@ -591,7 +639,12 @@ export function writeDeviceCred(baseUrl: string, c: DeviceCred): boolean {
     const path = builtin<{ dirname(p: string): string }>('node:path')
     const f = credFile(baseUrl)
     fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 })
-    fs.writeFileSync(f, JSON.stringify(c), { mode: 0o600 })
+    // ★ 写入时补 fingerprint：这样 Skill 侧（hub_dash.py）能把它带给 kai-pu 做双绑校验
+    const out: DeviceCred = { ...c }
+    if (!out.fingerprint) {
+      try { out.fingerprint = deriveFingerprint() } catch { /* 算不出就不写 */ }
+    }
+    fs.writeFileSync(f, JSON.stringify(out), { mode: 0o600 })
     return true
   } catch {
     return false

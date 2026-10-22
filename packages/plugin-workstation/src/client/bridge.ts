@@ -118,6 +118,7 @@ export const ENDPOINTS = {
   devicesList: 'devicesList',
   /** 撤销 / 恢复一台设备 · `POST /devices/{fp}/revoke` */
   deviceRevoke: 'deviceRevoke',
+  deviceResetSecret: 'deviceResetSecret',
   /** 设备进出流水 · `GET /devices/events` */
   deviceEvents: 'deviceEvents',
 
