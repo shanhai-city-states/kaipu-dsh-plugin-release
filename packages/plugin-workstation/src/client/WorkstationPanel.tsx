@@ -610,13 +610,16 @@ POST {baseUrl}/tasks/{taskId}/approve      （铺主 Bearer，不是 Agent 签�
 
 
 /* ── 设备码 ──
- * ★ 2026-10-22 阿开：「设备码领取页面做成工位卖点页面，设备码单独一个 tab 页」。
- *   这里只做「给」：显示设备码 + 一键复制解锁串 + 工位卖点。
- *   deviceSecret 不显示明文，只随「复制解锁串」进剪贴板。
+ * ★ 2026-10-22 阿开：「设备码单独一个 tab 页」「下面介绍参考工位 README 提炼卖点」。
+ * ★ 设计取舍（阿开问「解锁串和设备码有什么区别、会不会影响用户选择」）：
+ *   两种东西并排 = 用户不知道该点哪个 ⇒ **默认路径必须零决策**。
+ *   ⇒ 主区只留「设备码」（身份证，可给人看）；
+ *     「解锁串」（身份证+钥匙）收进「手动方式」折叠，只在自动识别失败时才用。
  */
 function DeviceTab(): ReactElement {
   const [cred, setCred] = useState<{ deviceId: string; deviceSecret: string } | null>(null)
   const [done, setDone] = useState('')
+  const [manual, setManual] = useState(false)
   useEffect(() => {
     void callActionData<{ deviceId: string; deviceSecret: string } | null>('deviceCred', {}).then((r) => {
       if (r.ok) setCred(r.data)
@@ -631,6 +634,13 @@ function DeviceTab(): ReactElement {
     })
   }
 
+  const point = (t: string, d: string): ReactElement => (
+    <div style={{ marginBottom: 7 }}>
+      <span style={{ color: C.text, fontWeight: 600 }}>{t}</span>
+      <span style={{ color: C.dim }}> —— {d}</span>
+    </div>
+  )
+
   return (
     <Section title="设备码">
       {cred === null ? (
@@ -640,36 +650,55 @@ function DeviceTab(): ReactElement {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
-            把这台设备的码给任意山海 Skill，即可解锁对应的免费能力 —— 一机一码，不用另外申请。
+            这是这台机器的<b style={{ color: C.text }}>身份证</b> —— 报备、核对、排查时说给对方听的就是它，不涉密。
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: FS.small, color: C.dim }}>设备码</span>
-            <code style={{ fontSize: FS.small, padding: '2px 8px', border: `1px solid ${C.border}`, borderRadius: 6 }}>
+            <code style={{ fontSize: FS.small, padding: '3px 9px', border: `1px solid ${C.border}`, borderRadius: 6 }}>
               {cred.deviceId}
             </code>
             <button type="button" onClick={() => copy(cred.deviceId, 'id')} style={{ ...btnStyle(false), fontSize: FS.small }}>
-              {done === 'id' ? '已复制' : '复制'}
+              {done === 'id' ? '已复制' : '复制设备码'}
             </button>
+          </div>
+          <div style={{ padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
+            装好工位后，在任意山海 Skill 里运行一次 <code style={{ color: C.text }}>claim</code>，
+            它就会自动认到这台设备 —— <b style={{ color: C.text }}>不用你复制任何东西，也不用填授权码</b>。
           </div>
           <button
             type="button"
-            onClick={() => copy(JSON.stringify({ deviceId: cred.deviceId, deviceSecret: cred.deviceSecret }), 'full')}
-            style={{ ...btnStyle(true), alignSelf: 'flex-start', fontSize: FS.small }}
+            onClick={() => setManual(!manual)}
+            style={{ alignSelf: 'flex-start', background: 'transparent', border: 'none', padding: 0, color: C.dim, fontSize: FS.tag, cursor: 'pointer', textDecoration: 'underline' }}
           >
-            {done === 'full' ? '已复制解锁串' : '复制解锁串（贴给 Skill 用）'}
+            {manual ? '收起手动方式' : 'Skill 读不到设备？手动方式'}
           </button>
-          <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: LH.normal }}>
-            解锁串含设备密钥，等于这台机器的钥匙 —— 不要发群、不要贴公开文档。
-          </div>
+          {manual ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: LH.normal }}>
+                只在自动识别失败时用。复制下面这串，贴进 Skill 的配置文件里。
+              </div>
+              <button
+                type="button"
+                onClick={() => copy(JSON.stringify({ deviceId: cred.deviceId, deviceSecret: cred.deviceSecret }), 'full')}
+                style={{ ...btnStyle(false), alignSelf: 'flex-start', fontSize: FS.small }}
+              >
+                {done === 'full' ? '已复制解锁串' : '复制解锁串'}
+              </button>
+              <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: LH.normal }}>
+                解锁串 = 设备码 + 设备密钥，等于这台机器的钥匙 —— 不要发群、不要贴公开文档。
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
-      <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}`, fontSize: FS.small, color: C.dim, lineHeight: LH.loose }}>
-        <div style={{ fontWeight: 700, color: C.text, marginBottom: 6 }}>装了工位，你还多了什么</div>
-        <div>· 一个固定的位置 —— 谁在做什么，一眼看得见，不用群里问。</div>
-        <div>· 任务有据 —— 派给谁、做到哪、卡在哪，都留在铺子里。</div>
-        <div>· 资料归位 —— 按任务归档，不再散在聊天记录里。</div>
-        <div>· 能力连坐 —— 装一次工位，后续更多 Skill 都能一并解锁。</div>
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${C.border}`, fontSize: FS.small, lineHeight: LH.loose }}>
+        <div style={{ fontWeight: 700, color: C.text, marginBottom: 9 }}>为什么值得装一个工位</div>
+        {point('跨云跨端', '云上、本地、Windows、Mac 的 Agent 坐进同一张桌，不用来回倒消息')}
+        {point('谁在做什么', '轮到谁、卡在哪、谁在线，一眼看见，不用群里问')}
+        {point('交接有据', '任务派给谁、做到哪一步、交付了什么，都留在工位上')}
+        {point('资料归位', '每份文件挂在对应任务下，不再散在聊天记录里')}
+        {point('换机不重来', '数据在云端，卸载重装登录即回，不会从头再来')}
+        {point('能力连坐', '装一次工位，后续更多山海 Skill 都能一并解锁')}
       </div>
     </Section>
   )
