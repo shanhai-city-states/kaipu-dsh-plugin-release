@@ -406,7 +406,7 @@ export function WorkstationPanel(): ReactElement {
                —— 那些是期1 开发期的诚实标注，读的是 scaffold 演示数据（发起人位/协作方甲乙丙）。
                   现在真工位、真任务、真资料三条链都通了，留着只会让人以为是系统状态 ⇒ 整块撤下。
                   面板只留能真改的三块：工位 / 任务 / 资料。 */}
-          <OrgSection onGoDevices={() => { setTab('pack'); setAdvTick((t) => t + 1) }} />
+          <OrgSection onGoDevices={() => setTab('device')} />
         </>
       )}
     </div>
@@ -1340,9 +1340,9 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
             type="button"
             onClick={props.onGoDevices}
             style={btnStyle(false)}
-            title="设备台账 / 给新设备开门 —— 换设备、加同事的机器都在这"
+            title="本机设备码 —— 复制给 Agent 即可解锁山海技能"
           >
-            🔑 设备
+            🔑 设备码
           </button>
         ) : null}
         <button
@@ -3097,6 +3097,8 @@ function PackSection({ onUpload, focus, advTick }: {
     await refresh()
   }
 
+  /* ★ 2026-10-22 阿开：设备台账/流水移出资料页（设备有自己的 tab）⇒ 入口按钮已撤。
+     函数保留：将来做「设备审计」时还要用同一个接口，删了会断 API 约定。 */
   const onJournal = async (): Promise<void> => {
     setBusy(true)
     setErr(null)
@@ -3121,9 +3123,6 @@ function PackSection({ onUpload, focus, advTick }: {
         </code>
         <button type="button" onClick={() => void refresh()} disabled={busy} style={btnStyle(false)}>
           刷新
-        </button>
-        <button type="button" onClick={() => void onJournal()} disabled={busy || ref.interactionId.length === 0} style={btnStyle(false)}>
-          流水
         </button>
         <span style={{ flex: 1 }} />
         <button type="button" onClick={onUpload} disabled={busy} style={btnStyle(true)} title="传文件不在这一页做 —— 单独一页，免得和查看混在一起">
@@ -3249,43 +3248,6 @@ function PackSection({ onUpload, focus, advTick }: {
         </div>
       </details>
 
-      {/* ★ 2026-10-21（阿里星月建议 · 阿开要「进出记录」）：设备台账 = 白名单本体
-          —— 入册 = 用码进来过一次；移出 = 只改状态不删记录（流水能对上）。 */}
-      <details style={{ marginTop: 8 }}>
-        <summary style={{ cursor: 'pointer', fontSize: FS.small, color: 'rgba(0,0,0,.6)' }}>
-          设备台账
-          {devices !== null ? `（在册 ${devices.activeCount} 台 · 共 ${devices.count} 条记录）` : ''}
-        </summary>
-        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {devices === null ? (
-            <span style={{ fontSize: FS.tag, color: C.dim }}>加载中…</span>
-          ) : devices.items.length === 0 ? (
-            <span style={{ fontSize: FS.tag, color: C.dim }}>还没有设备入册</span>
-          ) : devices.items.map((d) => (
-            <div key={d.deviceId} style={{
-              display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
-              fontSize: FS.tag, color: d.status === 'active' ? C.text : C.dim,
-            }}>
-              <code style={{ padding: '1px 5px', background: C.soft, borderRadius: 3 }}>{d.fpHash8}</code>
-              <span style={{ color: C.dim }}>{d.clientVersion || '—'}</span>
-              <span style={{ color: C.dim }}>
-                首次 {fmtWhen(d.firstSeen)} · 最近 {fmtWhen(d.lastSeen)}
-              </span>
-              {d.status === 'active' ? (
-                <button type="button" style={btnStyle(false)}
-                  onClick={() => void revokeDevice(d.fpHash, true)}>移出</button>
-              ) : (
-                <>
-                  <span style={{ color: '#b3261e' }}>已移出</span>
-                  <button type="button" style={btnStyle(false)}
-                    onClick={() => void revokeDevice(d.fpHash, false)}>恢复</button>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      </details>
-
       {notice !== null && (
         <div style={{ marginTop: 6, fontSize: FS.small, color: '#1f7a3d' }}>{notice}</div>
       )}
@@ -3332,30 +3294,6 @@ function PackSection({ onUpload, focus, advTick }: {
         </div>
       )}
 
-      {journal !== null && (
-        <div style={{ marginTop: 10, fontSize: FS.small }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            流水 · {journal.lines.length} 行 ·{' '}
-            {journal.ok ? (
-              <span style={{ color: '#1f7a3d' }}>链完整</span>
-            ) : (
-              <span style={{ color: '#b3261e' }}>
-                第 {journal.brokenAtSeq ?? '?'} 行断裂
-                {journal.anchorOk === false ? '（锚点对不上：可能被截断）' : ''}
-              </span>
-            )}
-            {journal.appendOnly === true ? ' · 内核层追加保护已开' : ''}
-          </div>
-          <div style={{ maxHeight: 160, overflow: 'auto', fontFamily: 'ui-monospace, monospace', lineHeight: 1.5 }}>
-            {journal.lines.map((ln, i) => (
-              <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {String((ln as Record<string, unknown>).seq ?? i + 1)}. {String((ln as Record<string, unknown>).event ?? '?')} ·{' '}
-                {String((ln as Record<string, unknown>).actor ?? '')} · {String((ln as Record<string, unknown>).file ?? '')}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </Section>
   )
 }
