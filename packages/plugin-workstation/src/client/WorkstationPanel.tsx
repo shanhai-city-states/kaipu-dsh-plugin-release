@@ -3010,6 +3010,7 @@ function PackSection({ onUpload, focus, advTick }: {
   const [joinTtl, setJoinTtl] = useState<number>(24)
   const [joinBusy, setJoinBusy] = useState(false)
   const [joinCopied, setJoinCopied] = useState(false)
+  const [guideCopied, setGuideCopied] = useState(false)
 
   /* ★ 2026-10-21（阿里星月建议）：设备台账 = 白名单本体（入册/撤销/流水） */
   type DeviceRow = {
@@ -3314,6 +3315,38 @@ function PackSection({ onUpload, focus, advTick }: {
                   setTimeout(() => setJoinCopied(false), 1800)
                 } catch { /* 手动复制 */ }
               })() }}>{joinCopied ? '✓ 已复制' : '复制'}</button>
+              {/* ★ 2026-10-22（阿开）：加入码的人**不会自动配好 skill** —— 给他一段能直接甩给 Agent 的指令，
+                  把「进铺 + 装技能 + 领授权」一次做完，不用他自己研究。 */}
+              <button type="button" style={btnStyle(false)} onClick={() => { void (async () => {
+                const guide = [
+                  '请帮我完成三件事，一次做完。',
+                  '',
+                  '一、装开铺工位插件',
+                  '在插件市场搜 kaipu-plugin-workstation 并安装，然后用我的账号登录。',
+                  '',
+                  '二、用这个加入码进铺',
+                  '工位加入码：' + joinCode.code,
+                  '在插件「工位」页里找加入入口，把上面的码填进去。',
+                  '',
+                  '三、装「山海数据看板」技能并领授权',
+                  '1) 下载并解压：https://agent.ak2029.com/dl084/dashboard-hub.tar.gz',
+                  '   解压得到 dashboard-hub 文件夹，整个放进你的技能目录。',
+                  '2) 打开 dashboard-hub/hub.json（没有就复制 hub.json.example），保证有且只有：',
+                  '   {"url": "https://agent.ak2029.com/hub-084"}',
+                  '3) 在 dashboard-hub 目录里运行：',
+                  '   python scripts/hub_dash.py claim',
+                  '4) 验证：',
+                  '   python scripts/hub_dash.py profile <表格路径>',
+                  '',
+                  '授权码不用手工填 —— claim 会自动读本机的工位设备凭据并领到，'
+                  + '免费额度，一年到期后回工位插件重领。',
+                ].join('\n')
+                try {
+                  await navigator.clipboard.writeText(guide)
+                  setGuideCopied(true)
+                  setTimeout(() => setGuideCopied(false), 1800)
+                } catch { /* 手动复制 */ }
+              })() }}>{guideCopied ? '✓ 已复制' : '📋 复制给新同事的指令'}</button>
             </>
           ) : (
             <span style={{ fontSize: FS.tag, color: C.dim }}>
