@@ -406,7 +406,9 @@ export function WorkstationPanel(): ReactElement {
                —— 那些是期1 开发期的诚实标注，读的是 scaffold 演示数据（发起人位/协作方甲乙丙）。
                   现在真工位、真任务、真资料三条链都通了，留着只会让人以为是系统状态 ⇒ 整块撤下。
                   面板只留能真改的三块：工位 / 任务 / 资料。 */}
-          <OrgSection onGoDevices={() => setTab('device')} />
+          {/* ★ 2026-10-22 阿开：这个按钮是「给同事发邀请」的快捷入口 ⇒ 指回资料页（工位加入码在那儿），
+              不是「看我自己的设备码」（那个在「设备码」tab 里）。 */}
+          <OrgSection onGoDevices={() => setTab('pack')} />
         </>
       )}
     </div>
@@ -1340,9 +1342,9 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
             type="button"
             onClick={props.onGoDevices}
             style={btnStyle(false)}
-            title="本机设备码 —— 复制给 Agent 即可解锁山海技能"
+            title="给同事的机器发一个入场码 —— 持码加入后能看本铺任务和资料"
           >
-            🔑 设备码
+            🔑 邀请
           </button>
         ) : null}
         <button
