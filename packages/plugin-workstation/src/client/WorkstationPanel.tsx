@@ -248,7 +248,7 @@ export function WorkstationPanel(): ReactElement {
     >
       {/* ── Tab 头 ── */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, borderBottom: `1px solid ${C.border}`, paddingBottom: 8 }}>
-        {tab !== 'tasks' && tab !== 'pack' && tab !== 'work' && tab !== 'more' ? (
+        {tab !== 'tasks' && tab !== 'pack' && tab !== 'work' && tab !== 'device' && tab !== 'more' ? (
           <button
             type="button"
             onClick={() => setTab('more')}
@@ -257,17 +257,18 @@ export function WorkstationPanel(): ReactElement {
             ←
           </button>
         ) : null}
-        {([['work', '工位'], ['tasks', '任务'], ['pack', '资料'], ['more', '⋯']] as const).map(([k, label]) => (
+        {([['work', '工位'], ['tasks', '任务'], ['pack', '资料'], ['device', '设备码'], ['more', '更多']] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
             onClick={() => setTab(k)}
             style={{
-              padding: '5px 14px',
+              padding: '5px 10px',
               borderRadius: 6,
               border: 'none',
               cursor: 'pointer',
               fontSize: FS.small,
+              whiteSpace: 'nowrap',
               fontWeight: tab === k ? 700 : 400,
               color: tab === k ? '#fff' : C.dim,
               background: tab === k ? C.accent : 'transparent',
