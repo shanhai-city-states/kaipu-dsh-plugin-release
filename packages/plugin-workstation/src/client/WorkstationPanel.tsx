@@ -408,7 +408,7 @@ export function WorkstationPanel(): ReactElement {
                   面板只留能真改的三块：工位 / 任务 / 资料。 */}
           {/* ★ 2026-10-22 阿开：这个按钮是「给同事发邀请」的快捷入口 ⇒ 指回资料页（工位加入码在那儿），
               不是「看我自己的设备码」（那个在「设备码」tab 里）。 */}
-          <OrgSection onGoDevices={() => setTab('pack')} />
+          <OrgSection onGoDevices={() => { setTab('pack'); setAdvTick((t) => t + 1) }} />
         </>
       )}
     </div>
@@ -3220,9 +3220,18 @@ function PackSection({ onUpload, focus, advTick }: {
         </div>
       ) : null}
 
-      <details ref={advRef} style={{ marginTop: 6 }}>
-        <summary style={{ fontSize: FS.tag, color: C.dim, cursor: 'pointer' }}>
-          上传选项（换一个交互 / 座位 / 项目 / 备注）
+      {/* ★ 2026-10-22 阿开：这块是一整个类目（换交互/座位/项目/备注），
+          不该长成一行灰字 —— 按「更多」里的卡片语言做成独立一栏，左侧色条跟其它区区分开。 */}
+      <details ref={advRef} style={{
+        marginTop: 10, borderRadius: 10, padding: '10px 13px',
+        border: `1px solid ${C.border}`, borderLeft: '3px solid #6366f1',
+        background: C.soft,
+      }}>
+        <summary style={{ cursor: 'pointer' }}>
+          <span style={{ fontSize: FS.small, fontWeight: 600, color: C.text }}>上传选项</span>
+          <span style={{ fontSize: FS.tag, color: C.dim, marginLeft: 8 }}>
+            换一个交互 / 座位 / 项目 / 备注 —— 不是必填，默认就对
+          </span>
         </summary>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
           <input
