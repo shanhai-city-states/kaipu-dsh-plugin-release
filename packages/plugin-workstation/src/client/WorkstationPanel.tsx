@@ -609,6 +609,33 @@ POST {baseUrl}/tasks/{taskId}/approve      （铺主 Bearer，不是 Agent 签�
 
 
 
+
+/** ★ 2026-10-22 阿开：「做成一个指令教程一键复制发给你的 Agent」。
+ *  这段话是给 Agent 看的，不是给人看的 —— 所以写成步骤 + 判据 + 失败怎么办。 */
+const AGENT_INSTRUCTION = [
+  '请帮我安装并使用「山海数据看板」技能，按下面步骤一次做完。',
+  '',
+  '1) 下载技能包并解压：',
+  '   https://agent.ak2029.com/dl084/dashboard-hub.tar.gz',
+  '   解压后得到 dashboard-hub 文件夹，整个放进你的技能目录（WorkBuddy / DSH 的用户级 skills 目录）。',
+  '',
+  '2) 打开 dashboard-hub/hub.json（没有就复制 hub.json.example），保证里面有且只有服务地址：',
+  '   {"url": "https://agent.ak2029.com/hub-084"}',
+  '   不要手填 token 和 license —— 下一步会自动写进去。',
+  '',
+  '3) 在 dashboard-hub 目录里运行解锁命令：',
+  '   python scripts/hub_dash.py claim',
+  '   它会自动读取本机的工位设备凭据，向服务端换取免费授权，并把 token / license 写回 hub.json。',
+  '',
+  '4) 验证（把 <表格路径> 换成真实文件）：',
+  '   python scripts/hub_dash.py profile <表格路径>',
+  '   能打印出字段列表就算通了；接着可以 build 出看板、export 成单文件 HTML。',
+  '',
+  '可能遇到的两件事：',
+  '· 报「没找到工位设备凭据」→ 先装并打开一次开铺工位插件（插件市场搜 kaipu-plugin-workstation）并登录，再重跑第 3 步。',
+  '· 报「设备校验服务暂时不可用」→ 稍等重试；或让开通方直接发一张 HUB-XXXX-XXXX-XXXX 授权码填进 hub.json 的 license。',
+].join('\n')
+
 /* ── 设备码 ──
  * ★ 2026-10-22 阿开：「设备码单独一个 tab 页」「下面介绍参考工位 README 提炼卖点」。
  * ★ 设计取舍（阿开问「解锁串和设备码有什么区别、会不会影响用户选择」）：
@@ -661,9 +688,16 @@ function DeviceTab(): ReactElement {
             </button>
           </div>
           <div style={{ padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
-            装好工位后，在任意山海 Skill 里运行一次 <code style={{ color: C.text }}>claim</code>，
-            它就会自动认到这台设备 —— <b style={{ color: C.text }}>不用你复制任何东西，也不用填授权码</b>。
+            想给某个山海 Skill 开权限？<b style={{ color: C.text }}>点下面的按钮，把整段话复制给你的 Agent</b>，
+            它自己会把技能装好、把授权领好 —— 你不用复制码，也不用填任何东西。
           </div>
+          <button
+            type="button"
+            onClick={() => copy(AGENT_INSTRUCTION, 'agent')}
+            style={{ ...btnStyle(true), alignSelf: 'flex-start', fontSize: FS.small }}
+          >
+            {done === 'agent' ? '已复制，粘给 Agent 就行' : '复制给 Agent 的指令'}
+          </button>
           <button
             type="button"
             onClick={() => setManual(!manual)}
