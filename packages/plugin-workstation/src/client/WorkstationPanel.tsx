@@ -2953,7 +2953,10 @@ function PackSection({ onUpload, focus, advTick }: {
   const [journal, setJournal] = useState<PackJournalPayload | null>(null)
   /* ★ 2026-10-22 阿开定名：**工位加入码**（原「设备加入码」）——
      与「设备码」区分：设备码只换技能授权、不进铺；工位加入码进铺、能看任务资料。 */
-  const [joinCode, setJoinCode] = useState<{ code: string; expiresAt: string } | null>(null)
+  const [joinCode, setJoinCode] = useState<{ code: string; expiresAt: string; ttlHours: number } | null>(null)
+  /* ★ 2026-10-22 阿开：「邀请码那里增加选择有效期（24h / 72h / 7天）」。
+     超时 = 这张券作废，要重新生成 —— 跟打卡一样，过期就得再打一次。 */
+  const [joinTtl, setJoinTtl] = useState<number>(24)
   const [joinBusy, setJoinBusy] = useState(false)
   const [joinCopied, setJoinCopied] = useState(false)
 
@@ -2981,17 +2984,17 @@ function PackSection({ onUpload, focus, advTick }: {
 
   useEffect(() => { void loadDevices() }, [])
 
-  const makeJoinCode = (): void => {
+  const makeJoinCode = (ttl: number): void => {
     setJoinBusy(true)
     void (async () => {
       const r = await callPack<{ code: string; accountId: string; expiresAt: string }>(
-        'deviceJoinCodeCreate', { note: '新设备加入', ttlHours: 24 })
+        'deviceJoinCodeCreate', { note: '新设备加入', ttlHours: ttl })
       setJoinBusy(false)
       if (!r.ok) {
         setErr({ code: r.code, message: r.message })
         return
       }
-      setJoinCode({ code: r.data.code, expiresAt: r.data.expiresAt })
+      setJoinCode({ code: r.data.code, expiresAt: r.data.expiresAt, ttlHours: ttl })
     })()
   }
 
@@ -3219,9 +3222,23 @@ function PackSection({ onUpload, focus, advTick }: {
           paddingTop: 8, borderTop: `1px dashed ${C.border}`,
         }}>
           <span style={{ fontSize: FS.tag, color: C.dim }}>邀请同事的机器进本铺：</span>
+          <select
+            value={joinTtl}
+            onChange={(e) => setJoinTtl(Number(e.target.value))}
+            disabled={joinBusy}
+            title="这张邀请券多久内有效；过期要重新生成"
+            style={{
+              padding: '4px 6px', borderRadius: 6, border: `1px solid ${C.border}`,
+              fontSize: FS.small, background: '#fff', fontFamily: 'inherit', color: C.text,
+            }}
+          >
+            <option value={24}>24 小时</option>
+            <option value={72}>3 天</option>
+            <option value={168}>7 天</option>
+          </select>
           <button
             type="button"
-            onClick={makeJoinCode}
+            onClick={() => makeJoinCode(joinTtl)}
             disabled={joinBusy}
             style={{
               padding: '6px 13px', borderRadius: 7, border: 'none', cursor: joinBusy ? 'default' : 'pointer',
@@ -3236,7 +3253,9 @@ function PackSection({ onUpload, focus, advTick }: {
                 fontSize: FS.small, padding: '2px 6px', background: C.soft,
                 borderRadius: 4, letterSpacing: 0.5,
               }}>{joinCode.code}</code>
-              <span style={{ fontSize: FS.tag, color: C.dim }}>24 小时内有效 · 只能用一次</span>
+              <span style={{ fontSize: FS.tag, color: C.dim }}>
+                {joinCode.ttlHours >= 168 ? '7 天' : joinCode.ttlHours >= 72 ? '3 天' : `${joinCode.ttlHours} 小时`}内有效 · 只能用一次
+              </span>
               <button type="button" style={btnStyle(false)} onClick={() => { void (async () => {
                 try {
                   await navigator.clipboard.writeText(joinCode.code)
