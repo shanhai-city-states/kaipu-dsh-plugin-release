@@ -149,10 +149,11 @@ export function WorkstationPanel(): ReactElement {
   /* ★ 2026-10-20 阿开：「资料（按位）点了附件按钮之后是否单独出现一个 tab 页面与资料并列，
      这样更干净」——把「看资料」与「传资料」拆成两个平级 tab；生成交付 ID 那行撤下（人不需要懂）。 */
   // ★ 2026-10-22（新定案 · 见 `定案-kaipu定位与UI-2026-10-22.md`）：
-  //   「最轻的铲子」= 第一屏只有一个动作。tab 从 6 个收到 3+1，
-  //   默认落地「任务」（打开第一眼该看到"要我干什么"，不是"有几个座位"）。
-  //   upload / notif / help 仍可达，但不再占主栏（一年用两次的东西不该占最贵的界面位置）。
-  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help' | 'more'>('tasks')
+  //   「最轻的铲子」= 第一屏只有一个动作。tab 从 6 个收到 3+1。
+  // ★ 2026-10-22 晚（阿开）：「打开或者安装工位插件默认显示第一页工位页面，
+  //   按钮排序按流程逻辑：工位 — 任务 — 资料 — 更多」
+  //   ⇒ 默认落地「工位」（先看到自己在哪个位、铺子里有谁），顺序即干活动线。
+  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help' | 'more'>('work')
   /* ★ 2026-10-21 阿开：从工位页点「🔑 设备」跳过来时，自动展开「高级」（设备台账在里面） */
   const [advTick, setAdvTick] = useState(0)
   /* ★ 2026-10-20：任务卡「📎 资料」→ 切到「资料（按位）」tab 并定位那次协作。
@@ -256,7 +257,7 @@ export function WorkstationPanel(): ReactElement {
             ←
           </button>
         ) : null}
-        {([['tasks', '任务'], ['pack', '资料'], ['work', '工位'], ['more', '⋯']] as const).map(([k, label]) => (
+        {([['work', '工位'], ['tasks', '任务'], ['pack', '资料'], ['more', '⋯']] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
