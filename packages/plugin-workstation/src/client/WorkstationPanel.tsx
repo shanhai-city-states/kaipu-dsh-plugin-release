@@ -2951,7 +2951,8 @@ function PackSection({ onUpload, focus, advTick }: {
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [journal, setJournal] = useState<PackJournalPayload | null>(null)
-  /* ★ 2026-10-21（阿开拍板 L3）：设备加入码 —— 新设备进本铺必须持码 */
+  /* ★ 2026-10-22 阿开定名：**工位加入码**（原「设备加入码」）——
+     与「设备码」区分：设备码只换技能授权、不进铺；工位加入码进铺、能看任务资料。 */
   const [joinCode, setJoinCode] = useState<{ code: string; expiresAt: string } | null>(null)
   const [joinBusy, setJoinBusy] = useState(false)
   const [joinCopied, setJoinCopied] = useState(false)
@@ -3217,7 +3218,7 @@ function PackSection({ onUpload, focus, advTick }: {
           display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, flexWrap: 'wrap',
           paddingTop: 8, borderTop: `1px dashed ${C.border}`,
         }}>
-          <span style={{ fontSize: FS.tag, color: C.dim }}>新设备要进这个铺：</span>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>邀请同事的机器进本铺：</span>
           <button
             type="button"
             onClick={makeJoinCode}
@@ -3227,7 +3228,7 @@ function PackSection({ onUpload, focus, advTick }: {
               background: '#1f2937', color: '#fff', fontSize: FS.small, fontWeight: 600, fontFamily: 'inherit',
             }}
           >
-            {joinBusy ? '生成中…' : '🔑 生成设备加入码'}
+            {joinBusy ? '生成中…' : '🔑 生成工位加入码'}
           </button>
           {joinCode !== null ? (
             <>
@@ -3246,7 +3247,7 @@ function PackSection({ onUpload, focus, advTick }: {
             </>
           ) : (
             <span style={{ fontSize: FS.tag, color: C.dim }}>
-              另一台设备（同事的机器 / 客户机）要用本铺时，给它这个码
+              对方持码加入后能看到本铺的任务和资料；一次性，用完即失效
             </span>
           )}
         </div>
