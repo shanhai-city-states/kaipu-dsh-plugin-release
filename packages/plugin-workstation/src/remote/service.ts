@@ -30,7 +30,7 @@ import type {
   WorkstationStatusPayload,
 } from '@shanhai/kaipu-contract'
 import { checkedWorkstationState, summarizeSeats } from './workstation-state.js'
-import { KaipuHttpClient, KaipuHttpError } from './kai-pu-http.js'
+import { KaipuHttpClient, KaipuHttpError, readAnyDeviceCred } from './kai-pu-http.js'
 
 /** remote 命名空间。★ 必须与 client `bridge.ts` 里的同值（判据看护） */
 export const REMOTE_NS = 'kaipu-workstation'
@@ -487,6 +487,14 @@ export class WorkstationRemoteService extends TypertRemoteService {
    * ★ 期1 返回 scaffold 种子（诚实标 source='scaffold'）；不实时流、不悄悄回落 mock。
    * ★ 同 `status`：出数前先过不变量（第 9 条「不变量前置」）。
    */
+  /** 本机设备码（「设备码」tab 用）—— 只读本地 ~/.kai-pu/，不发网络请求 */
+  @Remote('deviceCred')
+  async deviceCred(query: EmptyQuery, signal?: CancelSignal): Promise<RemoteResult<{ deviceId: string; deviceSecret: string } | null>> {
+    void query
+    void signal
+    return { ok: true, data: readAnyDeviceCred() }
+  }
+
   @Remote('state')
   async state(query: EmptyQuery, signal?: CancelSignal): Promise<RemoteResult<WorkstationState>> {
     void query

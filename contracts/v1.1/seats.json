@@ -1,0 +1,49 @@
+{
+  "$comment": "山海·开铺 · 契约 v1.1 · 三个可替换位 + 一个不可替换位 —— ★ 单一事实源（001-A §5.1 + 立项纪要 决议3）",
+  "contractVersion": "v1.1",
+  "updatedAt": "2026-10-04",
+  "seats": [
+    {
+      "seat": "execution",
+      "label": "执行位",
+      "defaultHolder": "山海智囊团",
+      "replaceable": true,
+      "replaceableWith": ["客户自带 Agent", "第三方 Agent"],
+      "noImplicitIntervention": true
+    },
+    {
+      "seat": "audit",
+      "label": "审计位",
+      "defaultHolder": "山海第三方审计（备选）",
+      "replaceable": true,
+      "replaceableWith": ["客户指定审计方", "第三方审计机构"],
+      "noImplicitIntervention": true
+    },
+    {
+      "seat": "management",
+      "label": "管理位",
+      "defaultHolder": "山海管理方（候选）",
+      "replaceable": true,
+      "replaceableWith": ["客户自任", "第三方"],
+      "noImplicitIntervention": true,
+      "note": "权限面最重 ⇒ 接入必须带四要素：身份 / 权责 / 留痕 / 可撤销（响石三道锁）"
+    },
+    {
+      "seat": "signature",
+      "label": "签名位",
+      "defaultHolder": "山海（平台）",
+      "replaceable": false,
+      "uiRule": "★ 界面必须显示『不可更改』并说明原因 —— 签名不是服务，是担保。",
+      "errorOnAttempt": "403 seat_immutable"
+    }
+  ],
+  "invariants": {
+    "INV-18": "执行位/审计位/管理位可替换：任一位置换成第三方 ⇒ 流程仍可完整跑通",
+    "INV-19": "签名位不可替换：客户端无法指定自己为签名方；报告签名恒由服务端",
+    "G3": "三个可替换位替换后，我方不做隐式干预（界面上不得出现『山海建议/提醒』类干预痕迹）"
+  },
+  "confirmText": {
+    "from": "立项审议纪要 §3.4（夜话文案 · 内容口径，措辞可调）",
+    "text": "在场地上，谁干活、谁审计、谁管理——这三件事，你说了算。但有一样东西，只有我们能给——签名。"
+  }
+}

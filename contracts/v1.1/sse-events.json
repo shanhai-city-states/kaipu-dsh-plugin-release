@@ -1,0 +1,89 @@
+{
+  "$comment": "山海·开铺 · 契约 v1.1 · SSE 事件总表（POST /scene/{id}/run）—— ★ 单一事实源",
+  "contractVersion": "v1.1",
+  "updatedAt": "2026-10-04",
+  "sources": [
+    "001-客户端开发包-给阿舟-v1.0 §4.3",
+    "004-星月回复-契约变更单 #2（新增 round_start/round_done + 各 lamp_* 加 round 字段）",
+    "004-星月回复-契约变更单 #4（summary 新增 participatedDims/skippedDims）",
+    "007-阿舟-契约工作基线-v1.1-merged §四.3"
+  ],
+  "order": "start → (round_start → lamp_start/lamp_delta/lamp_done×N → round_done)+ → summary → usage → done",
+  "clientGrouping": {
+    "primaryKey": ["round", "lamp"],
+    "mainJudgement": "round_start / round_done 给出流程语义（界面按『第 N 轮』分段）",
+    "fallbackJudgement": "每个 lamp_* 事件自带 round 字段 ⇒ 即便漏接 round_start 也不会串台",
+    "rationale": "★ 关键状态不能只有一个来源（004 Q5）"
+  },
+  "events": [
+    {
+      "event": "start",
+      "fields": { "requestId": "string", "scene": "string", "lamps": "string[]", "serverTime": "iso8601" },
+      "note": "lamps 为本次实际参与维度（dims 裁剪后的结果）"
+    },
+    {
+      "event": "round_start",
+      "isNew": "004 #2",
+      "fields": { "round": "number", "reason": "string" },
+      "note": "reason 例：'首轮' / '⚡有条件回炉'"
+    },
+    {
+      "event": "lamp_start",
+      "fields": { "round": "number", "lamp": "string", "agent": "string" },
+      "note": "round 为 004 #2 新增（兜底判据）"
+    },
+    {
+      "event": "lamp_delta",
+      "fields": { "round": "number", "lamp": "string", "text": "string" },
+      "note": "流式增量；按 (round, lamp) 归组渲染"
+    },
+    {
+      "event": "lamp_done",
+      "fields": { "round": "number", "lamp": "string", "verdict": "Verdict", "detail": "string", "latencyMs": "number" }
+    },
+    {
+      "event": "round_done",
+      "isNew": "004 #2",
+      "fields": { "round": "number", "verdict": "Verdict" }
+    },
+    {
+      "event": "summary",
+      "fields": {
+        "verdict": "Verdict",
+        "conditions": "string[]",
+        "round": "number",
+        "participatedDims": "string[]",
+        "skippedDims": "string[]"
+      },
+      "note": "★ participatedDims / skippedDims 为 004 #4 新增。报告体同步固定带『本次参与维度 / 未参与维度 / 裁剪依据』—— ★ 报告不能给出『审全了』的错觉。"
+    },
+    {
+      "event": "usage",
+      "fields": { "tokensIn": "number", "tokensOut": "number", "credits": "number", "balanceAfter": "number" },
+      "note": "★ 唯一可信计费口径。客户端不得自行计算。"
+    },
+    {
+      "event": "done",
+      "fields": { "finishReason": "string" }
+    }
+  ],
+  "verdicts": [
+    { "value": "✅通过", "tone": "pass" },
+    { "value": "⚡有条件", "tone": "conditional", "triggers": "回炉（goto）" },
+    { "value": "❌驳回", "tone": "reject", "triggers": "abort" },
+    { "value": "⛔拒收", "tone": "refuse", "triggers": "abort · 不收费" }
+  ],
+  "renderRules": [
+    { "id": "R1", "rule": "归组键 = (round, lamp)；round_start 为主、round 字段为兜底" },
+    { "id": "R2", "rule": "界面按『第 N 轮』分段，回炉可见（不合并成一条流水）" },
+    { "id": "R3", "rule": "四类判定必须可区分且可见 —— 流程透明是卖点，不是装饰" },
+    { "id": "R4", "rule": "★ dims 裁剪后，尾部固定显示『参与维度 / 未参与维度』，不做成可折叠的次要信息" },
+    { "id": "R5", "rule": "★ 断开 = 『已停止接收』，不写『已取消』（服务端仍在算完并落 lamp_runs）" },
+    { "id": "R6", "rule": "轮数由服务端 loopPolicy 决定，客户端不得推断；outputLevel 只影响输出详略" }
+  ],
+  "recovery": {
+    "endpoint": "GET /scene/run/{requestId}",
+    "isNew": "004 #5",
+    "clientAction": "本地库持久化 requestId 列表；进页先查，state=done 直接渲染结果（不重连 SSE），state=running 则续订阅。★『过程透明是卖点』——刷新不能丢过程。"
+  }
+}

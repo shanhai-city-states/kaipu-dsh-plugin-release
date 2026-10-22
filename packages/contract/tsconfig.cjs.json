@@ -1,0 +1,20 @@
+{
+  "//": "★ 契约层的**第二份产物**：CJS，专供 client bundle 内联。",
+  "//why": "同一份源码要同时服务两类消费者：",
+  "//host": "host half 走 ESM（继承 tsconfig.base.json 的 module:ESNext）—— 那是 Node/DSH host 的形态。",
+  "//client": "client half 必须 CJS —— DSH 的宿主 closure 是 **lazy CJS 表**，把 ESM 的 `export` 塞进去会直接 SyntaxError（2026-10-05 实测：整站不渲染）。",
+  "//so": "⇒ 契约包输出两态：lib/（ESM）给 host，lib-cjs/（CJS）给 tools/build-client.mjs 内联。",
+  "//trap": "⚠️ 本包 package.json 是 \"type\": \"module\" ⇒ Node 会把 lib-cjs/*.js **也当 ESM** 解析，里面全是 `exports.x =`，一 require 就炸。所以 lib-cjs **只能给 bundler 当文本读**，不许被 import/require。Node 侧要读契约请 import lib/index.js。",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib-cjs",
+    "lib": ["ES2022"],
+    "types": [],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "tsBuildInfoFile": "lib-cjs/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"]
+}

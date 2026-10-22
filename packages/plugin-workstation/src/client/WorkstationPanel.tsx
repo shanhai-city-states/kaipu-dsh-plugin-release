@@ -153,7 +153,7 @@ export function WorkstationPanel(): ReactElement {
   // ★ 2026-10-22 晚（阿开）：「打开或者安装工位插件默认显示第一页工位页面，
   //   按钮排序按流程逻辑：工位 — 任务 — 资料 — 更多」
   //   ⇒ 默认落地「工位」（先看到自己在哪个位、铺子里有谁），顺序即干活动线。
-  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help' | 'more'>('work')
+  const [tab, setTab] = useState<'work' | 'tasks' | 'pack' | 'upload' | 'notif' | 'help' | 'device' | 'more'>('work')
   /* ★ 2026-10-21 阿开：从工位页点「🔑 设备」跳过来时，自动展开「高级」（设备台账在里面） */
   const [advTick, setAdvTick] = useState(0)
   /* ★ 2026-10-20：任务卡「📎 资料」→ 切到「资料（按位）」tab 并定位那次协作。
@@ -391,6 +391,8 @@ export function WorkstationPanel(): ReactElement {
         </Section>
       ) : tab === 'help' ? (
         <HelpTab />
+      ) : tab === 'device' ? (
+        <DeviceTab />
       ) : tab === 'tasks' ? (
         <TaskSection />
       ) : tab === 'pack' ? (
@@ -604,6 +606,73 @@ POST {baseUrl}/tasks/{taskId}/approve      （铺主 Bearer，不是 Agent 签�
 - [ ] 我不会拿 Agent 凭据去调人类接口（/tasks 用 Bearer，/agent/tasks 用 HMAC）`;
 
 
+
+
+/* ── 设备码 ──
+ * ★ 2026-10-22 阿开：「设备码领取页面做成工位卖点页面，设备码单独一个 tab 页」。
+ *   这里只做「给」：显示设备码 + 一键复制解锁串 + 工位卖点。
+ *   deviceSecret 不显示明文，只随「复制解锁串」进剪贴板。
+ */
+function DeviceTab(): ReactElement {
+  const [cred, setCred] = useState<{ deviceId: string; deviceSecret: string } | null>(null)
+  const [done, setDone] = useState('')
+  useEffect(() => {
+    void callActionData<{ deviceId: string; deviceSecret: string } | null>('deviceCred', {}).then((r) => {
+      if (r.ok) setCred(r.data)
+    })
+  }, [])
+
+  const copy = (text: string, tag: string): void => {
+    const nav = (globalThis as { navigator?: { clipboard?: { writeText(t: string): Promise<void> } } }).navigator
+    void nav?.clipboard?.writeText(text).then(() => {
+      setDone(tag)
+      setTimeout(() => setDone(''), 1600)
+    })
+  }
+
+  return (
+    <Section title="设备码">
+      {cred === null ? (
+        <div style={{ fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
+          还没有登记设备。先在工位里完成一次登录，这里就会出现本机设备码。
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: FS.small, color: C.dim, lineHeight: LH.normal }}>
+            把这台设备的码给任意山海 Skill，即可解锁对应的免费能力 —— 一机一码，不用另外申请。
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: FS.small, color: C.dim }}>设备码</span>
+            <code style={{ fontSize: FS.small, padding: '2px 8px', border: `1px solid ${C.border}`, borderRadius: 6 }}>
+              {cred.deviceId}
+            </code>
+            <button type="button" onClick={() => copy(cred.deviceId, 'id')} style={{ ...btnStyle(false), fontSize: FS.small }}>
+              {done === 'id' ? '已复制' : '复制'}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => copy(JSON.stringify({ deviceId: cred.deviceId, deviceSecret: cred.deviceSecret }), 'full')}
+            style={{ ...btnStyle(true), alignSelf: 'flex-start', fontSize: FS.small }}
+          >
+            {done === 'full' ? '已复制解锁串' : '复制解锁串（贴给 Skill 用）'}
+          </button>
+          <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: LH.normal }}>
+            解锁串含设备密钥，等于这台机器的钥匙 —— 不要发群、不要贴公开文档。
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.border}`, fontSize: FS.small, color: C.dim, lineHeight: LH.loose }}>
+        <div style={{ fontWeight: 700, color: C.text, marginBottom: 6 }}>装了工位，你还多了什么</div>
+        <div>· 一个固定的位置 —— 谁在做什么，一眼看得见，不用群里问。</div>
+        <div>· 任务有据 —— 派给谁、做到哪、卡在哪，都留在铺子里。</div>
+        <div>· 资料归位 —— 按任务归档，不再散在聊天记录里。</div>
+        <div>· 能力连坐 —— 装一次工位，后续更多 Skill 都能一并解锁。</div>
+      </div>
+    </Section>
+  )
+}
 
 function HelpTab(): ReactElement {
   /* ★ 2026-10-19 阿开：「使用说明是通用的吗？管理方和被邀请方同一份吗？」

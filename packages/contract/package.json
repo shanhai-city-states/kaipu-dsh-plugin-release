@@ -1,0 +1,27 @@
+{
+  "name": "@shanhai/kaipu-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "//license": "★ 本包【刻意不写 license 字段】—— 不是漏了。理由三条：① 它是【排除面】（发布快照的 FORBIDDEN 里有 packages/contract/），【不上市场】⇒ 星月 009 §一#2 那条『package.json 写 license:MIT』的语境是【投稿件】，本包不适用；② 星月 010 §六 的审核清单里『看 packages/*/package.json 的 license』指的是【会对外发布的那几个包】（该清单第 2 条说 market/*.yml 才是『要对外发布的全部文字』）；③ private 包声明许可证在 npm 语义上无处生效 —— 写了无害但无意义，而『只在上架包声明许可』是更一致的口径。⚠️ 若将来本包改为对外发布，**必须同时补 license 字段**（tools/emit-release-snapshot.mjs 有一条自检看护发布面里的每个 package.json）。",
+  "description": "山海·开铺 · 契约层 —— I-3 / I-4 的 TypeScript 形状。★ 全仓契约类型的唯一出处（generated.ts 由 contracts/v1.1/*.json 生成）",
+  "//dist": "★ 本包【不发市场、不进插件产物】—— 是【构建期】依赖：类型被 tsc 擦除、常量表被 bundler 内联。见根 README §二·补 留意1。",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts"
+  ],
+  "scripts": {
+    "gen": "node ../../tools/gen-contract.mjs",
+    "gen:check": "node ../../tools/gen-contract.mjs --check"
+  }
+}

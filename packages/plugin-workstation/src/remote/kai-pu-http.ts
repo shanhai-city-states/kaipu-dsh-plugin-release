@@ -552,6 +552,35 @@ export function readDeviceCred(baseUrl: string): DeviceCred | null {
   }
 }
 
+/** 扫 ~/.kai-pu/device-*.json，返回第一份有效凭据（「设备码」页展示用）。
+ *  ★ 不依赖 baseUrl：换过服务地址也照样能找到本机登记的设备。 */
+export function readAnyDeviceCred(): DeviceCred | null {
+  try {
+    const fs = builtin<{
+      existsSync(p: string): boolean
+      readdirSync(p: string): string[]
+      readFileSync(p: string, enc: string): string
+    }>('node:fs')
+    const path = builtin<{ join(...p: string[]): string }>('node:path')
+    const os = builtin<{ homedir(): string }>('node:os')
+    const dir = path.join(os.homedir(), '.kai-pu')
+    if (!fs.existsSync(dir)) return null
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith('device-') || !f.endsWith('.json')) continue
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Partial<DeviceCred>
+        if (typeof j.deviceId === 'string' && j.deviceId.length > 0 &&
+            typeof j.deviceSecret === 'string' && j.deviceSecret.length > 0) {
+          return { deviceId: j.deviceId, deviceSecret: j.deviceSecret }
+        }
+      } catch { continue }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 /** 落盘（600）；失败返回 false，由调用方决定要不要提示 */
 export function writeDeviceCred(baseUrl: string, c: DeviceCred): boolean {
   try {

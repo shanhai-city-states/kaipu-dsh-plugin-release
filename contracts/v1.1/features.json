@@ -1,0 +1,28 @@
+{
+  "$comment": "山海·开铺 · 契约 v1.1 · /me 的 features 六位语义 —— ★ 单一事实源（006 §3.1 补齐星月的疏漏）",
+  "contractVersion": "v1.1",
+  "updatedAt": "2026-10-04",
+  "discipline": [
+    "★ features.* 是【功能可见性开关】，不是【权限】。真权限在服务端判，客户端只按它控制显隐。",
+    "★ 不许把 features 当安全边界用 —— 把它当权限 = 前端绕过 = 安全事故。",
+    "★ promptPreview 默认 false 且客户端不实现（属『藏实现』面，N-2 邻域）。即便服务端开了也不做界面。"
+  ],
+  "readRule": "wisdomTeam ?? expertTeam —— 命名评审定后删任一字段都是改一行（契约增补 #16）",
+  "features": [
+    { "key": "agentProfile", "meaning": "Agent 档案管理", "p1Default": true, "controls": "档案入口显隐" },
+    { "key": "wisdomTeam", "aliasOf": "expertTeam", "meaning": "智囊团（组团）", "p1Default": true, "controls": "智囊团入口显隐" },
+    { "key": "expertTeam", "deprecatedInFavorOf": "wisdomTeam", "meaning": "（旧名，同值并存）", "p1Default": true },
+    { "key": "customScenes", "meaning": "自定义场景", "p1Default": true, "controls": "C-8 入口" },
+    { "key": "roleSeats", "meaning": "三位指派（执行/审计/管理）", "p1Default": true, "controls": "C-6 入口" },
+    { "key": "reportSign", "meaning": "报告签名", "p1Default": true, "controls": "C-5 验签展示" },
+    { "key": "promptPreview", "meaning": "提示词预览", "p1Default": false, "controls": "★ 敏感面默认关 · 客户端不实现" }
+  ],
+  "meShape": {
+    "credits": "number",
+    "entitlements": "string[]",
+    "plan": "{ name: string, expiresAt: iso8601 }",
+    "serverTime": "iso8601",
+    "features": "Record<FeatureKey, boolean>"
+  },
+  "note": "★ serverTime 只在 /auth/device 与 /me 出现。客户端只显示、不判定（时间一律以服务端为准）。"
+}

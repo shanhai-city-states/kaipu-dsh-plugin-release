@@ -32,6 +32,8 @@ export const CONNECTION_SERVICE = 'connection'
 export const ENDPOINTS = {
   /** 接没接上 + 种子概览（第一件要知道的事） */
   status: 'status',
+  /** ★ 本机设备码（「设备码」tab） */
+  deviceCred: 'deviceCred',
   /** 工位完整持久化态（座位/球/轮次/留痕/事件流底座） */
   state: 'state',
   /** ★ 组织树（真数据）：工位节点 + 协作边 */

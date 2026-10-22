@@ -1,0 +1,143 @@
+{
+  "$comment": "山海·开铺 · 契约 v1.1 · 错误码总表 —— ★ 单一事实源（TS 侧 packages/contract/src/errors.ts 从本表派生，不得另行定义）",
+  "contractVersion": "v1.1",
+  "updatedAt": "2026-10-05",
+  "$textSourceFormat": "textSource 一律写 `<侧别>-<编号> §<节>`（如 `svc-012 §2.1`）—— 跨件引用必须带侧别，否则编号会撞（本仓已撞过 012/009/007 三次，见 cli-014 §3.3）。textAuthor 写侧别：svc / cli。",
+  "$gate": "★ 本表是**客户端侧机器可读副本**。正本在服务端（**服务侧 markdown**）。若本表与正本不一致：以正本为准，并把差异登记到『待同步清单』（cli-017 §四）。",
+  "sources": [
+    "001-客户端开发包-给阿舟-v1.0 §4.2（12 条）",
+    "004-星月回复-契约变更单 #8（新增 426 upgrade_required）",
+    "007-阿舟-契约工作基线-v1.1-merged §二.2（2 条缺失文案由阿舟补拟）",
+    "星月-012 §2.1（unauthorized 文案定稿：『过期』→『不管用了』）"
+  ],
+  "envelope": {
+    "shape": "{ \"error\": { \"code\": \"<snake_case>\", \"message\": \"<人可读中文>\", \"detail\"?: {...} } }",
+    "discipline": "客户端【不得】把原始错误直出给用户；一律按 code 翻译。code 不在本表内 ⇒ 兜底文案 + 上报（不许把裸 code 印给用户）。"
+  },
+  "codes": [
+    {
+      "http": 400,
+      "code": "invalid_request",
+      "when": "参数缺失 / 格式错",
+      "uiText": "差了个东西，我没看明白。回头检查下再发。",
+      "textSource": "svc-012 §2.1（原拟稿见 cli-007 §2.3）",
+      "textAuthor": "cli",
+      "textStatus": "confirmed",
+      "why": "svc-012 §2.1：「✅ 认可 · 一字不改」。"
+    },
+    {
+      "http": 401,
+      "code": "unauthorized",
+      "when": "无 / 过期 / 非法 token",
+      "uiText": "你的通行证不管用了，重新领一张就好。",
+      "textSource": "svc-012 §2.1",
+      "textAuthor": "svc",
+      "textStatus": "confirmed",
+      "why": "★ 原拟稿写「过期了」，只覆盖一种成因；401 的三种成因是【无 / 过期 / 非法令牌】。只写「过期」，用户在「令牌被判非法」时会按过期去理解、反复重领还是失败 —— 文案与实际成因不符 = 让人白试。（svc-012 §2.1 定稿）"
+    },
+    {
+      "http": 402,
+      "code": "insufficient_credits",
+      "when": "余额不足",
+      "uiText": "场地费不够了，充一点再来。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 403,
+      "code": "expert_forbidden",
+      "when": "无该专家权益",
+      "uiText": "这位不在你的铺子名单里。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 403,
+      "code": "agent_forbidden",
+      "when": "无该 Agent 权益",
+      "uiText": "这位不在你的铺子名单里。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 403,
+      "code": "seat_immutable",
+      "when": "试图更换签名位",
+      "uiText": "签名这件事，只能我来。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 404,
+      "code": "not_found",
+      "when": "对象不存在",
+      "uiText": "没找到这个铺子，看看名字对不对？",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 409,
+      "code": "duplicate_request",
+      "when": "幂等：同 requestId 重复提交",
+      "uiText": "这一单已经在跑了，别急。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed",
+      "detailShape": "{ \"state\": \"running\", \"poll\": \"/scene/run/{requestId}\" }",
+      "clientAction": "不弹错。按 detail.poll 直接切到查询接口。"
+    },
+    {
+      "http": 409,
+      "code": "not_checked_in",
+      "when": "requiresExternal 场景无有效预约",
+      "uiText": "还没到进场时间。到了我提醒你。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed",
+      "detailShape": "{ \"requiresExternal\": true, \"availableAt\": \"<ISO8601 可进场时点>\" }",
+      "clientAction": "按 detail.requiresExternal 显示『该场景需进场』，不是普通报错。★ 若带 availableAt，必须一并显示——它是用户的『出路』（何时能进场），只说不给时点等于没说。"
+    },
+    {
+      "http": 409,
+      "code": "seat_conflict",
+      "when": "同一实体兼任执行位 + 审计位",
+      "uiText": "干活的和审账的，不能是同一个人。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 422,
+      "code": "reservation_expired",
+      "when": "过期不候",
+      "uiText": "这场的门关了，是因为有下一场在等。再约一场吧，不用重新填。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 426,
+      "code": "upgrade_required",
+      "when": "客户端版本过低",
+      "uiText": "这个版本的台子旧了，升一下再进。",
+      "textSource": "svc-006 §二 #8",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 429,
+      "code": "rate_limited",
+      "when": "超限流",
+      "uiText": "有点挤，缓一缓再进。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    },
+    {
+      "http": 500,
+      "code": "server_error",
+      "when": "服务端异常（5xx）",
+      "uiText": "场地这边打了个喷嚏，我们看看。你的东西没丢。",
+      "textSource": "cli-001 §6.3",
+      "textStatus": "confirmed"
+    }
+  ],
+  "fallback": {
+    "uiText": "场地这边有点不对劲，我们看一下。你的东西没丢。",
+    "alsoReport": true
+  }
+}

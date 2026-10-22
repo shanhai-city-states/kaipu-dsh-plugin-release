@@ -1,0 +1,84 @@
+{
+  "name": "@shanhai/kaipu-wisdom-team",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "山海·开铺 · 智囊团插件 —— 开铺（kaipu-platform）的配套侧边面板：展示「我方内置的这群谋士」是谁、服务哪些场景，以及席位待接入状态。★ 需配合 kaipu-platform 安装 —— 灯位数据由开铺插件经宿主网关提供，单独安装会如实显示「通道未就绪」。★ 可摘除：卸掉它，开铺仍完整可用（可替换成你自己的 Agent 团队）。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanhai-city-states/kaipu-dsh-plugin-release.git",
+    "directory": "packages/plugin-wisdom"
+  },
+  "icon": "icon.svg",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "kaipu",
+    "wisdom",
+    "panel"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "//scripts": "★ 公开面不声明 scripts：构建脚本在不随本仓发布的判据层。留必失败的 path 只会让人以为「装了就坏」。",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "//inject": "★ 这里是【包名】词表（模块图边 / boot 顺序）；src/client/index.ts 的 inject 是【服务名】词表。两套都要填，填反了会卡在 waiting for services。",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "kaipu": {
+    "//": "★ 本块是【本仓自己的】声明，DSH 官方**不读**。DSH 只读 dsh.bundle / dsh.client / dsh.profile 三个键（已逐条核实）。我们自己的约束一律放 kaipu.*，不塞进 dsh 命名空间。",
+    "dshRange": ">=0.2.0-rc.2 <0.3.0",
+    "//descriptionReviewedAt": "★ 官方 contributing.md：描述会被当作声明并与代码核对。每次改描述都要真的复核代码并更新这个日期 —— --release 缺它即 FAIL。",
+    "descriptionReviewedAt": "2026-10-05",
+    "declaredSurfaces": [
+      "ui.panel",
+      "ui.slot",
+      "data.local"
+    ],
+    "//surfaces": "只声明真的用到的，供人审阅（**不是**运行时门禁）。",
+    "//compat": "⚠️ 分发侧目前没有官方兼容闸门：官方闸门只认 @deepseek-ai/dsh / @deepseek-ai/dsh-* 的 peer，而我们不 import 任何 dsh-* 包。",
+    "devContract": "@shanhai/kaipu-contract（内部契约包 · 不随本仓发布 · 构建期依赖，已内联进产物）"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "react": "^18.3.1"
+  },
+  "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react 由宿主 DSH 提供（peer）；契约包是构建期依赖，已内联进产物。",
+  "//contract": "★★ @shanhai/kaipu-contract 是【内部契约包 —— 不随本仓发布】。★★ 它**刻意不写在 devDependencies 里**（2026-10-08 改，与 plugin-platform 同一条裁定）。原做法把它声明成 workspace 依赖（workspace 协议）当作「边界可见」的标记 —— 代价是本仓源码（即发布面）**pnpm install 直接失败**（ERR_PNPM_WORKSPACE_PKG_NOT_FOUND）。⇒ 改由**本字段**承担「标记」职责；构建期的类型解析走 tsconfig 的 paths，运行值由打包脚本内联进产物（用户机上不需要它）。",
+  "//oldContractDep": "★ 被删掉的那两行（留档，免得下一个人以为是手滑删的）：\"devDependencies\": { \"@shanhai/kaipu-contract\": \"workspace:*\" }"
+}
