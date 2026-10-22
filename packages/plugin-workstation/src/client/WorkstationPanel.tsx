@@ -3162,7 +3162,7 @@ function PackSection({ onUpload, focus, advTick }: {
 
       <details ref={advRef} style={{ marginTop: 6 }}>
         <summary style={{ fontSize: FS.tag, color: C.dim, cursor: 'pointer' }}>
-          高级（换一个交互 / 座位 / 项目 / 备注）
+          上传选项（换一个交互 / 座位 / 项目 / 备注）
         </summary>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
           <input
