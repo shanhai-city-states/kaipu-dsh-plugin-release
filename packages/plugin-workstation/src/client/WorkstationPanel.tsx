@@ -3049,10 +3049,14 @@ function PackSection({ onUpload, focus, advTick }: {
     }
   }
 
+  /* ★ 2026-10-22 修（阿开实报「资料不见了」）：原来只在挂载时跑一次 refresh，
+     那时 `iid` 还是空 ⇒ 直接 return，页面停在「还没有拉到列表」；
+     稍后从服务端恢复出 iid 也**不会**再触发 ⇒ 永远拉不到。⇒ 改为跟随 iid/seat。 */
   useEffect(() => {
+    if (iid.trim().length === 0) return
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [iid, seat])
 
   /* ★ 期6-L1：任务卡片「📎 资料」→ 定位那次协作
      ★ 2026-10-20 改：事件监听上移到 WorkstationPanel（切 tab 的职责在它），本区只吃 focus。 */
