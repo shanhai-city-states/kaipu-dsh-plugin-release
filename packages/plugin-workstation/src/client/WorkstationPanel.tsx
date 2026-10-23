@@ -54,7 +54,15 @@ import {
 } from './live.js'
 import { C, FONT, FS, LH } from './theme.js'
 import { PLUGIN_VERSION } from './version.js'
-import type { BallLamp, Member, WorkstationState } from '@shanhai/kaipu-contract'
+import type {
+  BallLamp,
+  GrantCreated,
+  GrantEvent,
+  GrantListPayload,
+  GrantRow,
+  Member,
+  WorkstationState,
+} from '@shanhai/kaipu-contract'
 
 /* ★ 期6a-2 资料按位的 client 侧最小形状。
    ★ 为什么本地声明而不从 host `service.ts` import：那会把 host 侧（Node）依赖
@@ -90,6 +98,12 @@ interface RolesSeat {
   label: string
   holder: { type: string; id: string; name: string }
   replaceable: boolean
+  /** ★ 2026-10-23 新增：该位能坐几人（-1 = 不限） */
+  capacity?: number
+  /** ★ 新增：实际坐着的 Agent 列表（多席位时全给） */
+  occupants?: { id: string; name: string; lastSeen?: string }[]
+  /** ★ 新增：是否已满（发邀请前据此禁用按钮，别"先给希望再拒"） */
+  full?: boolean
 }
 interface RolesSeatsPayload {
   seats: RolesSeat[]
@@ -102,6 +116,10 @@ interface InviteCreated {
   lamp: string
   expiresAt: string
 }
+
+/* ══ ★★ 2026-10-23 · 管理助理授权（承响石 018 号方案 + A/B/C/D 拍板）
+   ★ 类型定义已上移到 `@shanhai/kaipu-contract/workstation` —— 全仓契约唯一出处。
+     host 侧 `service.ts` 也要用同一份形状，放在客户端文件里它 import 不到。 ══ */
 
 interface PackJournalPayload {
   interactionId: string
@@ -410,6 +428,11 @@ export function WorkstationPanel(): ReactElement {
           {/* ★ 2026-10-22 阿开：这个按钮是「给同事发邀请」的快捷入口 ⇒ 指回资料页（工位加入码在那儿），
               不是「看我自己的设备码」（那个在「设备码」tab 里）。 */}
           <OrgSection onGoDevices={() => { setTab('pack'); setAdvTick((t) => t + 1) }} />
+          {/* ★★ 2026-10-23：座位管理 + 管理助理授权。
+              以前这两个组件（RolesSeatSection 等）只定义不挂载 ⇒ 界面上根本看不到，
+              用户只能看到演示态的假座位。现在挂到「更多」页里，各自独立成块。 */}
+          <RolesSeatSection />
+          <ManagementGrantSection />
         </>
       )}
     </div>
@@ -1703,7 +1726,13 @@ const INVITE_LAMPS: ReadonlyArray<{ value: string; label: string; hint?: string 
      **签名位从可邀请列表里移除** —— 它是山海不可替代的**效力锚点**，
      不是能干活的工位；外部 Agent 坐进来 = 冒充山海背书。
      后端 `create_invite` 已同步 `seat_locked` 拦截，两层都堵住。 */
-  { value: 'strategy', label: '战略位' },
+  { value: 'strategy', label: '战略位', hint: '定方向的人（只能 1 位）' },
+  /* ★★ 2026-10-23 阿开：「邀请是否更合适一些？双向选择权」
+     ⇒ 管理助理位也走邀请：铺主发邀请（选人），对方接受（选接不接）。
+        接受即视为同意「在授权期内代管、到期自动转执行位」。
+     ★ 与其它位的区别：进这个位**不是永久席位**，而是借一段时间的管理权；
+        授权单由系统在 accept 时自动开，24h/72h/168h 三档。 */
+  { value: 'management_assistant', label: '管理助理位', hint: '临时代管的人（有时限）' },
 ]
 
 /* ══════════════════════════════════════════════════════════════════
@@ -2794,6 +2823,13 @@ function RolesSeatSection(): ReactElement {
           {seats.map((s) => {
             const holderName = s.holder?.name ?? ''
             const occupied = holderName.length > 0
+            // ★ 2026-10-23：容量与满员（阿开「审计是团队不是一个人」「战略位只能 1 位」）
+            const cap = typeof s.capacity === 'number' ? s.capacity : 1
+            const occ = s.occupants ?? []
+            const isFull = s.full === true || (cap !== -1 && occ.length >= cap)
+            const capText = cap === -1 ? '多席' : cap === 0 ? '不可入驻' : `${cap} 席`
+            // ★ 满员且不可换人 ⇒ 禁用邀请（避免发出去才被 409 拒）
+            const cantInvite = isFull || cap === 0
             return (
               <div
                 key={s.seat}
@@ -2801,16 +2837,52 @@ function RolesSeatSection(): ReactElement {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontWeight: 600 }}>{s.label || s.seat}</span>
-                  <span style={{ color: C.dim }}>{occupied ? holderName : '待配置'}</span>
+                  {/* ★ 容量徽标：多席 / 1 席 / 不可入驻，一眼看出这个位能坐几个人 */}
+                  <span
+                    style={{
+                      fontSize: FS.tag,
+                      padding: '1px 6px',
+                      borderRadius: 999,
+                      border: `1px solid ${C.border}`,
+                      color: cap === 0 ? '#b3261e' : C.dim,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {capText}
+                    {cap > 0 && occ.length > 0 ? ` · ${occ.length}/${cap}` : ''}
+                  </span>
+                  <span style={{ color: C.dim, flex: '1 1 auto', textAlign: 'right' }}>
+                    {occupied ? holderName : '待配置'}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setInviting(inviting === s.seat ? null : s.seat)}
-                    disabled={busy}
-                    style={btnStyle(false)}
+                    disabled={busy || cantInvite}
+                    title={
+                      cap === 0
+                        ? '这是山海的效力锚点，不可入驻'
+                        : isFull && cap !== -1
+                          ? `这个位是 ${capText}，已经坐满了 —— 请先请出，或换一个多席的位`
+                          : undefined
+                    }
+                    style={{ ...btnStyle(false), opacity: cantInvite ? 0.45 : 1 }}
                   >
-                    {inviting === s.seat ? '收起' : '邀请'}
+                    {cap === 0 ? '不可邀请' : isFull && cap !== -1 ? '已满' : inviting === s.seat ? '收起' : '邀请'}
                   </button>
                 </div>
+
+                {/* ★ 多席位时把所有人都列出来（审计位常有多个灯） */}
+                {occ.length > 1 && (
+                  <div style={{ marginTop: 4, color: C.dim, fontSize: FS.tag }}>
+                    在座：{occ.map((o) => o.name || o.id).join('、')}
+                  </div>
+                )}
+                {/* ★ 满员且单席 ⇒ 说清为什么不能邀请，别让人以为按钮坏了 */}
+                {isFull && cap > 0 && (
+                  <div style={{ marginTop: 4, color: '#b4690e', fontSize: FS.tag }}>
+                    这个位只坐 {cap} 人，已满。要换人请先「请出」，或改用多席的执行位／审计位。
+                  </div>
+                )}
 
                 {inviting === s.seat && (
                   <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2846,6 +2918,209 @@ function RolesSeatSection(): ReactElement {
       <div style={{ marginTop: 6, fontSize: FS.tag, color: 'rgba(0,0,0,.5)' }}>
         邀请链接交给对方打开 → 对方填写 Agent 名字 → 当场签发凭据（密钥只显示一次）。
       </div>
+    </Section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ★★ 管理助理授权面板（2026-10-23 · 承响石 018 号方案 + 阿开 A/B/C/D 拍板）
+
+   解决的问题：
+     管理位出差/休假时，铺子里的事谁来管？
+     以前只能把管理位整个交出去（不可逆、且审计分不清谁是谁）。
+     现在可以「借」一段时间出去 —— 到期自动还。
+
+   四条规则直接写在界面上（不让人猜）：
+     · 只有管理位本人能授、能收
+     · **授权那一刻就开始计时**（不是首次使用才算）
+     · 收回**即时生效**
+     · 到期**自动转执行位**，不是权限归零（人还在铺子里干活）
+
+   ★ 为什么显示「还剩多久」而不是「到期时间」：
+     人看「还有 21 小时」有感觉，看「2026-10-24T07:52:41Z」没感觉。
+   ══════════════════════════════════════════════════════════════════ */
+
+function fmtRemain(sec: number): string {
+  if (sec <= 0) return '已到期'
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (h >= 24) {
+    const d = Math.floor(h / 24)
+    return `还剩 ${d} 天 ${h % 24} 小时`
+  }
+  if (h > 0) return `还剩 ${h} 小时 ${m} 分`
+  return `还剩 ${m} 分`
+}
+
+function ttlLabel(h: number): string {
+  if (h === 24) return '24 小时（一次性代班）'
+  if (h === 72) return '72 小时（跨周末）'
+  if (h === 168) return '1 周（休假代班）'
+  return `${h} 小时`
+}
+
+function ManagementGrantSection(): ReactElement {
+  const [rows, setRows] = useState<GrantRow[] | null>(null)
+  const [ttlOptions, setTtlOptions] = useState<number[]>([24, 72, 168])
+  const [err, setErr] = useState<{ code: string; message: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [grantee, setGrantee] = useState('')
+  const [ttl, setTtl] = useState(24)
+  const [note, setNote] = useState('')
+  const [expanded, setExpanded] = useState(false)
+
+  const refresh = async (): Promise<void> => {
+    const r = await callPack<GrantListPayload>('grantList', {})
+    if (r.ok) {
+      setRows(Array.isArray(r.data.grants) ? r.data.grants : [])
+      if (Array.isArray(r.data.ttlOptions) && r.data.ttlOptions.length > 0) {
+        setTtlOptions(r.data.ttlOptions)
+      }
+      setErr(null)
+    } else {
+      setErr({ code: r.code, message: r.message })
+      setRows(null)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const onGrant = async (): Promise<void> => {
+    const who = grantee.trim()
+    if (who.length === 0) {
+      setErr({ code: 'empty', message: '先填要授权给谁（对方的 Agent id）' })
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    const r = await callPack<GrantCreated>('grantCreate', {
+      granteeId: who,
+      ttlHours: ttl,
+      ...(note.length > 0 ? { note } : {}),
+    })
+    setBusy(false)
+    if (!r.ok) {
+      setErr({ code: r.code, message: r.message })
+      return
+    }
+    setGrantee('')
+    setNote('')
+    await refresh()
+  }
+
+  const onRevoke = async (gid: string): Promise<void> => {
+    setBusy(true)
+    setErr(null)
+    const r = await callPack<{ grantId: string }>('grantRevoke', { grantId: gid, reason: '管理位手工收回' })
+    setBusy(false)
+    if (!r.ok) {
+      setErr({ code: r.code, message: r.message })
+      return
+    }
+    await refresh()
+  }
+
+  const active = (rows ?? []).filter((x) => x.status === 'active')
+  const history = (rows ?? []).filter((x) => x.status !== 'active')
+
+  return (
+    <Section title="管理助理（临时代管）">
+      {err !== null && (
+        <div style={{ fontSize: FS.small, color: '#b3261e', marginBottom: 6 }}>
+          [{err.code}] {err.message}
+        </div>
+      )}
+
+      {/* ── 生效中的授权 ── */}
+      {rows === null ? (
+        <div style={{ fontSize: FS.small, color: 'rgba(0,0,0,.55)' }}>读取授权台账中…</div>
+      ) : active.length === 0 ? (
+        <div style={{ fontSize: FS.small, color: 'rgba(0,0,0,.55)' }}>
+          当前没有人在代管。管理位出差或休假时，可以借一段时间的代管权出去。
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {active.map((g) => (
+            <div
+              key={g.grantId}
+              style={{ border: '1px solid #cfe3de', background: 'rgba(44,110,99,0.05)', borderRadius: 8, padding: '6px 10px', fontSize: FS.small }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 600 }}>{g.granteeName}</span>
+                <span style={{ color: '#2c6e63', fontWeight: 600 }}>{fmtRemain(g.remainingSeconds)}</span>
+                <button type="button" onClick={() => void onRevoke(g.grantId)} disabled={busy} style={btnStyle(false)}>
+                  收回
+                </button>
+              </div>
+              <div style={{ color: C.dim, marginTop: 2, fontSize: FS.tag }}>
+                代管期 {ttlLabel(g.ttlHours)} · 到期自动转为执行位 · 收回立即失效
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── 授权入口 ── */}
+      <div style={{ marginTop: 8 }}>
+        <button type="button" onClick={() => setExpanded(!expanded)} style={btnStyle(false)}>
+          {expanded ? '收起' : '＋ 授权一个人临时代管'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input
+            value={grantee}
+            onChange={(e) => setGrantee(e.target.value)}
+            placeholder="对方的 Agent id（例：azhou2）"
+            style={{ padding: '4px 6px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          />
+          <select
+            value={ttl}
+            onChange={(e) => setTtl(Number(e.target.value))}
+            style={{ padding: '4px 6px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          >
+            {ttlOptions.map((h) => (
+              <option key={h} value={h}>{ttlLabel(h)}</option>
+            ))}
+          </select>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="备注（可选，如：我出差三天）"
+            style={{ padding: '4px 6px', fontSize: FS.small, borderRadius: 4, border: '1px solid rgba(0,0,0,.18)' }}
+          />
+          <button type="button" onClick={() => void onGrant()} disabled={busy} style={btnStyle(true)}>
+            {busy ? '授予中…' : '授 予'}
+          </button>
+          {/* ★ 规则写死在这 —— 授权这件事不能靠"用久了自然会知道" */}
+          <div style={{ fontSize: FS.tag, color: 'rgba(0,0,0,.5)', lineHeight: 1.6 }}>
+            · <b>授权那一刻开始计时</b>，不是对方首次使用才算<br />
+            · 代管期间可做：派活/交活/传资料/发起审计/建项目/改名<br />
+            · <b>不能做</b>：吊销身份、换密钥、调座位、发邀请、审批通过、归档冻结、导出数据<br />
+            · 收回<b>立即生效</b>；到期<b>自动转执行位</b>并留转换记录
+          </div>
+        </div>
+      )}
+
+      {/* ── 历史（已收回 / 已到期）── */}
+      {history.length > 0 && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: 'pointer', fontSize: FS.tag, color: C.dim }}>
+            历史（{history.length} 条）
+          </summary>
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {history.map((g) => (
+              <div key={g.grantId} style={{ fontSize: FS.tag, color: C.dim }}>
+                {g.granteeName} · {ttlLabel(g.ttlHours)} ·{' '}
+                {g.status === 'expired' ? '已自然到期' : '已收回'}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </Section>
   )
 }

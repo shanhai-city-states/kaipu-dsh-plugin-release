@@ -25,6 +25,10 @@ import * as dshProtocol from '@deepseek-ai/dsh-typert-protocol'
 // ★ 只 import type —— host half 不经打包，契约包是构建期依赖（用户机上没有），
 //   类型被 tsc 擦除 ⇒ 不产生运行时依赖（由桥接检查脚本看护）。
 import type {
+  GrantCreated,
+  GrantEvent,
+  GrantListPayload,
+  GrantRow,
   RemoteResult,
   WorkstationState,
   WorkstationStatusPayload,
@@ -1143,6 +1147,76 @@ export class WorkstationRemoteService extends TypertRemoteService {
       ok: true,
       data: { seats: Array.isArray(data?.seats) ? data.seats : [], accountId: data?.accountId ?? '' },
     }
+  }
+
+  /* ── ★★ 2026-10-23 · 管理助理授权（承响石 018 号方案 + 阿开 A/B/C/D 拍板）
+   *
+   *  为什么要有这一组：
+   *    管理位可以临时把「代管权」交给一个人（24h / 72h / 1 周），
+   *    到期自动失效并转执行位。没有界面，这个能力等于不存在 ——
+   *    管理位不可能去手敲 curl 授一个 24 小时的权。
+   *
+   *  ★ 规则（写死在按钮文案里，别让用户猜）：
+   *    · 只有管理位本人能授、能收
+   *    · 授权刻起算，不是首次使用才起算（安全窗口与计时起点必须同一时刻）
+   *    · 收回即时生效（判定层实时读库，无缓存）
+   *    · 到期自动转执行位（不留权、不白占席位）
+   * ───────────────────────────────────────────────────────────────── */
+
+  /** 本铺授权台账（谁在代管、还剩多久） */
+  @Remote('grantList')
+  async grantList(query: { status?: string }, signal?: CancelSignal): Promise<RemoteResult<GrantListPayload>> {
+    const qs = query?.status ? `?status=${encodeURIComponent(query.status)}` : ''
+    const data = await this.requireHttp().call<{
+      grants?: GrantRow[]; ttlOptions?: number[]; accountId?: string
+    }>('GET', '/grants' + qs, undefined, signal)
+    return {
+      ok: true,
+      data: {
+        grants: Array.isArray(data?.grants) ? data.grants : [],
+        ttlOptions: Array.isArray(data?.ttlOptions) ? data.ttlOptions : [24, 72, 168],
+        accountId: data?.accountId ?? '',
+      },
+    }
+  }
+
+  /** 授予管理助理权（时长只有 24 / 72 / 168 三档） */
+  @Remote('grantCreate')
+  async grantCreate(
+    query: { granteeId: string; ttlHours: number; name?: string; note?: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<GrantCreated>> {
+    const data = await this.requireHttp().call<GrantCreated>('POST', '/grants', {
+      granteeId: query.granteeId,
+      ttlHours: query.ttlHours,
+      ...(query.name ? { name: query.name } : {}),
+      ...(query.note ? { note: query.note } : {}),
+    }, signal)
+    return { ok: true, data }
+  }
+
+  /** 收回（即时生效） */
+  @Remote('grantRevoke')
+  async grantRevoke(
+    query: { grantId: string; reason?: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{ grantId: string; status: string; revokedAt: string }>> {
+    const gid = encodeURIComponent(query.grantId)
+    const data = await this.requireHttp().call<{ grantId: string; status: string; revokedAt: string }>(
+      'POST', `/grants/${gid}/revoke`, query.reason ? { reason: query.reason } : {}, signal)
+    return { ok: true, data }
+  }
+
+  /** 授权流水（actor + onBehalfOf 双字段） */
+  @Remote('grantEvents')
+  async grantEvents(
+    query: { grantId: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{ grantId: string; events: GrantEvent[] }>> {
+    const gid = encodeURIComponent(query.grantId)
+    const data = await this.requireHttp().call<{ grantId: string; events?: GrantEvent[] }>(
+      'GET', `/grants/${gid}/events`, undefined, signal)
+    return { ok: true, data: { grantId: data?.grantId ?? query.grantId, events: Array.isArray(data?.events) ? data.events : [] } }
   }
 
   /* ── ★ 工位当前交互（存服务端 · 阿开 2026-10-19）──

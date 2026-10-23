@@ -112,6 +112,15 @@ export const ENDPOINTS = {
   /* ── ★ 座位与邀请（真实数据）── */
   /** 本铺真实席位 · `GET /roles/seats` */
   rolesSeats: 'rolesSeats',
+  /* ── ★★ 2026-10-23 · 管理助理授权（承响石 018 号方案 A/B/C/D 拍板）── */
+  /** 授权台账 · `GET /grants` */
+  grantList: 'grantList',
+  /** 授予 · `POST /grants` */
+  grantCreate: 'grantCreate',
+  /** 收回 · `POST /grants/{gid}/revoke` */
+  grantRevoke: 'grantRevoke',
+  /** 授权流水 · `GET /grants/{gid}/events` */
+  grantEvents: 'grantEvents',
   /** 生成邀请 · `POST /invites` */
   inviteCreate: 'inviteCreate',
   /** ★ 2026-10-21：签发一次性「设备加入码」· `POST /device-join-codes` */
