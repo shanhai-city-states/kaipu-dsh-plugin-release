@@ -337,10 +337,12 @@ export async function createTask(
   title: string,
   detail: string,
   projectId?: string,
+  interactionId?: string,
 ): Promise<OrgResult<TaskItem>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const query: { title: string; detail: string; projectId?: string } = { title, detail }
+  const query: { title: string; detail: string; projectId?: string; interactionId?: string } = { title, detail }
   if (typeof projectId === 'string' && projectId.length > 0) query.projectId = projectId
+  if (typeof interactionId === 'string' && interactionId.length > 0) query.interactionId = interactionId
   const r = await callKaipu<TaskItem>(connection, 'tasksCreate', query)
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
@@ -371,6 +373,14 @@ export async function loadProjects(): Promise<OrgResult<{ projects: ProjectItem[
 export async function createProject(name: string): Promise<OrgResult<ProjectItem>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const r = await callKaipu<ProjectItem>(connection, 'projectsCreate', { name })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** 改项目名（★ 2026-10-23：项目名可改，id 不变 —— 改名不破坏任务归属） */
+export async function renameProject(projectId: string, name: string): Promise<OrgResult<{ projectId: string; name: string }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ projectId: string; name: string }>(connection, 'projectsRename', { projectId, name })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }

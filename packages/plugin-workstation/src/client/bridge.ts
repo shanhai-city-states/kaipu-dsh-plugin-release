@@ -56,6 +56,8 @@ export const ENDPOINTS = {
   projectsList: 'projectsList',
   /** ★ 期6-L2 项目层：新建 */
   projectsCreate: 'projectsCreate',
+  /** ★ 2026-10-23 项目层：改名（只改 name，project_id 不动） */
+  projectsRename: 'projectsRename',
   /** ★ 期6-L2 项目层：归档（打包 + manifest） */
   projectArchive: 'projectArchive',
   projectUnarchive: 'projectUnarchive',

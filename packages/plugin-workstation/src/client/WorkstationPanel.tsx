@@ -23,6 +23,7 @@ import {
   createProject,
   createTask,
   loadProjects,
+  renameProject,
   loadPackInteractions,
   type ProjectItem,
   deleteOrgNode,
@@ -536,6 +537,7 @@ POST {baseUrl}/agent/result
   "taskId":"...", "result": { "verdict":"done", "detail":"..." } }
 
 ## 六、上传资料（一个交互一个目录）
+
 POST {baseUrl}/packs/{interactionId}/files
 Headers:
   X-Agent-Id     {agentId}
@@ -546,8 +548,50 @@ Headers:
   X-Sig          {按第三节算}
 Body: 文件原始字节（不是 base64）
 
+★ interactionId 不是任务 ID —— 一般就是 task-{任务ID}（任务卡上那串前面加 task-）。
+  拿不准就问铺主「这批资料放哪个交互」，别自己猜一个。
+
+### 给 Agent 的三行可跑命令（照着改 4 个值就能用）
+
+    # ① 取值（只算一次）
+    TS=$(date +%s)
+    SHA=$(sha256sum /path/to/你的文件.zip | cut -d' ' -f1)
+    MSG="{agentId}|\${TS}|{accountId}|你的文件.zip|\${SHA}"
+    SIG=$(printf '%s' "$MSG" | openssl dgst -sha256 -hmac "{secret}" -r | cut -d' ' -f1)
+
+    # ② 上传（原始字节，不是 base64、不是 multipart）
+    curl -sS -X POST "{baseUrl}/packs/task-{任务ID}/files" \
+      -H "X-Agent-Id: {agentId}" \
+      -H "X-Account-Id: {accountId}" \
+      -H "X-Ts: \${TS}" \
+      -H "X-Filename: 你的文件.zip" \
+      -H "X-Body-Sha256: \${SHA}" \
+      -H "X-Sig: \${SIG}" \
+      --data-binary @/path/to/你的文件.zip
+
+    # ③ 判据：HTTP 200 且回 {"filename":..., "size":..., "sha256":...}
+    #    sha256 一致才算传成功。回 401 ⇒ 签名串或时间戳（±300 秒）错了。
+
+### ★ 两个坑（实证，别踩）
+
+1. **签名串的分隔符是竖线，别写成逗号**：
+   msg = {agentId}|{ts}|{accountId}|{filename}|{sha256}
+   而领活/交结论用的是**直接拼接无分隔符**：{agentId}{ts} —— 两处不一样，别抄错。
+2. **★★ 文件名必须只用 ASCII（这是最常见的 401 来源）**：
+   HTTP 头只接受 latin-1 ⇒ 中文名放进 X-Filename 会直接发送失败或乱码；
+   服务端还会先 unquote() 再算签名 ⇒ 名字一变，签名就对不上（回 401 却不说是文件名的问题）。
+   正确做法：**先重命名成 ASCII 再传**，例如
+     cp 你的文件.zip equity-plan-fix-20261022.zip
+   中文名写进交活的 detail 里，或在同一交互另传一个说明文件。
+3. **★★ 座位决定目录（最容易「传了对方却看不见」的原因）**：
+   交互目录按**座位**分开存 —— 你在执行位传，文件就在 execution 下；
+   管理位的人看自己的管理位目录，**看不见执行位的文件**（反之亦然）。
+   ⇒ 传之前先跟对方确认一句「你在哪个位、我该传到哪个位？」，
+     否则传成功了、对方却说「没有附件」，两边都以为对方错了。
+
 ## 七、你不能做什么
 - 不能改铺子设置、不能审批、不能给别人发任务
+- 不能列出/下载已上传的文件（GET 只给铺主；你只能凭上传时返回的 sha256 自证）
 - 看不到别人的交互目录（只能碰自己有座位的位）
 
 ## 八、密钥出事怎么办
@@ -1274,6 +1318,10 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
      ★ 为什么清人不移位：工位是组织资产（#1-#5 编号稳定），人是流水的。 */
   const [clearing, setClearing] = useState(false)
   const [clearTxt, setClearTxt] = useState('')
+  /* ★ 2026-10-23：四类席位说明展开态（古茶定稿文案 · 见 SEAT_GUIDE）。
+     ★ 必须放在本函数 hooks 区（1303–1320），不能放中部 ——
+       中部在若干提前 return 之后，会导致 hooks 调用顺序不稳定。 */
+  const [showSeatGuide, setShowSeatGuide] = useState(false)
 
   const refresh = async (): Promise<void> => {
     const r = await loadOrgTree()
@@ -1379,6 +1427,14 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
         <span style={{ flex: 1 }} />
         <button
           type="button"
+          onClick={() => setShowSeatGuide((v) => !v)}
+          style={btnStyle(false)}
+          title="这四类席位分别负责什么？点开看说明"
+        >
+          {showSeatGuide ? '▾' : '▸'} 席位说明
+        </button>
+        <button
+          type="button"
           onClick={() => void refresh()}
           disabled={busy}
           style={btnStyle(false)}
@@ -1417,6 +1473,36 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
           一键清场
         </button>
       </div>
+
+      {/* ★★ 2026-10-23 四类席位说明（古茶定稿文案 · 逐字落地）
+          为什么放在工位布局顶部而不是单独的帮助页：
+          用户在这一页做「请谁坐哪个位」的决定，说明必须在决定发生的地方。 */}
+      {showSeatGuide && (
+        <div
+          style={{
+            border: '1px solid #d9d9d9',
+            borderRadius: 10,
+            padding: '10px 14px',
+            marginBottom: 10,
+            background: 'rgba(0,0,0,0.02)',
+            fontSize: FS.small,
+            lineHeight: 1.75,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>四大席位说明</div>
+          {SEAT_GUIDE.map((s) => (
+            <div key={s.name} style={{ marginBottom: 4 }}>
+              <span style={{ marginRight: 6 }}>{s.icon}</span>
+              <span style={{ fontWeight: 600, color: s.locked ? '#8e44ad' : undefined }}>{s.name}</span>
+              <span style={{ color: C.dim }}>：{s.desc}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 6, color: C.dim }}>
+            ★ 第三方要签自己那份结论，请让它坐<b>审计位</b>、用<b>它自有私钥</b>签；山海在其后附加「过程凭证」的签名。
+            两条签名并行，不互相替代 —— 独立性保住，效力锚点也保住。
+          </div>
+        </div>
+      )}
 
       {/* 清场确认条：必须输入 CLEAR 才放行 */}
       {clearing && (
@@ -1609,12 +1695,34 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
      所以这里给出可选的灯，默认 `execution`，不假装它们等价。
    ══════════════════════════════════════════════════════════════════ */
 
-const INVITE_LAMPS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: 'execution', label: '执行位' },
-  { value: 'audit', label: '审计位' },
-  { value: 'management', label: '管理位' },
-  { value: 'signature', label: '签名位' },
+const INVITE_LAMPS: ReadonlyArray<{ value: string; label: string; hint?: string }> = [
+  { value: 'execution', label: '执行位', hint: '干活的人' },
+  { value: 'audit', label: '审计位', hint: '负责审的人' },
+  { value: 'management', label: '管理位', hint: '管秩序的人' },
+  /* ★★ 2026-10-23 古茶裁决（`沟通记录/213b`）：
+     **签名位从可邀请列表里移除** —— 它是山海不可替代的**效力锚点**，
+     不是能干活的工位；外部 Agent 坐进来 = 冒充山海背书。
+     后端 `create_invite` 已同步 `seat_locked` 拦截，两层都堵住。 */
   { value: 'strategy', label: '战略位' },
+]
+
+/* ══════════════════════════════════════════════════════════════════
+   四类席位说明（古茶 2026-10-23 定稿文案 · 逐字落地，勿自编）
+
+   ★ 为什么要有这块：界面只写「执行位/审计位/管理位/签名位」四个词，
+     没有任何一处解释它们干什么 —— 阿开 2026-10-23 自己都想不起
+     「签名位是干嘛的」。名词不等于认知。
+   ══════════════════════════════════════════════════════════════════ */
+const SEAT_GUIDE: ReadonlyArray<{ icon: string; name: string; desc: string; locked?: boolean }> = [
+  { icon: '🧑‍💻', name: '执行位', desc: '干活的人（通常是你自带的 Agent 或我们的智囊团）。' },
+  { icon: '⚖️', name: '审计位', desc: '负责挑毛病、做审查的人（可以是第三方机构，也可以是我们）。' },
+  { icon: '👑', name: '管理位', desc: '负责建场地、发任务、管秩序的人（通常是你/铺主）。' },
+  {
+    icon: '💮',
+    name: '签名位（平台专属）',
+    desc: '山海的最后一道防线。它不负责干活，只负责在流程跑完后，为「过程未被篡改」盖上最终的效力印章。外来的 Agent 不能坐这个位子，否则就是冒充山海背书。',
+    locked: true,
+  },
 ]
 
 function InviteBar(props: { node: OrgNodeView; made: { url: string; expiresAt: string } | null; onMade: (v: { url: string; expiresAt: string }) => void }): ReactElement {
@@ -1809,6 +1917,14 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
   const occupied = (node.seat_count ?? 0) > 0
   /** ★ 谁在坐（2026-10-19：之前只显示工位名，看不到人 —— 阿开找不到阿舟/星月） */
   const holders = Array.isArray(node.holders) ? node.holders : []
+  /** ★★ 2026-10-23 阿开：「同一个座位为什么会有2个人不合理，一座一Agent，咱们那么多座位空间」
+   *   ⇒ 一座一 Agent 是**设计前提**（role_seats 主键 = (account_id, seat) 已然如此）。
+   *     行1 只放**一位**：名字单一来源 + 溢出省略号；多出来的只报数（「等 N 人」），
+   *     完整名单进 title。这样即使库里出现脏数据，界面也不会被撑破，且异常可见不可藏。
+   *   ★ 为什么不是截断字数：名字长不是病（「阿里星月」4 字是正常需求），
+   *     把多个身份并排塞进一行才是病 —— 治因不治表。 */
+  const primaryHolder = holders[0]
+  const extraHolders = holders.length > 1 ? holders.length - 1 : 0
   /** 请出要二次确认：凭证一作废不可恢复 */
   const [evictArm, setEvictArm] = useState(false)
 
@@ -1896,10 +2012,16 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
               color: C.accent,
               fontWeight: 600,
               whiteSpace: 'nowrap',
+              /* ★ 2026-10-23：单一来源 + 省略号兜底，不再靠「、」拼多人 */
+              minWidth: 0,
+              overflow: 'hidden',
             }}
             title={holders.map((h) => `${h.name}（${h.agentId}）`).join('、')}
           >
-            {holders.map((h) => h.name).join('、')}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {primaryHolder?.name || '?'}
+            </span>
+            {extraHolders > 0 ? <span style={{ color: C.dim, fontWeight: 400 }}>等 {holders.length} 人</span> : null}
             {holders.some((h) => h.online === true) ? '' : '（离线）'}
           </span>
         )}
@@ -2048,7 +2170,7 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
                   type="button"
                   onClick={() => setEvictArm(true)}
                   disabled={busy}
-                  title={`请出 ${holders.map((h) => h.name).join('、')}（凭证会作废，工位保留）`}
+                  title={`请出 ${primaryHolder?.name || '?'}（凭证会作废，工位保留）${extraHolders > 0 ? `　⚠ 该位另有 ${extraHolders} 条在职记录（数据异常，请联系运维）` : ''}`}
                   style={{ ...btnStyle(false), border: '1px solid #c0392b', color: '#c0392b' }}
                 >
                   请出
@@ -2357,6 +2479,17 @@ type ActionOutcome = { ok: boolean; code?: string; message?: string }
 interface AuditReportUi {
   verdict?: string
   summary?: string
+  /** ★ 2026-10-23 方案A：记录版本（v1=机制上线前 / v2=含中立性自证） */
+  record_version?: string
+  /** ★ 中立性已自证（四条判据全过） */
+  neutrality_declared?: boolean
+  neutrality_checks?: {
+    checks?: Record<string, { passed?: boolean; detail?: string; evidence?: Record<string, unknown> }>
+    passed_count?: number
+    total?: number
+    declared?: boolean
+    note?: string
+  }
   precheck?: {
     counts?: Record<string, number>
     findings?: Array<{ code?: string; level?: string; detail?: string }>
@@ -2369,6 +2502,21 @@ interface AuditReportUi {
   }
   error?: string
   message?: string
+}
+
+/** ★ 2026-10-23 方案A · 古茶拍板第4条：出口声明的横幅（后端 neutrality_banner 一比一） */
+interface NeutralityBannerUi {
+  level?: 'ok' | 'warning' | 'legacy' | string
+  red_flag?: boolean
+  text?: string
+}
+
+/** ★ 四判据的人话名 —— 客户不该看到 `refusal_used` 这种字段名 */
+const NEUTRALITY_LABEL: Record<string, string> = {
+  refusal_used: '拒绝权是否真的用过',
+  standard_self: '标准是否对自家也生效',
+  evidence_carry: '客户能否自己验完、带走证据',
+  replaceable: '席位能否换成第三方',
 }
 
 async function callAction(method: EndpointName, query: Record<string, unknown>): Promise<ActionOutcome> {
@@ -2500,6 +2648,22 @@ async function callPack<T>(method: EndpointName, query: Record<string, unknown>)
 
 /** 单件上限：base64 过 wire 会膨胀 ≈1.4 倍，8 MB 原文件在内存上可接受 */
 const PACK_MAX_BYTES = 8 * 1024 * 1024
+
+/** 生一个 uuid v4 —— 宿主若是非安全上下文则没有 `crypto.randomUUID`，用 getRandomValues 拼 */
+function newUuid(): string {
+  const c = (globalThis as { crypto?: Crypto }).crypto
+  if (c !== undefined && typeof c.randomUUID === 'function') return c.randomUUID()
+  const b = new Uint8Array(16)
+  if (c !== undefined && typeof c.getRandomValues === 'function') {
+    c.getRandomValues(b)
+  } else {
+    for (let i = 0; i < 16; i += 1) b[i] = Math.floor(Math.random() * 256)
+  }
+  b[6] = (b[6]! & 0x0f) | 0x40
+  b[8] = (b[8]! & 0x3f) | 0x80
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
 
 function fmtBytes(n: unknown): string {
   const v = typeof n === 'number' && Number.isFinite(n) ? n : 0
@@ -2860,9 +3024,12 @@ function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
     })()
   }, [])
 
-  const upload = async (fl: FileList | null): Promise<void> => {
-    const list = Array.from(fl ?? [])
-    if (list.length === 0) return
+  const upload = async (picked: File[] | FileList | null): Promise<void> => {
+    const list = Array.from(picked ?? [])
+    if (list.length === 0) {
+      setErr({ code: 'no_file', message: '没选到文件 —— 请重新点「选择文件上传」再选一次' })
+      return
+    }
     const cur = iid.trim()
     if (!cur) {
       setErr({ code: 'missing_interaction_id', message: '还没准备好交互 ID，请稍等或点「重试」' })
@@ -2937,19 +3104,35 @@ function UploadTab({ onDone }: { onDone: () => void }): ReactElement {
         <div style={{ opacity: 0.7, marginTop: 4 }}>下面这一页是<strong>人的兜底</strong>：Agent 传不了、或者你想补一份时用。</div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ fontSize: FS.small, color: C.dim }}>传到</span>
-        <code style={{ fontSize: FS.tag, padding: '3px 6px', background: 'rgba(0,0,0,.04)', borderRadius: 4, wordBreak: 'break-all' }}>
-          {iid || '准备中…'}
-        </code>
-        <span style={{ fontSize: FS.tag, color: C.dim }}>（一次协作一个目录 · Agent 与人在同一次协作里各占一个座位）</span>
-      </div>
+      {/* ★ 2026-10-23 阿开：「我点击上传文件的时候，发现有一个协作码…这个前端似乎可以隐藏，
+          是给 Agent 用的，Agent 后端能拿到就可以」
+          ⇒ 协作码（interactionId）不在主界面显示，收进「技术细节」折叠里，给排查时用。
+             后端保证：任务的 interactionId 为空时回退 `task-<task_id>`，Agent 从任务视图一定拿得到。 */}
+      <details style={{ marginBottom: 8 }}>
+        <summary style={{ fontSize: FS.tag, color: C.dim, cursor: 'pointer' }}>
+          这次传到哪儿（技术细节，通常不用看）
+        </summary>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>协作码</span>
+          <code style={{ fontSize: FS.tag, padding: '3px 6px', background: 'rgba(0,0,0,.04)', borderRadius: 4, wordBreak: 'break-all' }}>
+            {iid || '准备中…'}
+          </code>
+          <span style={{ fontSize: FS.tag, color: C.dim }}>（一次协作一个目录 · Agent 与人在同一次协作里各占一个座位）</span>
+        </div>
+      </details>
 
       <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button type="button" onClick={() => input.current?.click()} disabled={busy} style={btnStyle(true)}>
           {busy ? '上传中…' : '选择文件上传'}
         </button>
-        <input ref={input} type="file" multiple onChange={(e) => { const fl = e.target.files; e.target.value = ''; void upload(fl) }} style={{ display: 'none' }} />
+        {/* ★ 2026-10-23：必须先 snapshot 成数组再清空 —— 直接用 e.target.files 引用，
+            后面 `e.target.value=''` 会把 FileList 一起清空 ⇒ Array.from 拿到空 ⇒ 静默返回，
+            用户看到的就是「选了文件没反应」。 */}
+        <input ref={input} type="file" multiple onChange={(e) => {
+          const picked = Array.from(e.target.files ?? [])
+          e.target.value = ''
+          void upload(picked)
+        }} style={{ display: 'none' }} />
         <button type="button" onClick={() => onDone()} disabled={busy} style={btnStyle(false)}>
           去「资料（按位）」看看
         </button>
@@ -3349,6 +3532,21 @@ function PackSection({ onUpload, focus, advTick }: {
                   '',
                   '授权码不用手工填 —— claim 会自动读本机的工位设备凭据并领到，'
                   + '免费额度，一年到期后回工位插件重领。',
+                  '',
+                  '四、以后传资料（重要：不要开浏览器传，直接调接口）',
+                  '铺主给你「交互 ID」后，用下面这条（把 6 个 {..} 换成真实值）：',
+                  '  TS=$(date +%s)',
+                  '  SHA=$(sha256sum /path/to/your-file.zip | cut -d\' \' -f1)',
+                  '  MSG="{agentId}|${TS}|{accountId}|your-file.zip|${SHA}"',
+                  '  SIG=$(printf \'%s\' "$MSG" | openssl dgst -sha256 -hmac "{secret}" -r | cut -d\' \' -f1)',
+                  '  curl -sS -X POST "https://agent.ak2029.com/kai-pu/packs/{交互ID}/files" \\',
+                  '    -H "X-Agent-Id: {agentId}" -H "X-Account-Id: {accountId}" -H "X-Ts: ${TS}" \\',
+                  '    -H "X-Filename: your-file.zip" -H "X-Body-Sha256: ${SHA}" -H "X-Sig: ${SIG}" \\',
+                  '    --data-binary @/path/to/your-file.zip',
+                  '成功判据：HTTP 200 且返回的 sha256 与本地 sha256sum 一致。',
+                  '★ 签名串用竖线分隔，和领活（agentId+ts 直接拼）不一样。',
+                  '★ 座位决定目录：执行位传的在 execution 下，管理位看不见执行位的 ⇒ 先问对方在哪个位。',
+                  '★★ 文件名必须纯 ASCII（your-file.zip）—— 中文名放不进 HTTP 头，且服务端会先 unquote 再算签名 ⇒ 必然 401。',
                 ].join('\n')
                 try {
                   await navigator.clipboard.writeText(guide)
@@ -3453,6 +3651,8 @@ function TaskSection(): ReactElement {
     projectId: string
     status: string
     report: AuditReportUi | null
+    /** ★ 2026-10-23 方案A：中立性出口声明（后端 neutrality_banner 一比一，用于标红） */
+    neutralityBanner?: NeutralityBannerUi | null
   } | null>(null)
 
   /** 一键挂载：把当前项目送去审计（建单即返回，结论靠轮询） */
@@ -3508,14 +3708,19 @@ function TaskSection(): ReactElement {
     const id = audit.id
     let alive = true
     const timer = setInterval(() => {
-      void callActionData<{ status: string; report: AuditReportUi | null }>('auditGet', {
+      void callActionData<{ status: string; report: AuditReportUi | null; neutrality_banner?: NeutralityBannerUi | null }>('auditGet', {
         auditId: id,
       }).then((r) => {
         if (!alive || !r.ok) return
         setAudit((prev) =>
           prev === null || prev.id !== id
             ? prev
-            : { ...prev, status: r.data.status ?? prev.status, report: r.data.report ?? prev.report },
+            : {
+                ...prev,
+                status: r.data.status ?? prev.status,
+                report: r.data.report ?? prev.report,
+                neutralityBanner: r.data.neutrality_banner ?? prev.neutralityBanner ?? null,
+              },
         )
       })
     }, 5000)
@@ -3533,12 +3738,14 @@ function TaskSection(): ReactElement {
         而前端用 window.confirm 二次确认，在宿主里不可靠 ⇒ 报错被当成「读不到任务」。
      ⇒ 改成**页内两段式**：先说清有几个没完成，给一个「仍要暂存」按钮。 */
   const [pendingArchive, setPendingArchive] = useState<{ projectId: string; name: string; message: string } | null>(null)
-  /* ★ 2026-10-21 阿开：「＋发布 改成 ＋新项目，项目的问题就解决了」
-     ⇒ 我的判断：那按钮是**发任务**，改名会误导；但他的真实需求是「有个明确的建项目入口」
-     ⇒ 做法：发任务按钮改叫「＋ 新任务」，旁边**独立**加「＋ 新项目」。
-     不改「＋ 发布」的字面，是因为点开它不是建项目 —— 按钮说什么，就该做什么。 */
-  const [topProjOpen, setTopProjOpen] = useState(false)
-  const [topProjName, setTopProjName] = useState('')
+  /* ★ 2026-10-23 阿开：「新建任务的时候希望可以上传附件，或者拖入附件自动上传」
+     ⇒ 发布前先在本地攒附件，点「发布」时：建任务 → 拿 task_id → 传附件到 task-<uuid>。
+     为什么不在选文件时就传：那时还没有 task_id，交互 ID 无主，传上去就是孤儿件。 */
+  const [draftFiles, setDraftFiles] = useState<File[]>([])
+  const [dragOver, setDragOver] = useState(false)
+  const draftInput = useRef<HTMLInputElement | null>(null)
+  /* ★ 2026-10-23 阿开：「项目名称也改不了」⇒ 项目行内改名 */
+  const [renaming, setRenaming] = useState<{ projectId: string; name: string } | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   /* 身份与两个折叠区（块 C / 块 D） */
@@ -3666,14 +3873,56 @@ function TaskSection(): ReactElement {
     const t = title.trim()
     if (t.length === 0) return
     void run(async () => {
-      const r = await createTask(t, detail.trim(), projId || undefined)
-      if (r.ok) {
+      /* ★ 2026-10-23：先给这次任务预生交互 ID（`task-<uuid>`），随任务一起落库，
+         附件才有确定的家 —— 否则「先传文件再建任务」时无法知道该传给谁。 */
+      const tid = newUuid()
+      const r = await createTask(t, detail.trim(), projId || undefined, `task-${tid}`)
+      if (!r.ok) return r
+      /* 任务建好了 ⇒ 再传附件。附件失败不回滚任务（任务已在板上，人看得见），
+         但必须明确告知哪几个没上去 —— 不静默吞。 */
+      const files = draftFiles
+      if (files.length > 0) {
+        const bad: string[] = []
+        for (const f of files) {
+          if (f.size > PACK_MAX_BYTES) {
+            bad.push(`${f.name}（${fmtBytes(f.size)} 超过单件上限 ${fmtBytes(PACK_MAX_BYTES)}）`)
+            continue
+          }
+          try {
+            const b64 = await readFileAsBase64(f)
+            const up = await callPack<PackFileItem>('packUpload', {
+              interactionId: `task-${tid}`, seat: '', filename: f.name, contentBase64: b64,
+            })
+            if (!up.ok) bad.push(`${f.name}：${up.message}`)
+          } catch (e) {
+            bad.push(`${f.name}：${e instanceof Error ? e.message : String(e)}`)
+          }
+        }
         setTitle('')
         setDetail('')
+        setDraftFiles([])
         setComposing(false)
+        if (bad.length > 0) {
+          setNotice(`任务已发布；但有 ${bad.length} 个附件没传上去：${bad.join('；')}`)
+        } else {
+          setNotice(`任务已发布，附件 ${files.length} 个已上传`)
+        }
+        return { ok: true }
       }
+      setTitle('')
+      setDetail('')
+      setComposing(false)
       return r
     }, '任务已发布')
+  }
+
+  /** 收下附件（选择 或 拖入）—— 只攒在本地，发布时才真正上传 */
+  const addDraftFiles = (picked: File[]): void => {
+    if (picked.length === 0) return
+    setDraftFiles((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}|${f.size}`))
+      return [...prev, ...picked.filter((f) => !seen.has(`${f.name}|${f.size}`))]
+    })
   }
 
   /** 新建项目（发布表单里就地建，建完自动选中） */
@@ -3694,20 +3943,21 @@ function TaskSection(): ReactElement {
     }, '项目已建')
   }
 
-  /** ★ 2026-10-21：任务页顶部的「＋ 新项目」（不依赖发布表单） */
-  const onTopCreateProject = (): void => {
-    const n = topProjName.trim()
+  /** ★ 2026-10-23：项目改名（只改名字，project_id 不动 ⇒ 任务归属不受影响） */
+  const onRenameProject = (): void => {
+    if (renaming === null) return
+    const n = renaming.name.trim()
     if (n.length === 0) return
+    const pid = renaming.projectId
     void run(async () => {
-      const r = await createProject(n)
+      const r = await renameProject(pid, n)
       if (r.ok) {
-        setTopProjName('')
-        setTopProjOpen(false)
+        setRenaming(null)
         const pr = await loadProjects()
         if (pr.ok) setProjects(pr.data.projects)
       }
       return r
-    }, '项目已建')
+    }, '项目名已改')
   }
 
   /** 归档项目：打包 + manifest（不删原件） */
@@ -3876,31 +4126,15 @@ function TaskSection(): ReactElement {
         >
           {showAll ? '只看未完成' : '含已完成'}
         </button>
-        <button type="button" onClick={() => setTopProjOpen((v) => !v)} disabled={busy} style={btnStyle(false)}
-          title="新建一个项目（同一铺子里可以并行多个项目）">
-          {topProjOpen ? '取消' : '＋ 新项目'}
-        </button>
+        {/* ★ 2026-10-23 阿开：「任务一级页面新建任务旁边的那个新建项目按钮可以取消了，
+            我发现新建项目还要发布任务，不如直接从新建任务里面创建项目更好（里面已有新建按钮）」
+            ⇒ 顶部这个独立入口去掉；建项目只在「＋ 新任务」表单里做（那儿建完自动选中项目）。 */}
         <button type="button" onClick={() => setComposing((v) => !v)} disabled={busy} style={btnStyle(true)}>
           {composing ? '收起' : '＋ 新任务'}
         </button>
       </div>
 
-      {/* ★ 2026-10-21：独立的新建项目入口（不必先发任务才能建项目） */}
-      {topProjOpen ? (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          <input
-            value={topProjName}
-            onChange={(e) => setTopProjName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') onTopCreateProject() }}
-            placeholder="项目名，如「财税专家工作台」"
-            style={inputStyle}
-          />
-          <button type="button" onClick={onTopCreateProject}
-            disabled={busy || topProjName.trim().length === 0} style={btnStyle(true)}>
-            建
-          </button>
-        </div>
-      ) : null}
+      {/* ★ 2026-10-23：顶部「＋ 新项目」已去掉（阿开：建项目应在新建任务里就地做） */}
 
       {/* 发布表单 */}
       {composing ? (
@@ -3962,6 +4196,78 @@ function TaskSection(): ReactElement {
               </button>
             </div>
           ) : null}
+          {/* ★ 2026-10-23 阿开：「增加一行备注提示」（建完就改不了名/删不掉，事先说清） */}
+          {projNew ? (
+            <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.6 }}>
+              备注：项目一经创建<strong>不可删除</strong>（项目是任务与资料归档的锚，删了它们会失去归属）；
+              收尾请用「归档」，归档有包可还原。名称事后可以在项目行里改。
+            </div>
+          ) : null}
+
+          {/* ★ 2026-10-23 阿开：「新建任务的时候希望可以上传附件，或者拖入附件自动上传」
+              拖拽热区 = 整个发布卡片；点「添加附件」也可以。 */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              addDraftFiles(Array.from(e.dataTransfer?.files ?? []))
+            }}
+            style={{
+              border: `1px dashed ${dragOver ? 'rgba(59,111,224,.75)' : C.border}`,
+              background: dragOver ? 'rgba(59,111,224,.06)' : 'transparent',
+              borderRadius: 6, padding: '8px 10px',
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => draftInput.current?.click()} disabled={busy} style={btnStyle(false)}>
+                📎 添加附件
+              </button>
+              <span style={{ fontSize: FS.tag, color: C.dim }}>
+                {dragOver ? '松手就加上' : '也可以把文件直接拖到这里'}
+              </span>
+              <input
+                ref={draftInput}
+                type="file"
+                multiple
+                onChange={(e) => {
+                  /* ★ 必须先 snapshot 再清空 —— 清 value 会把 FileList 一起清掉 */
+                  const picked = Array.from(e.target.files ?? [])
+                  e.target.value = ''
+                  addDraftFiles(picked)
+                }}
+                style={{ display: 'none' }}
+              />
+            </div>
+            {draftFiles.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {draftFiles.map((f, i) => (
+                  <div key={`${f.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: FS.tag }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.name}
+                    </span>
+                    <span style={{ color: C.dim }}>{fmtBytes(f.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setDraftFiles((prev) => prev.filter((_, k) => k !== i))}
+                      style={{
+                        border: 'none', background: 'transparent', cursor: 'pointer',
+                        color: '#b3261e', fontSize: FS.tag, padding: '0 2px',
+                      }}
+                      title="从这次发布里去掉"
+                    >
+                      移除
+                    </button>
+                  </div>
+                ))}
+                <div style={{ fontSize: FS.tag, color: C.dim }}>
+                  共 {draftFiles.length} 个，发布时一起上传到这次任务的资料区（单件上限 {fmtBytes(PACK_MAX_BYTES)}）
+                </div>
+              </div>
+            ) : null}
+          </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
             <button type="button" onClick={onPublish} disabled={busy || title.trim().length === 0} style={btnStyle(true)}>
               发布
@@ -4121,6 +4427,62 @@ function TaskSection(): ReactElement {
                     ? '⚡ 有条件通过（有需要处理的提醒）'
                     : '审计未完成'}
           </div>
+          {/* ★★ 2026-10-23 方案A · 古茶拍板第4条：
+              「如果是 false，报告封面上必须明确标红：本报告未经过完整的中立性自证」
+              ⇒ 位置有意放**摘要之上**：客户第一眼看到的是「这份报告有没有验过中立性」，
+                而不是先读到一段好看的结论。顺序本身就是态度。
+              · red_flag=true  ⇒ 红底红框 + 逐条列出**哪几条没过**（不只说「未过」）
+              · level=legacy   ⇒ 灰底一行事实说明（不吓人，也不假装它验过）
+              · level=ok       ⇒ 绿字一行（有结论才亮，不刷存在感） */}
+          {(() => {
+            const b = audit.neutralityBanner
+            if (!b) return null
+            const red = b.red_flag === true
+            const legacy = b.level === 'legacy'
+            const okLv = b.level === 'ok'
+            const nz = audit.report?.neutrality_checks
+            const failed = nz?.checks
+              ? Object.entries(nz.checks).filter(([, v]) => v && v.passed !== true)
+              : []
+            return (
+              <div
+                style={{
+                  margin: '6px 0 8px',
+                  padding: red ? '8px 10px' : '6px 10px',
+                  borderRadius: 6,
+                  background: red ? '#fdecea' : legacy ? '#f4f5f7' : '#eef8f1',
+                  border: red ? '1px solid #c0392b' : legacy ? `1px solid ${C.border}` : '1px solid #bfe3cd',
+                  borderLeft: red ? '4px solid #c0392b' : undefined,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: FS.tag,
+                    fontWeight: red ? 700 : 600,
+                    color: red ? '#c0392b' : legacy ? C.dim : '#1e7e42',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {b.text || (red ? '⚠ 本报告未经过完整的中立性自证' : '')}
+                </div>
+                {red && failed.length > 0 ? (
+                  <ul style={{ margin: '5px 0 0', paddingLeft: 18, fontSize: FS.tag, color: '#8e2b20', lineHeight: 1.6 }}>
+                    {failed.map(([k, v]) => (
+                      <li key={k}>
+                        <b>{NEUTRALITY_LABEL[k] || k}</b>
+                        {v?.detail ? ` —— ${v.detail}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {okLv && typeof nz?.passed_count === 'number' ? (
+                  <div style={{ fontSize: FS.tag, color: '#1e7e42', marginTop: 3, opacity: 0.85 }}>
+                    {nz.passed_count}/{nz.total} 条判据通过 · 报告内已记录逐条明细，可凭公钥独立验签
+                  </div>
+                ) : null}
+              </div>
+            )
+          })()}
           {audit.report?.summary ? (
             <div style={{ fontSize: FS.tag, color: C.dim, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto', lineHeight: 1.6 }}>
               {String(audit.report.summary).slice(0, 3000)}
@@ -4249,11 +4611,50 @@ function TaskSection(): ReactElement {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {projects.map((p) => (
               <div key={p.projectId} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: FS.small, fontWeight: 600 }}>{p.name}</span>
-                <span style={{ fontSize: FS.tag, color: C.dim }}>{p.taskCount ?? 0} 个任务</span>
-                {p.status === 'archived' ? (
-                  <span style={{ fontSize: FS.tag, color: '#8a6d3b' }}>已归档（资料照旧，随时能取消）</span>
-                ) : null}
+                {renaming !== null && renaming.projectId === p.projectId ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={renaming.name}
+                      onChange={(e) => setRenaming({ projectId: p.projectId, name: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') onRenameProject()
+                        if (e.key === 'Escape') setRenaming(null)
+                      }}
+                      placeholder="新项目名"
+                      style={{ ...inputStyle, width: 'auto', flex: 1, minWidth: 140 }}
+                    />
+                    <button type="button" onClick={onRenameProject}
+                      disabled={busy || renaming.name.trim().length === 0} style={btnStyle(true)}>
+                      存
+                    </button>
+                    <button type="button" onClick={() => setRenaming(null)} disabled={busy} style={btnStyle(false)}>
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: FS.small, fontWeight: 600 }}>{p.name}</span>
+                    <span style={{ fontSize: FS.tag, color: C.dim }}>{p.taskCount ?? 0} 个任务</span>
+                    {p.status === 'archived' ? (
+                      <span style={{ fontSize: FS.tag, color: '#8a6d3b' }}>已归档（资料照旧，随时能取消）</span>
+                    ) : (
+                      /* ★ 2026-10-23 阿开：「项目名称也改不了」⇒ 可以改；只改名字不动 id，任务归属不受影响 */
+                      <button
+                        type="button"
+                        onClick={() => setRenaming({ projectId: p.projectId, name: p.name })}
+                        disabled={busy}
+                        style={{
+                          border: 'none', background: 'transparent', cursor: 'pointer',
+                          color: C.dim, fontSize: FS.tag, padding: '0 2px',
+                        }}
+                        title="改项目名（项目的 id 不变，挂在这个项目下的任务和资料都不受影响）"
+                      >
+                        改名
+                      </button>
+                    )}
+                  </>
+                )}
                 <span style={{ flex: 1 }} />
                 {/* ★ 2026-10-21 阿开：
                     ① 归档之后按钮不该还是「归档」⇒ 换「取消归档」

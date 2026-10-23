@@ -118,6 +118,8 @@ export interface TaskCreateQuery {
   nodeId?: string
   /** ★ 期6-L2：归到哪个项目（空 ⇒ 未归类） */
   projectId?: string
+  /** ★ 2026-10-23：这次任务的就交互 ID（前端预生 `task-<uuid>` 后回填，附件才有地方落） */
+  interactionId?: string
 }
 
 /** `projectsList` 返回的一项 */
@@ -581,6 +583,7 @@ export class WorkstationRemoteService extends TypertRemoteService {
     if (typeof query.detail === 'string') body.detail = query.detail
     if (typeof query.nodeId === 'string' && query.nodeId.length > 0) body.node_id = query.nodeId
     if (typeof query.projectId === 'string' && query.projectId.length > 0) body.project_id = query.projectId
+    if (typeof query.interactionId === 'string' && query.interactionId.length > 0) body.interaction_id = query.interactionId
     const data = await this.requireHttp().call<TaskRow>('POST', '/tasks', body, signal)
     return { ok: true, data }
   }
@@ -643,6 +646,19 @@ export class WorkstationRemoteService extends TypertRemoteService {
       throw new KaipuHttpError(400, 'empty_name', '项目名不能为空。')
     }
     const data = await this.requireHttp().call<ProjectRow>('POST', '/projects', { name }, signal)
+    return { ok: true, data }
+  }
+
+  /** 改项目名（★ 2026-10-23 阿开：「项目名称也改不了」）
+      ★ 不支持删除：项目是数据链的锚，删了任务变孤儿。要不看见 → 归档。 */
+  @Remote('projectsRename')
+  async projectsRename(query: { projectId: string; name: string }, signal?: CancelSignal): Promise<RemoteResult<{ projectId: string; name: string }>> {
+    const pid = typeof query.projectId === 'string' ? query.projectId : ''
+    const name = (query.name ?? '').trim()
+    if (pid.length === 0) throw new KaipuHttpError(400, 'missing_project_id', '改名缺项目 id')
+    if (name.length === 0) throw new KaipuHttpError(400, 'empty_name', '项目名不能为空。')
+    const data = await this.requireHttp().call<{ projectId: string; name: string }>(
+      'PATCH', `/projects/${encodeURIComponent(pid)}`, { name }, signal)
     return { ok: true, data }
   }
 
