@@ -117,6 +117,12 @@ import {
   PUBLIC_POOL_LABEL,
   PUBLIC_POOL_VALUE,
 } from './node-pick.js'
+import {
+  codeLeftText,
+  grantCopyText,
+  granteeLabel,
+  granteeUnknown,
+} from './grant-copy.js'
 import type {
   BallLamp,
   GrantCodeIssued,
@@ -3235,26 +3241,6 @@ function grantErrText(code: string, message: string): string {
   return message
 }
 
-/** 码的剩余有效天数（向上取整；服务端给过 `codeExpiresAt` 才算） */
-function codeDaysLeft(codeExpiresAt: string | undefined): number | null {
-  const t = Date.parse(String(codeExpiresAt ?? ''))
-  if (Number.isNaN(t)) return null
-  const ms = t - Date.now()
-  if (ms <= 0) return 0
-  return Math.ceil(ms / 86400000)
-}
-
-/** 复制出去的那**一整段话** —— 对方收到就能照做，不用再问一句「这码干嘛的」 */
-function grantCopyText(code: string, ttlHours: number, codeExpiresAt: string): string {
-  const day = codeExpiresAt.slice(0, 10)
-  return [
-    `我在山海城铺子里给你开了临时管理权限（兑换后 ${ttlHours} 小时，这个码到 ${day} 前都能兑换）。`,
-    '把这个码发给你自己的 Agent 就行：',
-    '',
-    code,
-  ].join('\n')
-}
-
 function ManagementGrantSection(): ReactElement {
   const [rows, setRows] = useState<GrantRow[] | null>(null)
   const [ttlOptions, setTtlOptions] = useState<number[]>([24, 72, 168])
@@ -3361,7 +3347,15 @@ function ManagementGrantSection(): ReactElement {
               style={{ border: '1px solid #cfe3de', background: 'rgba(44,110,99,0.05)', borderRadius: 8, padding: '6px 10px', fontSize: FS.small }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 600 }}>{g.granteeName}</span>
+                {/* ★ 需求 A-⑤：有名字显示名字，没名字说「对方未填名字」。
+                    以前这里直接渲染 `g.granteeName` —— 对方没填就是**一片空白**，
+                    看上去像页面坏了。`granteeId` 只用来判断"有没有兑换过"，不上屏。 */}
+                <span style={{ fontWeight: 600 }}>
+                  {granteeLabel(g.granteeName, g.granteeId)}
+                </span>
+                {granteeUnknown(g.granteeName) ? (
+                  <span style={{ fontSize: FS.tag, color: C.dim }}>（已兑换）</span>
+                ) : null}
                 <span style={{ color: '#2c6e63', fontWeight: 600 }}>{fmtRemain(g.remainingSeconds)}</span>
                 <button type="button" onClick={() => void onRevoke(g.grantId)} disabled={busy} style={btnStyle(false)}>
                   收回
@@ -3379,7 +3373,7 @@ function ManagementGrantSection(): ReactElement {
       {pending.length > 0 && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
           {pending.map((g) => {
-            const d = codeDaysLeft(g.codeExpiresAt)
+            const left = codeLeftText(g.codeExpiresAt)
             return (
               <div
                 key={g.grantId}
@@ -3387,7 +3381,7 @@ function ManagementGrantSection(): ReactElement {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ color: C.text, fontWeight: 600 }}>已生成 · 未兑换</span>
-                  <span>{d === null ? '码 7 天内有效' : d <= 0 ? '码已过期' : `剩 ${d} 天`}</span>
+                  <span>{left}</span>
                   <span>{ttlLabel(g.ttlHours)}</span>
                   <span style={{ flex: 1 }} />
                   <button type="button" onClick={() => void onRevoke(g.grantId)} disabled={busy} style={btnStyle(false)}>
@@ -3486,7 +3480,7 @@ function ManagementGrantSection(): ReactElement {
           <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {history.map((g) => (
               <div key={g.grantId} style={{ fontSize: FS.tag, color: C.dim }}>
-                {g.granteeName || '（未兑换）'} · {ttlLabel(g.ttlHours)} ·{' '}
+                {granteeLabel(g.granteeName, g.granteeId)} · {ttlLabel(g.ttlHours)} ·{' '}
                 {g.status === 'expired' ? '已自然到期' : g.status === 'revoked' ? '已收回' : '已作废'}
               </div>
             ))}
