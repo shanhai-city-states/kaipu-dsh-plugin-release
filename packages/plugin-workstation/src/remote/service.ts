@@ -93,6 +93,23 @@ export interface OrgNode {
   org_scope?: string
   cross_scope?: number | string | null
   created_at?: string
+  /** ★ 2026-10-24（083-r3）：工位序号 —— 工位页与发布选择器**都只认这个**，
+   *  不按数组下标、不自己编号（两处显示不一致就是阿开最在意的那个错）。 */
+  seq?: number
+  /** ★ 2026-10-24（083-r2）：这个位子上的邀请还挂着（人没来）。
+   *  ★ 只有 `holders` 为空时它才有意义 —— 人已到就说明邀请已完成，不该再显示。 */
+  invited?: { lamp?: string; invitedName?: string; invitedAt?: string } | null
+  /** ★ 2026-10-24（083-r2）：席位上的凭据姿态。present=90 秒内有心跳 /
+   *  joined=有凭据没心跳 / invited=邀请发了人还没来。老数据可能没有。 */
+  holders?: {
+    agentId?: string
+    name?: string
+    seat?: string
+    online?: boolean
+    onRoster?: boolean
+    hasCred?: boolean
+    joinState?: string
+  }[]
   /** ★ 被多少席位绑定 —— >0 即删不掉（服务端 409 referenced） */
   seat_count?: number
   /** ★ 还有多少未归档子节点 —— >0 即删不掉（会断树，409 has_children） */
@@ -295,6 +312,22 @@ export interface TaskRow {
 }
 
 /** `tasksList` 返回 */
+/** ★ 2026-10-24（083-r2）：邀码列表一行。**没有明文字段** —— 服务端只存 hash。 */
+export interface JoinCodeRow {
+  codeHash: string
+  note?: string
+  seat?: string
+  invitedName?: string
+  /** pending | used | expired | revoked */
+  state: string
+  createdAt: string
+  expiresAt: string
+  usedAt?: string | null
+  usedBy?: string
+  revokedAt?: string | null
+  batchId?: string
+}
+
 /* ─────────────────────────────────────────────────────────────────────
  * ★ 期6a-2 · 资料按位（packs）
  *
@@ -1375,15 +1408,65 @@ export class WorkstationRemoteService extends TypertRemoteService {
 
   @Remote('deviceJoinCodeCreate')
   async deviceJoinCodeCreate(
-    query: { note?: string; ttlHours?: number }, signal?: CancelSignal,
-  ): Promise<RemoteResult<{ code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string }>> {
+    query: { note?: string; ttlHours?: number; count?: number; seat?: string; invitedName?: string }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string; codes?: { code: string; codeHash: string; expiresAt: string }[] }>> {
     const body: Record<string, unknown> = {}
     if (typeof query.note === 'string' && query.note.length > 0) body.note = query.note
     if (typeof query.ttlHours === 'number' && Number.isFinite(query.ttlHours)) body.ttlHours = query.ttlHours
+    /* ★ 2026-10-24（083-r2）：批量与座位/受邀人。不传 count ⇒ 服务端按 1 张处理（存量零影响）。 */
+    if (typeof query.count === 'number' && Number.isFinite(query.count) && query.count > 1) body.count = query.count
+    if (typeof query.seat === 'string' && query.seat.length > 0) body.seat = query.seat
+    if (typeof query.invitedName === 'string' && query.invitedName.length > 0) body.invitedName = query.invitedName
     const data = await this.requireHttp().call<{
       code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string
+      codes?: { code: string; codeHash: string; expiresAt: string }[]
     }>('POST', '/device-join-codes', body, signal)
     return { ok: true, data }
+  }
+
+  /* ── ★★ 2026-10-24（083-r2）：邀请码列表化三个只读/管理端点 ──
+     ★ 列表**永不返回明文**（服务端只存 hash）—— 所以明文只能留在用户本机，
+       这也是「切页面回来码还在」只能靠 localStorage 的根本原因。
+     ★ 作废/续期都用 `codeHash`（12 位）定位，不是明文。 */
+  @Remote('deviceJoinCodes')
+  async deviceJoinCodes(
+    query: { state?: string }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ codes: JoinCodeRow[]; count?: number }>> {
+    const qs = typeof query.state === 'string' && query.state.length > 0
+      ? `?state=${encodeURIComponent(query.state)}` : ''
+    const data = await this.requireHttp().call<{ codes?: JoinCodeRow[]; count?: number }>(
+      'GET', `/device-join-codes${qs}`, undefined, signal)
+    const codes = Array.isArray(data.codes) ? data.codes : []
+    /* ★ exactOptionalPropertyTypes：`count` 只能**缺席**，不能显式给 undefined */
+    return {
+      ok: true,
+      data: typeof data.count === 'number' ? { codes, count: data.count } : { codes },
+    }
+  }
+
+  @Remote('deviceJoinCodeRevoke')
+  async deviceJoinCodeRevoke(
+    query: { codeHash: string }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ codeHash: string; state: string }>> {
+    const h = (query.codeHash ?? '').trim()
+    const data = await this.requireHttp().call<{ codeHash?: string; state?: string }>(
+      'POST', `/device-join-codes/${encodeURIComponent(h)}/revoke`, {}, signal)
+    return { ok: true, data: { codeHash: data.codeHash ?? h, state: data.state ?? 'revoked' } }
+  }
+
+  @Remote('deviceJoinCodeRenew')
+  async deviceJoinCodeRenew(
+    query: { codeHash: string; ttlHours?: number }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ codeHash: string; state: string; expiresAt: string }>> {
+    const h = (query.codeHash ?? '').trim()
+    const body: Record<string, unknown> = {}
+    if (typeof query.ttlHours === 'number' && Number.isFinite(query.ttlHours)) body.ttlHours = query.ttlHours
+    const data = await this.requireHttp().call<{ codeHash?: string; state?: string; expiresAt?: string }>(
+      'POST', `/device-join-codes/${encodeURIComponent(h)}/renew`, body, signal)
+    return {
+      ok: true,
+      data: { codeHash: data.codeHash ?? h, state: data.state ?? 'pending', expiresAt: data.expiresAt ?? '' },
+    }
   }
 
   /* ══════════════════════════════════════════════════════════════════

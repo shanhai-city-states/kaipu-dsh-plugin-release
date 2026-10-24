@@ -138,8 +138,16 @@ export interface OrgNodeView {
   origin?: string
   /** ★ 工位编号（沟通用「几号工位」）—— 服务端按创建顺序分配，删除不回收 */
   seq?: number
-  /** ★ 谁坐在这里（服务端按 agents.lamp ↔ role_seats.seat 归位） */
-  holders?: Array<{ agentId: string; name: string; seat: string; seatLabel?: string; online?: boolean; lastSeen?: string | null }>
+  /** ★ 谁坐在这里（服务端按 agents.lamp ↔ role_seats.seat 归位）
+   *  ★ 2026-10-24（083-r2）：新增 `joinState` 三态（present/joined/invited）——
+   *    原来只有 `online` 一个布尔，分不出「离线」与「压根没来」。 */
+  holders?: Array<{
+    agentId: string; name: string; seat: string; seatLabel?: string; online?: boolean
+    lastSeen?: string | null; joinState?: string; onRoster?: boolean; hasCred?: boolean
+  }>
+  /** ★ 2026-10-24（083-r2）：邀请发了、人还没来。
+   *  只有 `holders` 为空时它才有意义 —— 人已到就不该再显示「已受邀」。 */
+  invited?: { lamp?: string; invitedName?: string; invitedAt?: string } | null
   /** 非空 = 不能删，值就是原因（如「被 4 个席位占用」） */
   undeletable?: string | null
   /** ★ false = 不能改名（位被不可替换的席位占用，如平台签名位） */
@@ -376,16 +384,24 @@ export async function createTask(
    *   本字段只走铺主的 `POST /tasks`（Bearer），不进签名。
    */
   notifyAgent?: string,
+  /**
+   * ★ 2026-10-24（083-r3）：发到哪个工位（`GET /org/tree` 的 `node_id`）。
+   *   不传/空 ⇒ 公共池，与旧行为一致。
+   *   ★ 必须用 `org/tree` 回的真实 id —— 后端 `tasks.node_id` 与 `role_seats.node_id`
+   *     是两套 UUID 空间，自己拼/写死示例值会静默落进公共池（派单书 §二-2.2 的坑）。
+   */
+  nodeId?: string,
 ): Promise<OrgResult<TaskItem>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const query: {
     title: string; detail: string; projectId?: string; interactionId?: string
-    kind?: string; notifyAgent?: string
+    kind?: string; notifyAgent?: string; nodeId?: string
   } = { title, detail }
   if (typeof projectId === 'string' && projectId.length > 0) query.projectId = projectId
   if (typeof interactionId === 'string' && interactionId.length > 0) query.interactionId = interactionId
   if (typeof kind === 'string' && kind.length > 0) query.kind = kind
   if (typeof notifyAgent === 'string' && notifyAgent.length > 0) query.notifyAgent = notifyAgent
+  if (typeof nodeId === 'string' && nodeId.length > 0) query.nodeId = nodeId
   const r = await callKaipu<TaskItem>(connection, 'tasksCreate', query)
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)

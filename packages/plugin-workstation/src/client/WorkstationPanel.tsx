@@ -85,6 +85,38 @@ import {
   reqStoreKey,
 } from './join-copy.js'
 import type { ApplicantCodeState } from './join-copy.js'
+/* ★ 083-r2（邀请码列表化）：列表口径 / 明文留存 / 额度与错误人话，全在纯函数里。 */
+import {
+  batchChoices,
+  canCreateMore,
+  codeHashOf,
+  codeRowView,
+  createBlockedTip,
+  emptyListText,
+  humanizeCodeError,
+  isActionable,
+  PENDING_LIMIT,
+  pendingCount as countPendingCodes,
+  plainStoreKey,
+  staleHashes,
+  type JoinCodeRowLike,
+} from './invite-code.js'
+/* ★ 083-r3（派活绑定工位）：缩小版工位图与工位页共用同一套取数口径，写在一处。 */
+import {
+  dotOf,
+  humanizePublishError,
+  invitedLabel,
+  joinStateOf,
+  nodeChipLabel,
+  nodeChipWho,
+  pickerHint,
+  publishToast,
+  showInvited,
+  sortedNodes,
+  taskBindingText,
+  PUBLIC_POOL_LABEL,
+  PUBLIC_POOL_VALUE,
+} from './node-pick.js'
 import type {
   BallLamp,
   GrantCodeIssued,
@@ -2129,19 +2161,31 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
             border: occupied ? 'none' : `1px dashed ${C.faint}`,
           }}
         >
-          {holders.length > 0 ? (holders[0]?.name || '?').slice(0, 1) : occupied ? (node.name || '?').slice(0, 1) : ''}
+          {holders.length > 0
+            ? (holders[0]?.name || '?').slice(0, 1)
+            : showInvited(holders, node.invited)
+              ? (node.invited?.invitedName || '邀').slice(0, 1)
+              : occupied ? (node.name || '?').slice(0, 1) : ''}
         </span>
-        {/* ★ 心跳点（2026-10-19 阿开）：绿=90 秒内有心跳，灰=活着但没报 */}
-        {holders.length > 0 ? (
-          <span
-            title={holders[0]?.online === true ? '在线（90 秒内有心跳）' : '离线（没收到心跳）'}
-            style={{
-              width: 7, height: 7, borderRadius: '50%', marginLeft: -4, marginTop: -10,
-              background: holders[0]?.online === true ? '#27ae60' : '#bbb',
-              border: '1px solid #fff',
-            }}
-          />
-        ) : null}
+        {/* ★ 心跳点（2026-10-19 阿开）：绿=90 秒内有心跳，灰=活着但没报
+            ★★ 2026-10-24（083-r2）：三态。原来只有 online 一个布尔，
+               分不出「离线（人在）」和「压根没来」—— 后者被当成空位，于是
+               邀请发出去以后看不出邀请到底发没发。现在按 joinState：
+                 present 绿实心 / joined 灰实心 / invited 灰空心（受邀未到）。 */}
+        {holders.length > 0 ? (() => {
+          const st = joinStateOf(holders[0] ?? {})
+          const dot = dotOf(st)
+          return (
+            <span
+              title={dot.title}
+              style={{
+                width: 7, height: 7, borderRadius: '50%', marginLeft: -4, marginTop: -10,
+                background: dot.hollow ? 'transparent' : dot.color,
+                border: dot.hollow ? `1px solid ${dot.color}` : '1px solid #fff',
+              }}
+            />
+          )
+        })() : null}
         {holders.length > 0 && (
           <span
             style={{
@@ -2196,11 +2240,22 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
         {/* ★ 2026-10-19 阿开：「Agent 自己的名字后面还是跟着管理方、审计方」
             ⇒ 行1 只放**人**；角色下沉到行2 当门牌。有人时不再重复工位名。 */}
         {holders.length === 0 ? (
-          /* ★ 2026-10-24（083-r1）：席位被占、但名单读不出来 —— 这是**异常**，不是空位。
-             以前这种会退化成只显示工位名，看上去跟「没人」一模一样，与事实相反
-             （阿开就是因为「看不出多了个人」才以为 Codex 没进来）。
-             ⇒ 明说「有人，但读不到是谁」，并用待查色，别让它混在正常态里。 */
-          holderUnknownText(holders.length, node.seat_count ?? 0).length > 0 ? (
+          /* ★★ 2026-10-24（083-r2）：受邀未到 ≠ 空位。
+             以前这两种都渲染成「工位名」，于是邀请发出去以后界面上什么也没变 ——
+             人以为邀请没发出去，于是再发一张，僵尸码就是这么堆起来的。
+             ⇒ 有 invited 就明说「已受邀」，且**不显示空位态**（不再给邀请入口的暗示）。 */
+          showInvited(holders, node.invited) ? (
+            <span
+              style={{
+                fontSize: FS.tag, fontWeight: 600, flex: 1, minWidth: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                color: C.dim, fontStyle: 'italic',
+              }}
+              title={`邀请已发出（${node.invited?.invitedAt ?? '时间未记'}），人还没接入 —— 码用掉后会变成正常在册`}
+            >
+              {invitedLabel(node.invited ?? {})}
+            </span>
+          ) : holderUnknownText(holders.length, node.seat_count ?? 0).length > 0 ? (
             <span
               style={{
                 fontSize: FS.tag, fontWeight: 600, flex: 1, minWidth: 0,
@@ -4272,6 +4327,30 @@ function TaskSection(): ReactElement {
   const notifyChoices = agentOpts ?? []
   const notifyPick = notifyChoices.find((c) => c.id === notifyId) ?? null
 
+  /* ★★ 2026-10-24（083-r3）· 发布到哪个工位。
+     ★ 数据源与工位页**同一个端点**（`orgTree`），不用另一套接口 ——
+       两处显示要「看起来是同一个东西」，数据上就得是同一份。
+     ★ 拉不到就保持 null ⇒ 选择器整块不渲染，退回公共池（不画空图，免得误发）。 */
+  const [nodeId, setNodeId] = useState<string>('')
+  const [nodeOpts, setNodeOpts] = useState<OrgNodeView[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    void loadOrgTree().then((r) => {
+      if (!alive) return
+      /* 口径统一走 node-pick；类型上 OrgNodeView 已含 seq/holders/invited，直接喂 */
+      if (r.ok) setNodeOpts(sortedNodes(r.data.nodes) as unknown as OrgNodeView[])
+    })
+    return () => { alive = false }
+  }, [])
+  const nodeChoices = nodeOpts === null ? [] : sortedNodes(nodeOpts)
+  const nodePick = nodeChoices.find((n) => n.node_id === nodeId) ?? null
+  /** 任务卡用：node_id → 「#2 执行位」。认不出来（工位已删/未加载）就返回空 ⇒ 卡片按公共池显示 */
+  const nodeLabelOf = (id?: string | null): string => {
+    if (typeof id !== 'string' || id.length === 0) return ''
+    const hit = nodeChoices.find((n) => n.node_id === id)
+    return hit === undefined ? '' : nodeChipLabel(hit)
+  }
+
   const [projId, setProjId] = useState('')
   const [projNew, setProjNew] = useState(false)
   const [projName, setProjName] = useState('')
@@ -4418,22 +4497,41 @@ function TaskSection(): ReactElement {
   const onPublish = (): void => {
     const t = title.trim()
     if (t.length === 0) return
+    /* 发布结果要说清「发到哪、指派给谁」（派单书 §三-任务3）——
+       一次派五个任务时，最容易犯的错就是选错工位，发完必须让人看见。
+       ★ 文案在点发布这一刻就定下来：之后清空表单，不能等回调再读 state。 */
+    const okText = publishToast(nodePick === null ? '' : nodeChipLabel(nodePick), notifyPick?.name ?? '')
     void run(async () => {
       /* ★ 2026-10-23：先给这次任务预生交互 ID（`task-<uuid>`），随任务一起落库，
          附件才有确定的家 —— 否则「先传文件再建任务」时无法知道该传给谁。 */
       const tid = newUuid()
-      let r = await createTask(t, detail.trim(), projId || undefined, `task-${tid}`, newKind || undefined, notifyId || undefined)
+      let r = await createTask(
+        t, detail.trim(), projId || undefined, `task-${tid}`, newKind || undefined,
+        notifyId || undefined, nodeId || undefined,
+      )
       /* ★ 2026-10-24（083-r1）：服务端这版 `POST /tasks` 还没有 notifyAgent 字段，
          带了就整条 400 `unknown_field`（这属于**整单被拒**，没有副作用 —— 探针实测过）。
          ⇒ 去掉该字段重发一次，不让一个「顺手的便利」把派活本身搞失败；
-           但必须当场说明「这次其实没点名」，不能让人以为点名生效了。 */
+           但必须当场说明「这次其实没点名」，不能让人以为点名生效了。
+         ★ 083-r3（2026-10-24 实测）：线上已认 `notifyAgent` 与 `nodeId`（探针分别回
+           `agent_not_found` / `node_not_found`，都是零副作用）。这层降级因此成了**保险**，
+           不再在主路径上触发 —— 但保留：字段被回退时业务不能跟着挂。 */
       let degraded = false
       if (!r.ok && notifyId.length > 0 && isNotifyUnsupported(r.code, r.message)) {
         degraded = true
-        r = await createTask(t, detail.trim(), projId || undefined, `task-${tid}`, newKind || undefined)
+        r = await createTask(
+          t, detail.trim(), projId || undefined, `task-${tid}`, newKind || undefined,
+          undefined, nodeId || undefined,
+        )
       }
-      /* 失败一律翻成人话（`agent_not_found` 不上屏码，只进 console） */
-      if (!r.ok) return { ok: false, code: r.code, message: notifyFailText(r.code, r.message) }
+      /* 失败一律翻成人话（`agent_not_found` / `node_not_found` 不上屏码，只进 console） */
+      if (!r.ok) {
+        return {
+          ok: false,
+          code: r.code,
+          message: humanizePublishError(r.code ?? '', notifyFailText(r.code, r.message)),
+        }
+      }
       /* 任务建好了 ⇒ 再传附件。附件失败不回滚任务（任务已在板上，人看得见），
          但必须明确告知哪几个没上去 —— 不静默吞。 */
       const files = draftFiles
@@ -4459,10 +4557,11 @@ function TaskSection(): ReactElement {
         setDraftFiles([])
         setComposing(false)
         setNotifyId('')
+        setNodeId('')
         if (bad.length > 0) {
-          setNotice(`任务已发布；但有 ${bad.length} 个附件没传上去：${bad.join('；')}${degraded ? ` · ${NOTIFY_DEGRADED_NOTICE}` : ''}`)
+          setNotice(`${okText}；但有 ${bad.length} 个附件没传上去：${bad.join('；')}${degraded ? ` · ${NOTIFY_DEGRADED_NOTICE}` : ''}`)
         } else {
-          setNotice(`任务已发布，附件 ${files.length} 个已上传${degraded ? ` · ${NOTIFY_DEGRADED_NOTICE}` : ''}`)
+          setNotice(`${okText}，附件 ${files.length} 个已上传${degraded ? ` · ${NOTIFY_DEGRADED_NOTICE}` : ''}`)
         }
         return { ok: true }
       }
@@ -4470,11 +4569,12 @@ function TaskSection(): ReactElement {
       setDetail('')
       setComposing(false)
       setNotifyId('')
-      /* 无附件分支由 run 的 okMsg 收尾；降级时覆盖掉那句「任务已发布」，
-         否则「已发布」三个字会盖住「其实没点名」这个事实。 */
-      if (degraded) setNotice(`任务已发布 · ${NOTIFY_DEGRADED_NOTICE}`)
+      setNodeId('')
+      /* 无附件分支由 run 的 okMsg 收尾（已换成「发到哪 + 指派给谁」）；
+         降级时覆盖掉那句成功提示，否则「已发布」会盖住「其实没点名」这个事实。 */
+      if (degraded) setNotice(`${okText} · ${NOTIFY_DEGRADED_NOTICE}`)
       return r
-    }, '任务已发布')
+    }, okText)
   }
 
   /** 收下附件（选择 或 拖入）—— 只攒在本地，发布时才真正上传 */
@@ -4775,6 +4875,63 @@ function TaskSection(): ReactElement {
                 ))}
               </select>
               <span style={{ color: C.faint, lineHeight: 1.5 }}>{notifyPickHint(notifyPick)}</span>
+            </div>
+          ) : null}
+          {/* ★★ 2026-10-24（083-r3）· 发布到哪个工位。
+              ★ 为什么是「缩小版工位图」而不是下拉框：阿开原话「与实际工位号和显示一致，
+                这样就不需要切换工位界面去核对」。下拉框能选，但对不上号 —— 那正是要解决的问题。
+              ★ 序号只用 `seq`、姓名只用 `holders[].name`，两处调用同一组函数（node-pick），
+                所以选择器与工位页**不可能慢慢跑偏**。*/}
+          {nodeOpts !== null ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: FS.tag, color: C.dim }}>发布到哪个工位？</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {nodeChoices.map((n) => {
+                  const on = nodeId === n.node_id
+                  return (
+                    <button
+                      key={n.node_id}
+                      type="button"
+                      onClick={() => setNodeId(on ? PUBLIC_POOL_VALUE : n.node_id)}
+                      title={pickerHint(n)}
+                      style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1,
+                        padding: '4px 8px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit',
+                        border: `1px solid ${on ? C.accent : C.border}`,
+                        background: on ? 'rgba(59,111,224,.10)' : '#fff',
+                        maxWidth: 180,
+                      }}
+                    >
+                      <span style={{
+                        fontSize: FS.tag, fontWeight: on ? 700 : 600,
+                        color: on ? C.accent : C.text, whiteSpace: 'nowrap',
+                      }}>{nodeChipLabel(n)}</span>
+                      <span style={{
+                        fontSize: 10, color: C.dim, maxWidth: 164,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{nodeChipWho(n)}</span>
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() => setNodeId(PUBLIC_POOL_VALUE)}
+                  title="不绑工位，所有 Agent 都能看到"
+                  style={{
+                    display: 'flex', alignItems: 'center', padding: '4px 8px', borderRadius: 7,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    border: `1px ${nodeId === PUBLIC_POOL_VALUE ? 'solid' : 'dashed'} ${nodeId === PUBLIC_POOL_VALUE ? C.accent : C.border}`,
+                    background: nodeId === PUBLIC_POOL_VALUE ? 'rgba(59,111,224,.10)' : 'transparent',
+                    fontSize: FS.tag, fontWeight: nodeId === PUBLIC_POOL_VALUE ? 700 : 600,
+                    color: nodeId === PUBLIC_POOL_VALUE ? C.accent : C.dim,
+                  }}
+                >{PUBLIC_POOL_LABEL}</button>
+              </div>
+              <div style={{ fontSize: FS.tag, color: C.faint }}>
+                {nodePick === null
+                  ? '不绑工位：所有 Agent 都能看到这条'
+                  : `绑到 ${nodeChipLabel(nodePick)}：只有这个工位的 Agent 会看到`}
+              </div>
             </div>
           ) : null}
           {projNew ? (
@@ -5165,7 +5322,7 @@ function TaskSection(): ReactElement {
                     ) : (
                       list.map((t) => (
                         <CardBoundary key={t.task_id}>
-                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} />
+                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} />
                         </CardBoundary>
                       ))
                     )}
@@ -5420,6 +5577,10 @@ function TaskCard(props: {
   busy: boolean
   /** ★ 期6-L2：所属项目名（空 = 未归类） */
   projectName?: string
+  /** ★ 2026-10-24（083-r3）：绑到哪个工位（空 = 公共池）。
+   *  ★ 只从 `task.node_id` 反查工位名 —— `/tasks` **不回 notify_agent**（实测），
+   *    所以「指派给谁」这一半在铺主列表上取不到，只能靠发布当时那句 toast。 */
+  nodeLabel?: string
   run: (fn: () => Promise<{ ok: boolean; code?: string; message?: string }>, okMsg?: string) => Promise<void>
 }): ReactElement {
   const { task, myId, busy, run } = props
@@ -5542,6 +5703,21 @@ function TaskCard(props: {
             {props.projectName}
           </span>
         ) : null}
+        {/* ★ 2026-10-24（083-r3）：这条发到哪 —— 公共池还是某个工位。
+            一次派五条时「发错工位」是最常见的错，列表里必须能回看。 */}
+        <span
+          title={props.nodeLabel && props.nodeLabel.length > 0
+            ? `绑到工位「${props.nodeLabel}」：只有这个工位的 Agent 会看到`
+            : '公共池：所有 Agent 都能看到'}
+          style={{
+            fontSize: FS.tag,
+            color: props.nodeLabel && props.nodeLabel.length > 0 ? C.accent : C.dim,
+            border: `1px ${props.nodeLabel && props.nodeLabel.length > 0 ? 'solid' : 'dashed'} ${C.border}`,
+            borderRadius: 6, padding: '1px 6px', whiteSpace: 'nowrap',
+          }}
+        >
+          {taskBindingText(props.nodeLabel ?? '', '')}
+        </span>
         {/* ★ 期6-L1：这次任务的附件数（0 也显示 ⇒ 可从这里直接去上传，天然归属该任务） */}
         <button
           type="button"
@@ -5873,6 +6049,16 @@ function safeSet(key: string, value: string): void {
   }
 }
 
+/** ★ 083-r2：码失效后要把明文从本机抹掉（留着是纯泄露面）。
+ *  删除失败同样不阻塞流程 —— 界面已经按「不在本机」渲染。 */
+function safeRemove(key: string): void {
+  try {
+    globalThis.localStorage?.removeItem(key)
+  } catch {
+    /* 同上 */
+  }
+}
+
 function applicantId(): string {
   const old = safeGet(JOIN_WHO_KEY)
   if (old.length > 0) return old
@@ -5912,6 +6098,17 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
   /** 拒绝：就地展开理由输入框（★ 不用 window.confirm —— DSH 宿主里不可靠） */
   const [rejectFor, setRejectFor] = useState<string>('')
   const [rejectWhy, setRejectWhy] = useState<string>('')
+
+  /* ── ★★ 083-r2 · 邀请码列表（铺主侧）──
+     ★ 明文只在本机：服务端只存 hash、列表永不回明文，所以「码值」这一格
+       只能从 localStorage 按 codeHash 取。取不到就明说「明文未保存在本机」。 */
+  const [codeRows, setCodeRows] = useState<JoinCodeRowLike[]>([])
+  /** codeHash → 明文（本机快照；渲染用它，不在 render 里读 localStorage） */
+  const [codePlain, setCodePlain] = useState<Record<string, string>>({})
+  const [listErr, setListErr] = useState<string>('')
+  /** 哪一行在处理（revoke/renew），空 = 没人在处理 */
+  const [rowCodeBusy, setRowCodeBusy] = useState<string>('')
+  const [batch, setBatch] = useState<number>(1)
 
   /* ── 083 第一批 · 申请人侧 ── */
   const [myId, setMyId] = useState<string>('')
@@ -5981,19 +6178,108 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
     return () => { clearInterval(t) }
   }, [owner, myId])
 
+  /** 拉邀请码列表 + 同步本机明文快照。
+   *  ★ 顺序很重要：先按服务端状态清掉失效码的明文，再快照 —— 反过来的话，
+   *    这一轮还会把已经作废的码显示成正的，下一轮才消失（中间那一眼会骗人）。
+   *  ★ 明文快照进 state（渲染读 state，不在 render 里读 localStorage）：
+   *    localStorage 不是响应式数据源，直接读会导致「码出来了但界面不刷新」。 */
+  const refreshCodes = (): void => {
+    void (async () => {
+      const r = await callPack<{ codes: JoinCodeRowLike[] }>('deviceJoinCodes', {})
+      if (!r.ok) {
+        setListErr(humanizeCodeError(r.code ?? '', r.message ?? ''))
+        return
+      }
+      const list = Array.isArray(r.data.codes) ? r.data.codes : []
+      const stale = staleHashes(list, (h) => safeGet(plainStoreKey(h)).length > 0, Date.now())
+      for (const h of stale) safeRemove(plainStoreKey(h))
+      const snap: Record<string, string> = {}
+      for (const row of list) snap[row.codeHash] = safeGet(plainStoreKey(row.codeHash))
+      setListErr('')
+      setCodeRows(list)
+      setCodePlain(snap)
+    })()
+  }
+
+  /* 铺主进卡片就拉一次列表；申请人（owner===false）不拉 —— 那是铺主专属端点，拉了必 403 */
+  useEffect(() => {
+    if (owner !== true) return
+    refreshCodes()
+    /* 只跟 owner 变化走：refreshCodes 是纯闭包，每次渲染都是新函数，
+       把它放进依赖会变成「渲染一次拉一次」的无限循环。 */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner])
+
+  const pendingCodes = countPendingCodes(codeRows)
+
+  /** 作废一张（只能作废待用；后端 404 code_not_revocable 要说人话） */
+  const revokeCode = (hash: string): void => {
+    if (rowCodeBusy.length > 0) return
+    setRowCodeBusy(hash)
+    setListErr('')
+    void (async () => {
+      const r = await callPack<{ codeHash: string; state: string }>('deviceJoinCodeRevoke', { codeHash: hash })
+      setRowCodeBusy('')
+      if (!r.ok) {
+        setListErr(humanizeCodeError(r.code ?? '', r.message ?? '', pendingCodes))
+        refreshCodes()
+        return
+      }
+      safeRemove(plainStoreKey(hash))
+      refreshCodes()
+    })()
+  }
+
+  /** 续期（沿用当前选中的有效期时长） */
+  const renewCode = (hash: string): void => {
+    if (rowCodeBusy.length > 0) return
+    setRowCodeBusy(hash)
+    setListErr('')
+    void (async () => {
+      const r = await callPack<{ codeHash: string; state: string; expiresAt: string }>(
+        'deviceJoinCodeRenew', { codeHash: hash, ttlHours: ttl })
+      setRowCodeBusy('')
+      if (!r.ok) {
+        setListErr(humanizeCodeError(r.code ?? '', r.message ?? '', pendingCodes))
+        refreshCodes()
+        return
+      }
+      refreshCodes()
+    })()
+  }
+
   const make = (ttlHours: number): void => {
     if (busy) return
     setBusy(true)
     setErr('')
+    setListErr('')
     void (async () => {
-      const r = await callPack<{ code: string; accountId: string; expiresAt: string }>(
-        'deviceJoinCodeCreate', { note: '新设备加入', ttlHours })
+      /* 一次生成 N 张（N 受剩余额度限制）。**不做「一个码用 N 次」** ——
+         一码一人，谁用了、谁没用、作废哪张才清晰（派单书 §二-任务1）。 */
+      const room = batchChoices(pendingCodes)
+      const n = room.includes(batch) ? batch : 1
+      const r = await callPack<{
+        code: string; accountId: string; expiresAt: string; ttlHours: number
+        codes?: string[]; items?: { code: string; expiresAt: string }[]
+      }>('deviceJoinCodeCreate', { note: '新设备加入', ttlHours, count: n })
       setBusy(false)
       if (!r.ok) {
-        setErr(humanizeJoinError(r.code, r.message))
+        setErr(humanizeCodeError(r.code ?? '', r.message ?? '', pendingCodes))
         return
       }
-      setCode({ code: r.data.code, expiresAt: r.data.expiresAt, ttlHours })
+      /* ★★ 明文先落盘：服务端列表**永远不回明文**，这一次不回就永久丢了。
+         键用 `codeHashOf(明文)`（= 服务端 codeHash，实测 sha256 前 12 位），
+         于是「这一行」与「这个码」是精确对应，不靠批次顺序猜。 */
+      const plains = Array.isArray(r.data.codes) && r.data.codes.length > 0
+        ? r.data.codes.map((x) => String(x ?? '')).filter((x) => x.length > 0)
+        : [r.data.code]
+      for (const p of plains) {
+        const h = codeHashOf(p)
+        if (h.length > 0) safeSet(plainStoreKey(h), p)
+      }
+      setCode({ code: plains[0] ?? r.data.code, expiresAt: r.data.expiresAt, ttlHours })
+      setBatch(1)
+      refreshCodes()
     })()
   }
 
@@ -6276,6 +6562,97 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
         </div>
       ) : null}
 
+      {/* ══ ★★ 083-r2 · 邀请码列表（铺主侧）══
+          阿开要的是「能看、能复制、能作废、能续期，最多留 3 张待用」。
+          ★ 空列表整块不渲染，但给一句引导 —— 摆一个空框会让人以为加载失败。 */}
+      {owner === true ? (
+        <div style={{ marginBottom: 8 }}>
+          {codeRows.length > 0 ? (
+            <div style={{
+              padding: '6px 8px', borderRadius: 8, background: '#fff',
+              border: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 2,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: FS.tag, color: C.dim }}>
+                <span style={{ fontWeight: 600, color: C.text }}>手上的码</span>
+                <span>待用 {pendingCodes} / {PENDING_LIMIT}</span>
+                <span style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  onClick={() => refreshCodes()}
+                  style={{
+                    padding: '1px 4px', background: 'transparent', border: 'none', cursor: 'pointer',
+                    fontSize: FS.tag, color: C.dim, fontFamily: 'inherit',
+                    textDecoration: 'underline', textUnderlineOffset: 3,
+                  }}
+                >刷新</button>
+              </div>
+              {codeRows.map((row) => {
+                const view = codeRowView(row, codePlain[row.codeHash] ?? '', Date.now())
+                return (
+                  <div
+                    key={row.codeHash}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                      padding: '4px 0', borderTop: `1px dashed ${C.border}`,
+                    }}
+                  >
+                    <code style={{
+                      fontSize: FS.small, padding: '2px 6px', letterSpacing: 0.5,
+                      background: view.plainLocal ? C.soft : 'transparent',
+                      color: view.plainLocal ? C.text : C.dim,
+                      borderRadius: 4,
+                      border: view.plainLocal ? `1px solid ${C.border}` : `1px dashed ${C.border}`,
+                    }}>{view.codeText}</code>
+                    <span style={{
+                      fontSize: FS.tag, fontWeight: 600,
+                      color: row.state === 'pending' ? '#2f6b2f' : C.dim,
+                    }}>{view.stateText}</span>
+                    {view.remainText.length > 0 ? (
+                      <span style={{ fontSize: FS.tag, color: C.dim }}>{view.remainText}</span>
+                    ) : null}
+                    {view.usedByText.length > 0 ? (
+                      <span style={{ fontSize: FS.tag, color: C.dim }}>{view.usedByText}</span>
+                    ) : null}
+                    {/* 只有待用才有这三个按钮 —— 其余三档不渲染（不是禁用，免得点了才发现不行） */}
+                    {isActionable(row.state) && view.plainLocal ? (
+                      <button type="button" style={btnStyle(false)} onClick={() => { void (async () => {
+                        if (await copyText(codePlain[row.codeHash] ?? '')) {
+                          setCopied(true)
+                          setTimeout(() => setCopied(false), 1800)
+                        }
+                      })() }}>{copied ? '✓ 已复制' : '📋 复制'}</button>
+                    ) : null}
+                    {isActionable(row.state) ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={rowCodeBusy.length > 0}
+                          onClick={() => revokeCode(row.codeHash)}
+                          style={btnStyle(false)}
+                        >{rowCodeBusy === row.codeHash ? '处理中…' : '作废'}</button>
+                        <button
+                          type="button"
+                          disabled={rowCodeBusy.length > 0}
+                          onClick={() => renewCode(row.codeHash)}
+                          style={btnStyle(false)}
+                        >续期</button>
+                      </>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize: FS.tag, color: C.dim }}>
+              {emptyListText(true)}
+            </div>
+          )}
+          {listErr.length > 0 ? (
+            <div style={{ marginTop: 4, fontSize: FS.small, color: '#b3261e' }}>{listErr}</div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <select
           value={ttl}
@@ -6291,15 +6668,35 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
           <option value={72}>3 天</option>
           <option value={168}>7 天</option>
         </select>
+        {/* ★ 083-r2：批量张数（1–3，且不超过剩余额度）。
+            不做「一个码用 N 次」—— 一码一人，谁用了、作废哪张才说得清。 */}
+        {owner === true && batchChoices(pendingCodes).length > 1 ? (
+          <select
+            value={batch}
+            onChange={(e) => setBatch(Number(e.target.value))}
+            disabled={busy}
+            title="一次生成几张（一码一人）"
+            style={{
+              padding: '4px 6px', borderRadius: 6, border: `1px solid ${C.border}`,
+              fontSize: FS.small, background: '#fff', fontFamily: 'inherit', color: C.text,
+            }}
+          >
+            {batchChoices(pendingCodes).map((n) => (
+              <option key={n} value={n}>{n} 张</option>
+            ))}
+          </select>
+        ) : null}
         <button
           type="button"
           onClick={() => make(ttl)}
-          disabled={busy}
+          disabled={busy || (owner === true && !canCreateMore(pendingCodes))}
+          title={owner === true ? createBlockedTip(pendingCodes) : '生成一张新设备加入码'}
           style={{
             position: 'relative',
             padding: '6px 13px', borderRadius: 7, border: 'none',
             cursor: busy ? 'default' : 'pointer',
-            background: '#1f2937', color: '#fff', fontSize: FS.small,
+            background: owner === true && !canCreateMore(pendingCodes) ? '#9ca3af' : '#1f2937',
+            color: '#fff', fontSize: FS.small,
             fontWeight: 600, fontFamily: 'inherit',
           }}
         >

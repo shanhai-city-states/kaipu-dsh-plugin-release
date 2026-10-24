@@ -145,6 +145,11 @@ export const ENDPOINTS = {
   /** 撤销 / 恢复一台设备 · `POST /devices/{fp}/revoke` */
   deviceRevoke: 'deviceRevoke',
   deviceResetSecret: 'deviceResetSecret',
+  /* ── ★★ 2026-10-24（083-r2）· 邀请码列表化：看 / 作废 / 续期 ──
+     ★ 列表不发明文（服务端只存 hash），作废与续期都按 codeHash 定位。 */
+  deviceJoinCodes: 'deviceJoinCodes',
+  deviceJoinCodeRevoke: 'deviceJoinCodeRevoke',
+  deviceJoinCodeRenew: 'deviceJoinCodeRenew',
   /** 设备进出流水 · `GET /devices/events` */
   deviceEvents: 'deviceEvents',
 
