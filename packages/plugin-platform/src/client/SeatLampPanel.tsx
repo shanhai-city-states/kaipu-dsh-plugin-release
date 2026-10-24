@@ -62,7 +62,27 @@ import { C, FS, LH } from './theme.js'
  *
  * ★ `seat` 取值域（实测四席）来自契约 `seats.json`，不是自编。
  */
-const SEAT_ORDER = ['execution', 'audit', 'management', 'signature'] as const
+/* ★ 2026-10-23（083 单 G-4 · 星月）：**签名位挪到 1 号位**。
+ *   为什么是它排第一：签名是审计流程的**最后一环**，也是整条链的出口 ——
+ *   用户在这一排里先看到「签没签」，才明白前面四个位在为什么服务。
+ *   ★ 顺序是「流程顺序」，不是「权限大小」，所以不写"级别"含义。 */
+const SEAT_ORDER = ['signature', 'execution', 'audit', 'management'] as const
+
+/* ★ 2026-10-23（G-4）：**签名位不进邀请抽屉**。
+ *   抽屉干的事是「请个人来坐这个位」；签名位是契约层结构性锁死、
+ *   由系统在送审闭环里落章 —— 它出现在「邀请谁」的勾选清单里，
+ *   就是「标了锁死却还能邀请」的语义打架（星月原文：语义矛盾）。
+ *   ⇒ 抽屉只列可请人的位，签名位不出现；它在位栏里照常显示状态。 */
+const INVITE_SEATS = SEAT_ORDER.filter((s) => s !== 'signature')
+
+/* ★ 2026-10-23（G-4）：签名位**不单独给按钮** —— 用户只点「申请送审」。
+ *   状态只有两种说法：「⛨ 山海已签」/「⛨ 待签」。
+ *   为什么不像别的位那样写「未指派」：签名方不是一个"座位上的同事"，
+ *   是场地底座，人不需要去指派它，只需要知道「签了 / 还没签」。 */
+function signatureLabel(h: SeatHolder | undefined): string {
+  const signed = h !== undefined && h.holderType !== 'none' && h.holderName.trim() !== ''
+  return signed ? '⛨ 山海已签' : '⛨ 待签'
+}
 
 const SEAT_LABEL: Record<string, string> = {
   execution: '执行位',
@@ -280,8 +300,9 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
             勾选要请人坐的位，生成一次性邀请链接 —— 对方打开就能接入。
           </div>
 
-          {/* 四位行：勾选框（仅可改位）+ 位名 + 当前承担方 + 可改性标签 */}
-          {SEAT_ORDER.map((k) => {
+          {/* 位行：勾选框（仅可改位）+ 位名 + 当前承担方 + 可改性标签
+              ★ 2026-10-23（G-4）：这里走 `INVITE_SEATS` —— **签名位不出现**（不可邀请） */}
+          {INVITE_SEATS.map((k) => {
             const { text, muted } = holderLabel(holders.get(k))
             const editable = SEAT_EDITABLE[k] === true
             const checked = picked.includes(k)
@@ -404,6 +425,9 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
         {SEAT_ORDER.map((k) => {
           const { text, muted } = holderLabel(holders.get(k))
           const editable = SEAT_EDITABLE[k] === true
+          /* ★ 2026-10-23（G-4）：签名位不按「未登记/未指派」说 —— 它不是座位，是底座。
+             状态只有两种：⛨ 山海已签 / ⛨ 待签。 */
+          const isSig = k === 'signature'
           return (
             <Fragment key={k}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
@@ -414,8 +438,10 @@ export function SeatLampPanel({ scene }: { scene: SceneCard | null }): ReactElem
                     标签保留为**政策陈述**（谁有资格改这个位），不是入口。
                 */}
                 <span style={{ flex: '0 0 44px', fontSize: FS.tag, color: C.dim }}>{SEAT_LABEL[k] ?? k}</span>
-                <span style={{ fontSize: FS.small, color: muted ? C.dim : C.text }}>{text}</span>
-                <span style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.dim }}>{editLabelOf(k)}</span>
+                <span style={{ fontSize: FS.small, color: muted ? C.dim : C.text }}>{isSig ? '' : text}</span>
+                <span style={{ marginLeft: 'auto', fontSize: FS.tag, color: C.dim }}>
+                  {isSig ? signatureLabel(holders.get(k)) : editLabelOf(k)}
+                </span>
               </div>
 
               {/* 指派已有执行方：入口收进邀请抽屉（勾选行下的小链接），此处只渲染展开态 */}

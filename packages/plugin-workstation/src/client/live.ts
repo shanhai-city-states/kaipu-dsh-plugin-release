@@ -316,14 +316,43 @@ export interface TaskItem {
   projectId?: string | null
   /** ★ 2026-10-21：发布人显示名（工位编号 + 昵称，如「#3 阿里星月」） */
   createdByName?: string
+  /** ★ 2026-10-23（阿开定：不上向量上分类标签）—— 任务性质，**互斥单值**。
+   *  status 是「流程走到哪」，kind 是「这是什么活」。Agent 靠它先分流再细看。 */
+  kind?: 'requirement' | 'delivery' | 'report' | 'test' | 'other'
+  /** ★ 2026-10-23 —— 细分关键词，多值。像 skill 的关键词：命中才跳进去看。 */
+  tags?: string[]
 }
 
 export interface TaskListResult {
   tasks: TaskItem[]
   counts: { open: number; claimed: number; done: number; cancelled: number }
+  /** ★ 2026-10-23：`grouped=true` 时服务端给的分类分组（未请求则为 null） */
+  groups?: TaskGroups | null
 }
 
-/** 读任务列表（默认只列未完成） */
+/** 服务端 `groups` 回体（只装最小字段，不含 detail） */
+export interface TaskGroupBrief {
+  taskId: string
+  title: string
+  status: string
+  kind?: string
+  tags?: string[]
+  projectId?: string | null
+  createdAt?: string
+  createdByName?: string
+  fileCount?: number
+}
+
+export interface TaskGroups {
+  byKind: Record<string, TaskGroupBrief[]>
+  byStatus: Record<string, TaskGroupBrief[]>
+  kindCounts: Record<string, number>
+  statusCounts: Record<string, number>
+}
+
+/** 读任务列表
+ *  ★ 2026-10-23：`all` 参数**已失去作用面** —— 服务端改为默认全量返回（含 accepted）。
+ *     保留形参只为不破坏调用方签名；传什么都一样。 */
 export async function loadTasks(all: boolean): Promise<OrgResult<TaskListResult>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const query: Record<string, unknown> = all ? { all: true } : {}
@@ -338,11 +367,25 @@ export async function createTask(
   detail: string,
   projectId?: string,
   interactionId?: string,
+  /** ★ 2026-10-23：任务性质。不传 ⇒ 服务端按标题推断（推断不出来给 other）。 */
+  kind?: string,
+  /**
+   * ★ 2026-10-24（083-r1）：点名通知某个 Agent（传 id）。
+   *   不传/空 ⇒ 公池，与旧行为一致 —— 这是硬约束，默认值不许反过来。
+   *   签名域不受影响：`POST /agent/tasks` 的签名仍是 agent_id|ts|title|isDestructive，
+   *   本字段只走铺主的 `POST /tasks`（Bearer），不进签名。
+   */
+  notifyAgent?: string,
 ): Promise<OrgResult<TaskItem>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const query: { title: string; detail: string; projectId?: string; interactionId?: string } = { title, detail }
+  const query: {
+    title: string; detail: string; projectId?: string; interactionId?: string
+    kind?: string; notifyAgent?: string
+  } = { title, detail }
   if (typeof projectId === 'string' && projectId.length > 0) query.projectId = projectId
   if (typeof interactionId === 'string' && interactionId.length > 0) query.interactionId = interactionId
+  if (typeof kind === 'string' && kind.length > 0) query.kind = kind
+  if (typeof notifyAgent === 'string' && notifyAgent.length > 0) query.notifyAgent = notifyAgent
   const r = await callKaipu<TaskItem>(connection, 'tasksCreate', query)
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)

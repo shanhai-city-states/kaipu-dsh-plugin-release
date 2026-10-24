@@ -117,6 +117,8 @@ export const ENDPOINTS = {
   grantList: 'grantList',
   /** 授予 · `POST /grants` */
   grantCreate: 'grantCreate',
+  /** ★ 2026-10-23（G-1）：生成授权码 · `POST /grants/generate`（明文码只回一次） */
+  grantGenerate: 'grantGenerate',
   /** 收回 · `POST /grants/{gid}/revoke` */
   grantRevoke: 'grantRevoke',
   /** 授权流水 · `GET /grants/{gid}/events` */
@@ -125,6 +127,19 @@ export const ENDPOINTS = {
   inviteCreate: 'inviteCreate',
   /** ★ 2026-10-21：签发一次性「设备加入码」· `POST /device-join-codes` */
   deviceJoinCodeCreate: 'deviceJoinCodeCreate',
+  /* ── ★★ 2026-10-24 · 邀请码补发闭环（083 第一批·块 A · 5 端点）──
+     ★ 这四个（+get）是**申请人自助补发**那条链的全部后端口子；
+       前端一个都不许自己拼 URL —— 一律过 host（凭据纪律 + 指纹在 host 侧）。 */
+  /** 铺主看待审批列表 · `GET /join/requests?status=pending` */
+  joinRequests: 'joinRequests',
+  /** 申请人查自己那张 · `GET /join/request/{id}` */
+  joinRequestGet: 'joinRequestGet',
+  /** 提交补发申请（无鉴权，靠旧码/指纹自证）· `POST /join/request` */
+  joinRequestCreate: 'joinRequestCreate',
+  /** 同意（仅铺主）· `POST /join/request/{id}/approve` */
+  joinRequestApprove: 'joinRequestApprove',
+  /** 拒绝（仅铺主）· `POST /join/request/{id}/reject` */
+  joinRequestReject: 'joinRequestReject',
   /** 设备台账（= 白名单）· `GET /devices` */
   devicesList: 'devicesList',
   /** 撤销 / 恢复一台设备 · `POST /devices/{fp}/revoke` */

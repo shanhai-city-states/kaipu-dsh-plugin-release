@@ -297,6 +297,27 @@ export class KaipuHttpClient {
     return (await this.request(method, path, body, token, signal)) as T
   }
 
+  /**
+   * ★★ 2026-10-24 · **不带鉴权**的业务请求（只有一个合法用途：`POST /join/request`）
+   *
+   * 为什么必须有这条独立通道：
+   *   补发申请的申请人**恰恰是「没进铺 / 码失效」的那个人** —— 他本机没有
+   *   `deviceToken`（`/auth/device` 会直接 401）。走 `call()` 会在**握手阶段**就炸，
+   *   永远到不了这个端点，而契约里它明写「无鉴权，靠 joinCode / deviceFp 自证」。
+   *
+   * ★ 边界要钉死：除了这个端点，**任何**业务请求都必须走 `call()`。
+   *   这条通道等于「匿名发请求」，滥用就是绕开白名单 —— 所以名字带 Anon、
+   *   并且刻意不做通用重试/凭据回填。
+   */
+  async callAnon<T>(
+    method: 'POST',
+    path: string,
+    body: unknown,
+    signal?: AbortSignalLike,
+  ): Promise<T> {
+    return (await this.request(method, path, body, undefined, signal)) as T
+  }
+
   /* ─────────────────────────────────────────────────────────────────────
    * ★ 期6a-2 · 资料通道（raw bytes）
    *
