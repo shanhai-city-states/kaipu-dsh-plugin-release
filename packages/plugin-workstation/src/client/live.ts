@@ -418,6 +418,12 @@ export interface ProjectItem {
   archivedAt?: string | null
   /** 该项目下任务数（服务端子查询） */
   taskCount?: number
+  /** ★★ 2026-10-26 项目阶段（requirement/plan/assignment/build/review/archived）
+   *  —— 「Agent 版 OA」的骨头：项目走到哪一步。
+   *  ★ 服务端老版本没有这个字段 ⇒ 可选，缺省按 'requirement' 显示。 */
+  phase?: string
+  /** 阶段人话名（服务端一并给，前端不再自己维护一份映射） */
+  phaseLabel?: string
 }
 
 /** 读项目清单 */
@@ -440,6 +446,86 @@ export async function createProject(name: string): Promise<OrgResult<ProjectItem
 export async function renameProject(projectId: string, name: string): Promise<OrgResult<{ projectId: string; name: string }>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const r = await callKaipu<{ projectId: string; name: string }>(connection, 'projectsRename', { projectId, name })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/* ══ ★★ 2026-10-26「Agent 版 OA」三件套的前端入口 ══ */
+
+/** 推进 / 退回项目阶段（服务端只允许 ±1 与「任意 → archived」） */
+export async function setProjectPhase(
+  projectId: string, phase: string,
+): Promise<OrgResult<{ projectId: string; phase: string; from?: string; changed: boolean }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ projectId: string; phase: string; from?: string; changed: boolean }>(
+    connection, 'projectPhaseSet', { projectId, phase })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+export interface TaskDepItem { id: string; title: string; status: string }
+export interface TaskDepsPayload {
+  task_id: string
+  dependsOn: TaskDepItem[]
+  blocks: TaskDepItem[]
+  unmet: number
+  claimable: boolean
+}
+
+/** 读任务依赖（双向：我等谁 / 谁等我 / 现在能不能领） */
+export async function loadTaskDeps(taskId: string): Promise<OrgResult<TaskDepsPayload>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<TaskDepsPayload>(connection, 'tasksDepsList', { taskId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** 加一条依赖（自环 / 成环由服务端 409 拦） */
+export async function addTaskDep(
+  taskId: string, dependsOnTaskId: string,
+): Promise<OrgResult<Record<string, unknown>>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<Record<string, unknown>>(connection, 'tasksDeps', { taskId, dependsOnTaskId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** 撤一条依赖（服务端会立刻放行因它卡住的后继） */
+export async function removeTaskDep(
+  taskId: string, dependsOnTaskId: string,
+): Promise<OrgResult<{ removed: boolean }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ removed: boolean }>(connection, 'tasksDepsDelete', { taskId, dependsOnTaskId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+export interface DeliverableItem {
+  id: string; version: number; is_final: number; filename: string
+  size: number; sha256: string; interaction_id: string; created_at: string
+}
+export interface DeliverablesPayload {
+  task_id: string
+  versions: number[]
+  count: number
+  finalVersion: number
+  items: DeliverableItem[]
+}
+
+/** 读交付版本（同一个任务交了几稿、哪一稿是最终） */
+export async function loadDeliverables(taskId: string): Promise<OrgResult<DeliverablesPayload>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<DeliverablesPayload>(connection, 'deliverablesList', { taskId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
+/** 指定某一稿为最终稿（新交的那稿改坏了，用它回退） */
+export async function promoteDeliverable(
+  taskId: string, deliverableId: string,
+): Promise<OrgResult<{ version: number }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ version: number }>(connection, 'deliverablePromote', { taskId, deliverableId })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }

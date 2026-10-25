@@ -82,8 +82,23 @@ export const ENDPOINTS = {
   tasksUnblock: 'tasksUnblock',
   /** 强行指派（期5b-2 接 UI，本轮只开通道）· `POST /tasks/{id}/assign` */
   tasksAssign: 'tasksAssign',
-  /** 加依赖（期5b-2 接 UI，本轮只开通道）· `POST /tasks/{id}/deps` */
+  /** 加依赖 · `POST /tasks/{id}/deps` */
   tasksDeps: 'tasksDeps',
+  /* ── ★★ 2026-10-26「Agent 版 OA」三件套接线 ──
+     `tasksDeps` 那条注释原本写着「期5b-2 接 UI，本轮只开通道」——
+     这只通道躺了整整一轮没人接，UI 从没做出来（本轮盘点才发现）。
+     ⇒ 现在补齐「读 / 删 / 交付版本」，并把注释里的「本轮只开通道」去掉：
+        通道开着但没人用，比没开更危险 —— 它让后来人以为功能已经有了。 */
+  /** 读任务依赖（前置 + 后继 + 能不能领）· `GET /tasks/{id}/deps` */
+  tasksDepsList: 'tasksDepsList',
+  /** 撤一条依赖（会立刻放行后继）· `DELETE /tasks/{id}/deps/{dep}` */
+  tasksDepsDelete: 'tasksDepsDelete',
+  /** 推进项目阶段 · `PATCH /projects/{id}/phase` */
+  projectPhaseSet: 'projectPhaseSet',
+  /** 读交付版本 · `GET /tasks/{id}/deliverables` */
+  deliverablesList: 'deliverablesList',
+  /** 指定最终稿（回退用）· `POST /tasks/{id}/deliverables/{did}/promote` */
+  deliverablePromote: 'deliverablePromote',
   /** HITL 审批通过 · `POST /tasks/{id}/approve` */
   tasksApprove: 'tasksApprove',
   /** HITL 驳回 · `POST /tasks/{id}/reject` */

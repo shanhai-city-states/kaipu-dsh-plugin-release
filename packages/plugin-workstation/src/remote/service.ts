@@ -739,6 +739,114 @@ export class WorkstationRemoteService extends TypertRemoteService {
     return { ok: true, data }
   }
 
+  /**
+   * 推进项目阶段 · `PATCH /projects/{id}/phase`（2026-10-26 · Agent 版 OA）
+   *
+   * ★ 为什么不在前端做「跳阶」的宽容处理：
+   *   服务端只允许 ±1 与「任意 → archived」，前端如果自己放宽（比如允许直接跳 build），
+   *   就会变成「界面能点、服务端 400 phase_skip」—— 那是把后台判据搬到前台重写，
+   *   两份规则迟早不一致。前端只负责**只显示合法的下一步**。
+   */
+  @Remote('projectPhaseSet')
+  async projectPhaseSet(
+    query: { projectId: string; phase: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{ projectId: string; phase: string; from?: string; changed: boolean }>> {
+    const pid = typeof query.projectId === 'string' ? query.projectId : ''
+    const phase = (query.phase ?? '').trim()
+    if (pid.length === 0) throw new KaipuHttpError(400, 'missing_project_id', '改阶段缺项目 id')
+    if (phase.length === 0) throw new KaipuHttpError(400, 'missing_phase', '改阶段缺目标阶段')
+    const data = await this.requireHttp().call<{ projectId: string; phase: string; from?: string; changed: boolean }>(
+      'PATCH', `/projects/${encodeURIComponent(pid)}/phase`, { phase }, signal)
+    return { ok: true, data }
+  }
+
+  /** 读任务依赖（前置 + 后继 + 能不能领）· `GET /tasks/{id}/deps` */
+  @Remote('tasksDepsList')
+  async tasksDepsList(
+    query: { taskId: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{
+    task_id: string
+    dependsOn: Array<{ id: string; title: string; status: string }>
+    blocks: Array<{ id: string; title: string; status: string }>
+    unmet: number
+    claimable: boolean
+  }>> {
+    const tid = typeof query.taskId === 'string' ? query.taskId : ''
+    if (tid.length === 0) throw new KaipuHttpError(400, 'missing_task_id', '读依赖缺任务 id')
+    const data = await this.requireHttp().call<{
+      task_id: string
+      dependsOn: Array<{ id: string; title: string; status: string }>
+      blocks: Array<{ id: string; title: string; status: string }>
+      unmet: number
+      claimable: boolean
+    }>('GET', `/tasks/${encodeURIComponent(tid)}/deps`, undefined, signal)
+    return { ok: true, data }
+  }
+
+  /** 撤一条依赖（会立刻放行因它卡住的后继）· `DELETE /tasks/{id}/deps/{dep}` */
+  @Remote('tasksDepsDelete')
+  async tasksDepsDelete(
+    query: { taskId: string; dependsOnTaskId: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{ task_id: string; depends_on_task_id: string; removed: boolean }>> {
+    const tid = typeof query.taskId === 'string' ? query.taskId : ''
+    const dep = typeof query.dependsOnTaskId === 'string' ? query.dependsOnTaskId : ''
+    if (tid.length === 0 || dep.length === 0) {
+      throw new KaipuHttpError(400, 'missing_ids', '撤依赖缺任务 id 或前置 id')
+    }
+    const data = await this.requireHttp().call<{ task_id: string; depends_on_task_id: string; removed: boolean }>(
+      'DELETE', `/tasks/${encodeURIComponent(tid)}/deps/${encodeURIComponent(dep)}`, undefined, signal)
+    return { ok: true, data }
+  }
+
+  /** 读交付版本（全部稿 + 哪一稿是最终）· `GET /tasks/{id}/deliverables` */
+  @Remote('deliverablesList')
+  async deliverablesList(
+    query: { taskId: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{
+    task_id: string
+    versions: number[]
+    count: number
+    finalVersion: number
+    items: Array<{
+      id: string; version: number; is_final: number; filename: string
+      size: number; sha256: string; interaction_id: string; created_at: string
+    }>
+  }>> {
+    const tid = typeof query.taskId === 'string' ? query.taskId : ''
+    if (tid.length === 0) throw new KaipuHttpError(400, 'missing_task_id', '读交付版本缺任务 id')
+    const data = await this.requireHttp().call<{
+      task_id: string
+      versions: number[]
+      count: number
+      finalVersion: number
+      items: Array<{
+        id: string; version: number; is_final: number; filename: string
+        size: number; sha256: string; interaction_id: string; created_at: string
+      }>
+    }>('GET', `/tasks/${encodeURIComponent(tid)}/deliverables`, undefined, signal)
+    return { ok: true, data }
+  }
+
+  /** 指定某一稿为最终稿（回退旧稿用）· `POST /tasks/{id}/deliverables/{did}/promote` */
+  @Remote('deliverablePromote')
+  async deliverablePromote(
+    query: { taskId: string; deliverableId: string },
+    signal?: CancelSignal,
+  ): Promise<RemoteResult<{ task_id: string; deliverable_id: string; version: number; is_final: boolean }>> {
+    const tid = typeof query.taskId === 'string' ? query.taskId : ''
+    const did = typeof query.deliverableId === 'string' ? query.deliverableId : ''
+    if (tid.length === 0 || did.length === 0) {
+      throw new KaipuHttpError(400, 'missing_ids', '指定最终稿缺任务 id 或稿 id')
+    }
+    const data = await this.requireHttp().call<{ task_id: string; deliverable_id: string; version: number; is_final: boolean }>(
+      'POST', `/tasks/${encodeURIComponent(tid)}/deliverables/${encodeURIComponent(did)}/promote`, {}, signal)
+    return { ok: true, data }
+  }
+
   /** 归档项目：打包全部任务资料 + manifest（只读原件，不删） */
   /** ★ 2026-10-21：取消归档（阿开拍板：归档能回来，像 DeepSeek 会话那样） */
   @Remote('projectUnarchive')

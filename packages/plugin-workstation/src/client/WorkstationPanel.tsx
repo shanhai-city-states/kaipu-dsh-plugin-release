@@ -26,6 +26,15 @@ import {
   renameProject,
   loadPackInteractions,
   type ProjectItem,
+  /* ★★ 2026-10-26「Agent 版 OA」三件套：项目阶段 / 任务依赖 / 交付版本 */
+  setProjectPhase,
+  loadTaskDeps,
+  addTaskDep,
+  removeTaskDep,
+  loadDeliverables,
+  promoteDeliverable,
+  type TaskDepsPayload,
+  type DeliverablesPayload,
   deleteOrgNode,
   checkPluginVersion,
   clearAgents,
@@ -68,6 +77,29 @@ import {
   type NotifyChoice,
 } from './notify-copy.js'
 import { C, FONT, FS, LH } from './theme.js'
+/* ★★ 2026-10-26「Agent 版 OA」三件套 · 依赖/版本文案（纯函数，判据能真跑）
+   与 UI 组件分开：`.ts` 可被 node 直接 import 做输入→输出断言，
+   `.tsx` 要 React 运行时 —— 混在一起判据就只能 grep 源码。 */
+import {
+  depsHeadline,
+  depLine,
+  versionLine,
+  versionHint,
+  pickDepCandidates,
+} from './deps-text.js'
+import { TaskDepsSection, DeliverableVersionsSection } from './task-deps-ui.js'
+/* ★★ 2026-10-26：项目阶段（纯逻辑）—— 顺序即语义，与后端 `PROJECT_PHASES` 同序。
+   放在独立件里：判据要能跑 `phaseBar('plan') === '●●○○○○'`，不是 grep 源码。 */
+import {
+  PROJECT_PHASES,
+  phaseIndex,
+  phaseLabel,
+  phaseHint,
+  phaseBar,
+  nextPhase,
+  prevPhase,
+  isArchivedPhase,
+} from './project-phase.js'
 import { PLUGIN_VERSION } from './version.js'
 /* ★★ 2026-10-26：席位数量总览（纯逻辑，可单测）。
    抽成独立模块而不是写在组件里：判据要能真跑输入→输出，
@@ -5362,6 +5394,81 @@ function TaskSection(): ReactElement {
         </span>
       </div>
 
+      {/* ★★ 2026-10-26「Agent 版 OA」：项目阶段条。
+          阿开原话：「这样清晰之后，我们的审计以及第三方审计就省事很多了。
+          直接按项目。按任务先后顺序以及任务需求和交付条理非常清晰。」
+          ⇒ 只在**选中单个项目**时显示：看全部项目时没有「这个项目走到哪一步」这回事，
+            硬显示一个进度的平均值是假读数。
+          ★ 顺序即语义：立需求→出计划书→分工→施工→验收→归档，服务端只允许 ±1。 */}
+      {(() => {
+        const cur = projects.find((p) => p.projectId === projFilter)
+        if (cur === undefined) return null
+        const ph = cur.phase
+        const bar = phaseBar(ph)
+        const nx = nextPhase(ph)
+        const pv = prevPhase(ph)
+        const archived = isArchivedPhase(ph)
+        return (
+          <div style={{
+            ...cardStyle, marginBottom: 6, padding: '8px 12px',
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: FS.small, fontWeight: 600 }}>
+              {cur.name}
+            </span>
+            <span
+              title={phaseHint(ph)}
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: FS.small, letterSpacing: 1,
+                color: phaseIndex(ph) === 0 ? '#9b2c2c' : C.accent,
+              }}
+            >
+              {bar}
+            </span>
+            <span style={{ fontSize: FS.tag, color: archived ? '#1e7e42' : C.dim }}>
+              {phaseLabel(ph, cur.phaseLabel)}（第 {phaseIndex(ph)}/{PROJECT_PHASES.length} 步）
+            </span>
+            {/* ★ 归档态不给「推进」：归档是出口，没有下一步。
+                也不给「退回」—— 归档=冻结，要改先解冻（那是另一个动作，不能藏在这里）。 */}
+            {archived ? (
+              <span style={{ fontSize: FS.tag, color: C.faint }}>已归档 · 冻结不再改</span>
+            ) : (
+              <>
+                {pv !== null ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { void run(async () => {
+                      const r = await setProjectPhase(cur.projectId, pv)
+                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
+                    }, `已退回「${phaseLabel(pv)}」`) }}
+                    title={`退回上一步：「${phaseLabel(pv)}」`}
+                    style={{ ...btnStyle(false), padding: '3px 10px', fontSize: FS.tag }}
+                  >
+                    ← {phaseLabel(pv)}
+                  </button>
+                ) : null}
+                {nx !== null ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { void run(async () => {
+                      const r = await setProjectPhase(cur.projectId, nx)
+                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
+                    }, `已推进到「${phaseLabel(nx)}」`) }}
+                    title={phaseHint(nx)}
+                    style={{ ...btnStyle(true), padding: '3px 10px', fontSize: FS.tag }}
+                  >
+                    {phaseLabel(nx)} →
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+        )
+      })()}
+
       {/* ★ 一键挂载：审计结论（四灯场景 + 资料预检；报告带 Ed25519 签名可验） */}
       {audit !== null ? (
         <div style={{ ...cardStyle, marginBottom: 6 }}>
@@ -5546,7 +5653,7 @@ function TaskSection(): ReactElement {
                     ) : (
                       list.map((t) => (
                         <CardBoundary key={t.task_id}>
-                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} />
+                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} allTasks={tasks} />
                         </CardBoundary>
                       ))
                     )}
@@ -5805,6 +5912,9 @@ function TaskCard(props: {
    *  ★ 只从 `task.node_id` 反查工位名 —— `/tasks` **不回 notify_agent**（实测），
    *    所以「指派给谁」这一半在铺主列表上取不到，只能靠发布当时那句 toast。 */
   nodeLabel?: string
+  /** ★★ 2026-10-26：全铺任务（依赖区拿它当「可加为前置」的候选池）。
+   *  由列表层传入；缺省空数组 ⇒ 加依赖的候选为空，但不影响读已有依赖。 */
+  allTasks?: Array<{ task_id: string; title: string; status: string }>
   run: (fn: () => Promise<{ ok: boolean; code?: string; message?: string }>, okMsg?: string) => Promise<void>
 }): ReactElement {
   const { task, myId, busy, run } = props
@@ -6043,6 +6153,15 @@ function TaskCard(props: {
             交付：{shortResult(task.result)}
           </div>
         )
+      ) : null}
+      {/* ★★ 2026-10-26「Agent 版 OA」：依赖 + 交付版本。
+          只在展开时拉数据 —— 收起状态下几十条卡片各发一个请求是性能自杀，
+          而且语义上也不需要（收起 = 不想看细节）。 */}
+      {open ? (
+        <>
+          <TaskDepsSection taskId={task.task_id} allTasks={props.allTasks ?? []} run={run} />
+          <DeliverableVersionsSection taskId={task.task_id} run={run} />
+        </>
       ) : null}
       <div style={{ display: ask !== null ? 'none' : 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
         {/* ★★ 2026-10-20 阿开：「领取和复制重了」⇒ 「领取」已合并进上方的「领取并复制」，
