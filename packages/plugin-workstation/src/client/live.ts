@@ -147,7 +147,12 @@ export interface OrgNodeView {
   }>
   /** ★ 2026-10-24（083-r2）：邀请发了、人还没来。
    *  只有 `holders` 为空时它才有意义 —— 人已到就不该再显示「已受邀」。 */
-  invited?: { lamp?: string; invitedName?: string; invitedAt?: string } | null
+  /** ★ 2026-10-26（4️⃣）：`expiresAt` 前端要靠它判「码还有效吗」；
+   *  `url` 是给人复制的邀请链接（服务端签发时一并给出）。 */
+  invited?: {
+    lamp?: string; invitedName?: string; invitedAt?: string
+    expiresAt?: string; url?: string
+  } | null
   /** 非空 = 不能删，值就是原因（如「被 4 个席位占用」） */
   undeletable?: string | null
   /** ★ false = 不能改名（位被不可替换的席位占用，如平台签名位） */
@@ -331,11 +336,27 @@ export interface TaskItem {
   tags?: string[]
 }
 
+/** 服务端 `groups` 分类分组回体（★ 2026-10-26 补回：此前误删） */
+export interface TaskGroups {
+  byKind: Record<string, TaskGroupBrief[]>
+  byStatus: Record<string, TaskGroupBrief[]>
+  kindCounts: Record<string, number>
+  statusCounts: Record<string, number>
+}
+
 export interface TaskListResult {
   tasks: TaskItem[]
   counts: { open: number; claimed: number; done: number; cancelled: number }
   /** ★ 2026-10-23：`grouped=true` 时服务端给的分类分组（未请求则为 null） */
   groups?: TaskGroups | null
+  /** ★ 2026-10-26 台阶⑤（甲案）：过滤后、切片前的全集条数。
+   *  `total` 与 `counts` 口径不同，别混：
+   *    - `counts` 九态分布，从 SQL 全量 `rows` 算（不含 required_tags/tags 过滤）
+   *    - `total` 是本 agent **真正能看到**的条数（Python 侧过滤后）
+   *  前端据 `tasks.length < total` 判「还有下一页」。不传 limit 时 total = 本次条数。 */
+  total?: number
+  limit?: number | null
+  offset?: number
 }
 
 /** 服务端 `groups` 回体（只装最小字段，不含 detail） */
@@ -351,19 +372,23 @@ export interface TaskGroupBrief {
   fileCount?: number
 }
 
-export interface TaskGroups {
-  byKind: Record<string, TaskGroupBrief[]>
-  byStatus: Record<string, TaskGroupBrief[]>
-  kindCounts: Record<string, number>
-  statusCounts: Record<string, number>
-}
-
 /** 读任务列表
  *  ★ 2026-10-23：`all` 参数**已失去作用面** —— 服务端改为默认全量返回（含 accepted）。
- *     保留形参只为不破坏调用方签名；传什么都一样。 */
-export async function loadTasks(all: boolean): Promise<OrgResult<TaskListResult>> {
+ *     保留形参只为不破坏调用方签名；传什么都一样。
+ *  ★ 2026-10-26 台阶⑤（阿开定甲案）：新增 `page` 分页参数。
+ *     ★ 默认不传 ⇒ 服务端全量返回，**前端行为零变化**。
+ *       这才是甲案的关键：接口先定型，UI 不做没用的翻页（现在全库只有 5 条任务）。
+ *     ★ 分页真正要解决的是**传输量**（每条任务带 detail 正文），不是查询次数 ——
+ *       服务端 `count_pack_files_by_iids` 本来就是一条 SQL + GROUP BY（无 N+1）。
+ */
+export async function loadTasks(
+  all: boolean,
+  page?: { limit?: number; offset?: number },
+): Promise<OrgResult<TaskListResult>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const query: Record<string, unknown> = all ? { all: true } : {}
+  if (page?.limit !== undefined) query.limit = page.limit
+  if (page?.offset !== undefined && page.offset > 0) query.offset = page.offset
   const r = await callKaipu<TaskListResult>(connection, 'tasksList', query)
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)

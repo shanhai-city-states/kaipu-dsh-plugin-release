@@ -67,12 +67,19 @@ export const SEAT_LABELS: Readonly<Record<string, string>> = {
  *    永远可见 —— 它不是「可邀请的空位」，而是「这铺受山海背书」这件事本身。
  *  ★ 其余按阿开给的六行原序，不另排序（他明确说「顺序就按这个排」）：
  *    战略位（看远）→ 管理位（担责）→ 管理助理位（代管）→ 审计位（查错）→ 执行位（干活）。
- *  ★ 这个顺序**同时决定工位卡片网格的顺序**（`OrgSection` 按同一个数组排）。 */
+ *  ★ 这个顺序**同时决定工位卡片网格的顺序**（`OrgSection` 按同一个数组排）。
+ *
+ *  ★★ 2026-10-26 阿开三定稿（**覆盖上面同日两次口径**）：
+ *     「管理助理位就不要占一张卡片了取消，后面的审计位顺移到现在的助理位。」
+ *     ⇒ `management_assistant` **不是座位，是一段有时限的代管授权**（后端
+ *       `management_grants` 表 + `POST /grants {granteeId, ttlHours}`），
+ *       它不该占格子 —— 否则会出现「既没人在坐、又不是空位」这种怪卡片。
+ *     ⇒ 本轮从 SEAT_ORDER 移除；助理入口搬到「工位布局」标题右侧（`GrantEntry`）。
+ *     ★ 后端 `DEFAULT_SEATS` 同步移除该位（见 store.py），前端不再渲染它。 */
 export const SEAT_ORDER: ReadonlyArray<string> = [
   'signature',
   'strategy',
   'management',
-  'management_assistant',
   'audit',
   'execution',
 ]
