@@ -49,8 +49,9 @@ export interface SeatTypeCount {
 }
 
 /** 席位 key → 人话名字。★ 未知 key 不隐藏，原样显示 —— 界面宁可露出怪名字，
- *  也不要把一类席位悄悄吞掉（吞掉 = 用户以为没有这个位）。 */
-const SEAT_LABELS: Readonly<Record<string, string>> = {
+ *  也不要把一类席位悄悄吞掉（吞掉 = 用户以为没有这个位）。
+ *  ★ 2026-10-26 导出给 `WorkstationPanel` 用（系统位空格也要显示位名）。 */
+export const SEAT_LABELS: Readonly<Record<string, string>> = {
   execution: '执行位',
   audit: '审计位',
   management: '管理位',

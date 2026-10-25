@@ -26,15 +26,6 @@ import {
   renameProject,
   loadPackInteractions,
   type ProjectItem,
-  /* ★★ 2026-10-26「Agent 版 OA」三件套：项目阶段 / 任务依赖 / 交付版本 */
-  setProjectPhase,
-  loadTaskDeps,
-  addTaskDep,
-  removeTaskDep,
-  loadDeliverables,
-  promoteDeliverable,
-  type TaskDepsPayload,
-  type DeliverablesPayload,
   deleteOrgNode,
   checkPluginVersion,
   clearAgents,
@@ -77,41 +68,11 @@ import {
   type NotifyChoice,
 } from './notify-copy.js'
 import { C, FONT, FS, LH } from './theme.js'
-/* ★★ 2026-10-26「Agent 版 OA」三件套 · 依赖/版本文案（纯函数，判据能真跑）
-   与 UI 组件分开：`.ts` 可被 node 直接 import 做输入→输出断言，
-   `.tsx` 要 React 运行时 —— 混在一起判据就只能 grep 源码。 */
-import {
-  depsHeadline,
-  depLine,
-  versionLine,
-  versionHint,
-  pickDepCandidates,
-} from './deps-text.js'
-import { TaskDepsSection, DeliverableVersionsSection } from './task-deps-ui.js'
-/* ★★ 2026-10-26：项目阶段（纯逻辑）—— 顺序即语义，与后端 `PROJECT_PHASES` 同序。
-   放在独立件里：判据要能跑 `phaseBar('plan') === '●●○○○○'`，不是 grep 源码。 */
-import {
-  PROJECT_PHASES,
-  phaseIndex,
-  phaseLabel,
-  phaseHint,
-  phaseBar,
-  nextPhase,
-  prevPhase,
-  isArchivedPhase,
-} from './project-phase.js'
 import { PLUGIN_VERSION } from './version.js'
 /* ★★ 2026-10-26：席位数量总览（纯逻辑，可单测）。
    抽成独立模块而不是写在组件里：判据要能真跑输入→输出，
    写在 JSX 里就只能靠肉眼看截图 —— 那种「验证」等于没验。 */
-import { countSeatTypes, seatBadge, seatSummary, SEAT_ORDER } from './seat-summary.js'
-/* ★★ 2026-10-26：卡座分区（纯逻辑）—— 卡座只放座位，游离 role 进「未归属」。
-   判据能真跑三种脏数据形态，不用起浏览器截图。 */
-/* ★★★ 2026-10-26 卡座布局（纯逻辑）：恒定 10 格，前 6 格系统位先落座。
-   阿开最终口径：「10 个座位要在顶部 …… 2 行一行 5 个座位，
-   然后把上面的 6 个座位按照上面那样先落座显示系统默认工位」。
-   判据能真跑：喂 15 个脏节点必须仍得 10 格、前 6 格是系统位。 */
-import { buildSeatGrid, systemSeatedCount, emptyCount } from './seat-grid.js'
+import { countSeatTypes, seatBadge, seatSummary, SEAT_ORDER, SEAT_LABELS } from './seat-summary.js'
 /* ★ 083 第一批（邀请码补发闭环）：文案与纯逻辑抽出去，判据才能**真跑**输入→输出，
    而不是对源码 grep 关键词（星月 R-6：同一张关键词表 = 0 命中，那不是通过，是没测）。 */
 import {
@@ -1609,10 +1570,6 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
      ★ 为什么清人不移位：工位是组织资产（#1-#5 编号稳定），人是流水的。 */
   const [clearing, setClearing] = useState(false)
   const [clearTxt, setClearTxt] = useState('')
-  /* ★ 2026-10-23：四类席位说明展开态（古茶定稿文案 · 见 SEAT_GUIDE）。
-     ★ 必须放在本函数 hooks 区（1303–1320），不能放中部 ——
-       中部在若干提前 return 之后，会导致 hooks 调用顺序不稳定。 */
-  const [showSeatGuide, setShowSeatGuide] = useState(false)
   /* ★★ 2026-10-24 阿开：「工位的邀请按钮可以替换成『🔑 生成工位加入码』」，
      点就在工位顶部就地展开，不跳页。
      ★ 为什么在顶部就地展开而不是跳资料页：新同事要进铺时，人就在工位页看「有谁在」，
@@ -1707,25 +1664,27 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
   const nodes = tree?.nodes ?? []
   const roots = nodes.filter((n) => !n.parent_node_id)
   const childrenOf = (id: string): OrgNodeView[] => nodes.filter((n) => n.parent_node_id === id)
+  // ★ 座位表口径（阿开 2026-10-19）：**位** = 叶子节点（post）；只有一个根时它自己也是位
+  //   ⇒ 不按树缩进展示，而按 3 列网格铺开，更像办公室
   const leaves = nodes.filter((n) => childrenOf(n.node_id).length === 0)
-  /* ★★★ 2026-10-26 阿开（最终口径 · 第三版，前两版都理解偏了）：
-     「工位还是保持原来的 10 个座位要在顶部。
-      6 个位 · 4 人已坐 · 2 个空
-      —山海签名位（已占）#1战略位1人 #2管理位1人 #3管理助理位空 #4审计位空 #5执行位2人
-      这里 2 行一行 5 个座位。然后把上面的 6 个座位按照上面那样先落座显示系统默认工位」
-
-     ⇒ 卡座 = **恒定 10 格**（2 行 × 5 列）。
-        前 6 格 = 系统默认位，顺序与顶部席位表逐字同序（SYSTEM_SEAT_ORDER = SEAT_ORDER）。
-        后 4 格 = 空位。
-     ★ 前两版之误：
-       第一版按「没有子节点」取卡片 ⇒ 8 个游离 role 混进卡座，12 张卡撑成 3 行；
-       第二版只放 6 个座位 + 补 4 空位 ⇒ 格数对了，但不是「10 个座位里前 6 个落座」，
-         而是「只有 6 个座位」—— 他要的是卡座仍是 10 格。
-     ★ 非座位节点（游离 role / team 根）一律不进卡座，下方「未归属」区单独列。 */
-  const gridCells = buildSeatGrid(nodes)
-  const strayNodes = nodes.filter((n) => (n.node_kind ?? '') !== 'post')
-  const seatedSystem = systemSeatedCount(gridCells)
-  const gridEmpty = emptyCount(gridCells)
+  const rawGrid = leaves.length > 0 ? leaves : nodes
+  /* ★★ 2026-10-26 阿开（第三轮）：「工位排号也按这个排」——
+     工位卡片网格的**顺序必须与顶部席位表同源**（`SEAT_ORDER`），
+     否则上面第 4 行写「管理助理位」、下面卡片却排在别处，人就对不上号。
+     ★ 为什么要在这里排而不是靠后端返回顺序：后端按 `created_at` 出（开铺时间序），
+       那个顺序里签名位可能排在末尾；界面顺序是产品语义，不能托管给数据时点。
+     ★ 认不出 seatKey 的老数据：按名字认「签名」，再认不出就**排最后**（不插队、不被藏）。 */
+  const seatKeyOf = (n: OrgNodeView): string => {
+    const k = (n as { seatKey?: string }).seatKey
+    if (typeof k === 'string' && k.length > 0) return k
+    if (n.name.includes('签名')) return 'signature'
+    return ''
+  }
+  const seatRank = (n: OrgNodeView): number => {
+    const i = SEAT_ORDER.indexOf(seatKeyOf(n))
+    return i < 0 ? 999 : i
+  }
+  const gridNodes = rawGrid.slice().sort((a, b) => seatRank(a) - seatRank(b))
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -1745,14 +1704,6 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
         <span style={{ flex: 1 }} />
         <button
           type="button"
-          onClick={() => setShowSeatGuide((v) => !v)}
-          style={btnStyle(showSeatGuide)}
-          title={showSeatGuide ? '收起席位说明' : '这四类席位分别负责什么？点开看说明'}
-        >
-          {showSeatGuide ? '▾' : '▸'} 席位说明
-        </button>
-        <button
-          type="button"
           onClick={() => void refresh()}
           disabled={busy}
           style={btnStyle(false)}
@@ -1760,34 +1711,6 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
         >
           刷新
         </button>
-        {/* ★★ 2026-10-26 阿开：「这个刷新旁边增加一个收起是否更好一些
-           现在的收起有点不够显著」。
-           ★ 原来只有「▸ 席位说明」一个按钮，展开后文字不变、只翻了个小箭头 ⇒
-             看不出它是开着的，也看不出点哪里收。这是「开关没有状态感」的老毛病。
-           ★ 做法：展开后**在刷新旁边多出一个明确的「收起」按钮**（常显文字、琥珀色描边），
-             跟席位说明形成「一开一收」两个方向的动作；席位说明按钮本身也在展开时高亮。
-           ★ 为什么不用「席位说明」按钮自己变「收起」：那样按钮名会跳变，
-             用户下次想找「席位说明」会找不到 —— 入口名要稳定。 */}
-        {showSeatGuide ? (
-          <button
-            type="button"
-            onClick={() => setShowSeatGuide(false)}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: '1px solid #c8881f',
-              background: 'rgba(200,136,31,0.10)',
-              color: C.text,
-              fontSize: FS.small,
-              fontWeight: 600,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-            title="收起上面的席位说明"
-          >
-            收起 ▴
-          </button>
-        ) : null}
         <button
           type="button"
           onClick={() => {
@@ -1809,48 +1732,6 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
           一键清场
         </button>
       </div>
-
-      {/* ★★ 2026-10-26 阿开：「把这一行移动到顶部，与顶部的
-          🔑 生成工位加入码 给新同事：进本铺 · 装技能 · 领授权，一次做完 …
-          邀请码过期了、或者同事换了台机器，也是从这里重新生成一张补发给他
-          合并到同一栏是不是更好管理。底部一展开已生成就要拉到底部才能看到」
-          ⇒ 加入码整块（标题 + 补发说明 + 时长/张数 + 生成按钮 + 待用码列表）
-            **搬到「工位布局」标题行正下方**，即本区块最顶上。
-          ★ 为什么放这里而不是再往上（页面最顶）：
-            「工位布局」是这一页的主语，发码是它的第一个动作 ——
-            顺序读下来是「这是工位 → 先请人进来 → 看看座位」。放到页面最顶反而
-            跟「工位」这个主语断了。
-          ★ 必须**常显、不折叠**：他要的是「一进来看得见」，折起来就还是得点。 */}
-      <JoinCodeCard compact />
-      {/* ★★ 2026-10-23 四类席位说明（古茶定稿文案 · 逐字落地）
-          为什么放在工位布局顶部而不是单独的帮助页：
-          用户在这一页做「请谁坐哪个位」的决定，说明必须在决定发生的地方。 */}
-      {showSeatGuide && (
-        <div
-          style={{
-            border: '1px solid #d9d9d9',
-            borderRadius: 10,
-            padding: '10px 14px',
-            marginBottom: 10,
-            background: 'rgba(0,0,0,0.02)',
-            fontSize: FS.small,
-            lineHeight: 1.75,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>四大席位说明</div>
-          {SEAT_GUIDE.map((s) => (
-            <div key={s.name} style={{ marginBottom: 4 }}>
-              <span style={{ marginRight: 6 }}>{s.icon}</span>
-              <span style={{ fontWeight: 600, color: s.locked ? '#8e44ad' : undefined }}>{s.name}</span>
-              <span style={{ color: C.dim }}>：{s.desc}</span>
-            </div>
-          ))}
-          <div style={{ marginTop: 6, color: C.dim }}>
-            ★ 第三方要签自己那份结论，请让它坐<b>审计位</b>、用<b>它自有私钥</b>签；山海在其后附加「过程凭证」的签名。
-            两条签名并行，不互相替代 —— 独立性保住，效力锚点也保住。
-          </div>
-        </div>
-      )}
 
       {/* 清场确认条：必须输入 CLEAR 才放行 */}
       {clearing && (
@@ -1953,21 +1834,13 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
           <div style={{ ...cardStyle, color: C.dim, fontSize: FS.small, lineHeight: LH.normal }}>
             还没有工位 —— 在下面输入一个名字，加第一个。
           </div>
-          {/* ★★ 2026-10-26（第四轮）这一份**已删除** —— 加入码已上移到标题行正下方，
-              且是**无条件渲染**（在三分支之外）⇒ 空铺分支自然也带着，无需再补。
-              ★ 留着就是两处渲染：空铺时上下各一张，正是「同一件事两处显示必然漂移」的病根。
-              判据 `L-4e`（前端）与 `S-11f`（席位）都要跟着改口径。 */}
+          {/* ★★ 2026-10-26 阿开：「点开之后的（24 小时 / 1张2张3张 / 生成工位加入码）
+              在底部，改到上方顶部下方」⇒ 卡片**常显**在席位总览下方，不再折叠。
+              ★ 空铺也要有：总览行只在「有工位」分支渲染，这里补一份（判据 S-11f 盯）。 */}
+          <JoinCodeCard compact />
         </>
       ) : (
         <>
-        {/* ★★ 2026-10-26 阿开：「座位与邀请是否不需要提供邀请按钮，只需要展示
-           每一个类型席位数量 …… 这样整个页面就会剩下很多空间」
-           ⇒ 工位区顶部加**一行总览**（总数 + 每类占用），且**撤掉卡片上的邀请按钮**。
-           为什么可以撤：邀请栏（InviteBar）里本来就要再选一次座位类型（INVITE_LAMPS）
-           ⇒ 卡片上的按钮等于把同一件事问两遍，还占掉每张卡片的右侧空间。
-           邀请入口统一收到「管理助理（临时代管）」区块（唯一还需要的生成按钮）。
-           ★ 撤按钮 ≠ 撤能力：坐人的位仍有「请出」，签名位仍有「🔒 不可邀请」说明。 */}
-        <SeatSummaryRow seats={seatList} />
 
         {/* ★★ 2026-10-26 阿开（第二轮纠正）：「生成工位邀请码改回去，是我没讲清楚
            —— 我指的是点开之后的（24 小时 / 1张2张3张 / 🔑 生成工位加入码）在底部，
@@ -1979,140 +1852,188 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
              藏在折叠后面等于每次都要点一下；工位页已经收掉了底部只读席位表，
              版面腾得出来。
            ★ 视线顺序：几个位/坐几人/还空几个 → 空位就在眼前 → 下面是发码。 */}
-        {/* ★★ 2026-10-26 阿开（第四轮）：「把这一行移动到顶部，与顶部的
-            🔑 生成工位加入码 …… 合并到同一栏是不是更好管理。
-            底部一展开已生成就要拉到底部才能看到」
-           ⇒ 这一份**已搬到本区块顶部**（「工位布局」标题行正下方）。
-           ★ 只留一份：同一个东西两处显示，两处必然漂移（本项目反复栽的坑）。 */}
+        <JoinCodeCard compact />
+
         <div
           style={{
             display: 'grid',
             // ★ 5 列 × 2 行 = 10 个位（阿开 2026-10-19 定稿：上限 10 位 ⇒ 一行 5 个卡片）
-            //   ★ 2026-10-26 复核：这里**只放座位**（`seatNodes`），游离 role 见下方「未归属」行
             gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
             gap: 8,
             marginTop: 8,
           }}
         >
-          {/* ★★★ 2026-10-26 最终口径：**恒定 10 格**，前 6 格系统位先落座。
-              每格要么是「有节点的座位卡」，要么是「空位」——
-              不再区分「6 张卡片 + 4 个补位」，而是「10 个座位，前 6 个坐着系统位」。 */}
-          {gridCells.map((cell, idx) => {
-            const n = cell.node
-            if (n === undefined) {
-              /* 空格：系统位未落座 or 自建空位 —— 两种都渲染成同一个空位块。
-                 ★ canAdd 只给最后一格（追加位置从末尾长出来，不从中间插）。 */
-              return (
-                <EmptySeat
-                  key={`empty-${idx}`}
-                  canAdd={idx === gridCells.length - 1}
-                  busy={busy}
-                  onAdd={(name) => { setDraft(name); void (async () => {
-                    const r = await createOrgNode(name)
-                    if (!r.ok) setErr({ code: r.code, message: r.message })
-                    await refresh()
-                  })() }}
+          {gridNodes.map((n) => (
+            <Fragment key={`wrap-${n.node_id}`}>
+            <OrgNodeCard
+              key={n.node_id}
+              node={n}
+              seatInfo={(() => {
+                /* ★ 按 seatKey 查这一位在 `/roles/seats` 里的读数（工位 → 席位定义 → 实际在座）。
+                   老数据可能没 seatKey ⇒ 用名字里认「签名位」兜底，与卡片本身的判据同源。 */
+                if (seatList === null) return undefined
+                const k = ((n as { seatKey?: string }).seatKey ?? '').length > 0
+                  ? ((n as { seatKey?: string }).seatKey as string)
+                  : (n.name.includes('签名') ? 'signature' : '')
+                return k.length > 0 ? seatList.find((x) => x.seat === k) : undefined
+              })()}
+              busy={busy}
+              editing={editing}
+              editName={editName}
+              setEditName={setEditName}
+              onStartRename={(node) => {
+                setEditing(node.node_id)
+                setEditName(node.name)
+              }}
+              onRename={onRename}
+              onDelete={onDelete}
+              onInvite={() => setInviting(inviting === n.node_id ? null : n.node_id)}
+              onEvict={(seat, agentId) => { void (async () => {
+                const r = await evictSeat(seat, agentId)
+                if (!r.ok) {
+                  /* 失败就别 refresh —— 一刷新就可能把这条错误盖掉 */
+                  const title = r.code === 'seat_vacant' ? '这个位置本来就空着'
+                    : r.code === 'seat_protected' ? '系统内置位，不能请出'
+                    : '请出没成功'
+                  setErr({ code: r.code, message: r.message, source: 'action', title })
+                  return
+                }
+                await refresh()
+                setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位置现在空了`)
+              })() }}
+              inviteOpen={inviting === n.node_id}
+            />
+            {inviting === n.node_id && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <InviteBar
+                  node={n}
+                  made={madeBy[n.node_id] ?? null}
+                  onMade={(v) => setMadeBy((prev) => ({ ...prev, [n.node_id]: v }))}
                 />
-              )
-            }
-            return (
-              <Fragment key={`wrap-${n.node_id}`}>
-              <OrgNodeCard
-                node={n}
-                seatInfo={(() => {
-                  /* ★ 按 seatKey 查这一位在 `/roles/seats` 里的读数。
-                     ★ 这里用 `cell.seatKey`（卡座算出来的），不用节点字段 ——
-                       保证「卡片显示的那一类」与顶部席位表是同一个来源。 */
-                  if (seatList === null) return undefined
-                  return cell.seatKey.length > 0
-                    ? seatList.find((x) => x.seat === cell.seatKey)
-                    : undefined
-                })()}
-                busy={busy}
-                editing={editing}
-                editName={editName}
-                setEditName={setEditName}
-                onStartRename={(node) => {
-                  setEditing(node.node_id)
-                  setEditName(node.name)
-                }}
-                onRename={onRename}
-                onDelete={onDelete}
-                onInvite={() => setInviting(inviting === n.node_id ? null : n.node_id)}
-                onEvict={(seat, agentId) => { void (async () => {
-                  const r = await evictSeat(seat, agentId)
-                  if (!r.ok) {
-                    /* 失败就别 refresh —— 一刷新就可能把这条错误盖掉 */
-                    const title = r.code === 'seat_vacant' ? '这个位置本来就空着'
-                      : r.code === 'seat_protected' ? '系统内置位，不能请出'
-                      : '请出没成功'
-                    setErr({ code: r.code, message: r.message, source: 'action', title })
-                    return
-                  }
-                  await refresh()
-                  setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位置现在空了`)
-                })() }}
-                inviteOpen={inviting === n.node_id}
-              />
-              {inviting === n.node_id && (
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <InviteBar
-                    node={n}
-                    made={madeBy[n.node_id] ?? null}
-                    onMade={(v) => setMadeBy((prev) => ({ ...prev, [n.node_id]: v }))}
-                  />
-                </div>
-              )}
-              </Fragment>
-            )
-          })}
-        </div>
-        {strayNodes.length > 0 ? (
-          <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 6 }}>
-            另有 {strayNodes.length} 个非座位节点在下方「未归属」区（不属于卡座）
-          </div>
-        ) : null}
+              </div>
+            )}
+            </Fragment>
+          ))}
+          {/* ★★★ 2026-10-26 阿开：「你没有默认 6 个系统位啊…哪怕没有人也显示邀请按钮」
+               ⇒ 补齐的格子**先按系统位顺序摆位**（会显示位名 + 人数 + 邀请），
+                 6 位摆完仍有剩余才渲染真正的空位块（只有第一格可「+ 添加工位」）。
 
-        {/* ★★ 2026-10-26 阿开：「工位布局怎么变了呢？……回到之前的卡座模式啊
-            两行一行 5 个座位，6 个系统默认工位」
-            ⇒ 卡座只放座位（post）。下面这些是**不是座位**的历史节点
-              （老结构留下的、没有父节点的 role：Codex / 前端位 / 测试1 …）。
-            ★ 为什么不直接不显示：那是他的东西，藏起来他会问「我的 Codex 呢」。
-              显示在卡座外面，既不占座位格，又找得到、改得动、删得掉。 */}
-        {strayNodes.length > 0 ? (
-          <div style={{ marginTop: 10, padding: '8px 10px', border: `1px dashed ${C.border}`, borderRadius: 8 }}>
-            <div style={{ fontSize: FS.tag, color: C.dim, marginBottom: 4 }}>
-              未归属的工位（{strayNodes.length}）—— 历史结构留下的，不算座位，不占卡座
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {strayNodes.map((n) => (
-                <span
-                  key={n.node_id}
-                  title={`${n.name} —— 不是座位（node_kind=${n.node_kind || '空'}），可改名或删除`}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    fontSize: FS.tag, color: C.dim,
-                    border: `1px solid ${C.border}`, borderRadius: 6, padding: '2px 8px',
-                  }}
-                >
-                  {n.name || n.node_id}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onDelete(n)}
-                    title="删除这个节点"
-                    style={{
-                      border: 'none', background: 'transparent', cursor: 'pointer',
-                      color: '#9b2c2c', fontSize: FS.tag, padding: 0, fontFamily: 'inherit',
-                    }}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-            </div>
+               ★ 为什么要按系统位摆：`gridNodes` 只含**已建出来的**节点，
+                 存量铺子常常只有 4 个（缺战略位 / 管理助理位）⇒ 那两格原来是纯「空位」，
+                 看不出是哪个位、也没邀请入口 —— 用户因此说「你没有默认 6 个系统位」。
+               ★ 两种格子的区别：系统位格 = 有身份（虚线边框 + 位名 + 邀请）；
+                 空位格 = 无身份（只有「+ 添加工位」/「空位」）。 */}
+          {(() => {
+            const missing = Math.max(0, 10 - gridNodes.length)
+            /* 已在卡座里的座位认领了哪些 seatKey */
+            const seated = new Set<string>()
+            for (const n of gridNodes) {
+              const direct = ((n as { seatKey?: string }).seatKey ?? '').trim()
+              seated.add(direct.length > 0 ? direct : resolveSeatKeyByName(n.name))
+            }
+            /* 还没落座的系统位（按 SEAT_ORDER 顺序） */
+            const vacantSystem = SEAT_ORDER.filter((k) => !seated.has(k))
+            const cells: ReactElement[] = []
+            for (let i = 0; i < missing; i += 1) {
+              const seatKey = vacantSystem[i]
+              if (seatKey !== undefined) {
+                cells.push(
+                  <EmptySystemSeat
+                    key={`sysslot-${seatKey}`}
+                    seatKey={seatKey}
+                    label={SEAT_LABELS[seatKey] ?? seatKey}
+                    seatInfo={seatList === null ? undefined : seatList.find((x) => x.seat === seatKey)}
+                    locked={seatKey === 'signature'}
+                    onInvite={() => setInviting('')}
+                  />,
+                )
+              } else {
+                /* 6 位都摆完之后剩下的才是真·空位：只有第一格可加，避免一排全是加号 */
+                cells.push(
+                  <EmptySeat
+                    key={`empty-${i}`}
+                    canAdd={i === vacantSystem.length}
+                    busy={busy}
+                    onAdd={(name) => { setDraft(name); void (async () => {
+                      const r = await createOrgNode(name)
+                      if (!r.ok) setErr({ code: r.code, message: r.message })
+                      await refresh()
+                    })() }}
+                  />,
+                )
+              }
+            }
+            return cells
+          })()}
+        </div>
+        {gridNodes.length > 10 ? (
+          <div style={{ fontSize: FS.small, color: C.dim, marginTop: 6 }}>
+            还有 {gridNodes.length - 10} 个位置未显示（先显示前 10 个）
           </div>
         ) : null}
+        {/* ★★★ 2026-10-26 阿开：「顶多增加第三行同样高度的介绍席位桌面直接显示，不需要单独按钮」
+            ⇒ 席位介绍**常显**在卡座正下方，与卡座同构的横排（5 列、同样 78px 最小高度）。
+            ★ 不要按钮：他要「一眼看见」，多一次点击就是多一步。
+            ★ 放卡座**下方**：先看「有哪些位、坐着谁」，再看「每个位干什么」——
+              顺序反了会先读说明才找位。 */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+            gap: 8,
+            marginTop: 8,
+          }}
+        >
+          {SEAT_GUIDE.map((s) => (
+            <div
+              key={s.name}
+              style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 10,
+                padding: '8px 10px',
+                minHeight: 78,
+                background: 'rgba(0,0,0,0.02)',
+                fontSize: FS.tag,
+                lineHeight: 1.55,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span>{s.icon}</span>
+                <span style={{ fontWeight: 600, fontSize: FS.small, color: s.locked ? '#8e44ad' : C.text }}>
+                  {s.name}
+                </span>
+              </div>
+              <div style={{ color: C.dim, flex: 1 }}>{s.desc}</div>
+              {s.locked === true ? <div style={{ color: '#8e44ad' }}>🔒 不可邀请</div> : null}
+            </div>
+          ))}
+          {/* 第 6 格：审计位独立性的说明（原文案保留，不丢） */}
+          <div
+            style={{
+              border: '1px solid #d9d9d9',
+              borderRadius: 10,
+              padding: '8px 10px',
+              minHeight: 78,
+              background: 'rgba(0,0,0,0.02)',
+              fontSize: FS.tag,
+              lineHeight: 1.55,
+              color: C.dim,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div style={{ fontWeight: 600, fontSize: FS.small, color: C.text }}>签名并行</div>
+            <div style={{ flex: 1 }}>
+              第三方签自己的结论，请让它坐<b>审计位</b>、用<b>自有私钥</b>；
+              山海在其后附加「过程凭证」的签名。两条并行、不互相替代。
+            </div>
+          </div>
+        </div>
+
         <TaskStatsBar />
         </>
       )}
@@ -2891,6 +2812,92 @@ function EmptySeat(props: {
     </div>
   )
 }
+
+/** 按名字认席位（老数据可能没有 seatKey 字段） */
+function resolveSeatKeyByName(name: string): string {
+  const s = (name ?? '').trim()
+  if (s.includes('签名')) return 'signature'
+  if (s.includes('战略')) return 'strategy'
+  if (s.includes('管理助理')) return 'management_assistant'
+  if (s.includes('管理')) return 'management'
+  if (s.includes('审计')) return 'audit'
+  if (s.includes('执行')) return 'execution'
+  return ''
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ★★★ 2026-10-26 阿开：「你没有默认 6 个系统位啊…哪怕没有人也显示邀请按钮」
+
+   两层一起修（只修一层都不够）：
+     · 后端 `reconcile_org_seats`：补齐存量铺子的 6 个系统位
+       （`provision_org` 只在首次开铺建，存量铺子永远只有 4 个）
+     · 前端（本组件）：**系统位即使没有节点也渲染成系统位卡片**
+       —— 有位名、有人数、有邀请按钮；只有「自建空位」才是纯空位块。
+       这样后端补位万一失败，界面也不会塌。
+
+   ★ 邀请为什么不做成 InviteBar：0.2.84 起「邀请」已是**铺级动作**
+     （一张码进本铺，不绑定 node），空格拿不到 `InviteBar` 要的 `node`。
+     这里点了直接展开上方的加入码卡（`setInviting('')` 收起旧展开态）。
+   ══════════════════════════════════════════════════════════════════ */
+function EmptySystemSeat(props: {
+  seatKey: string
+  label: string
+  seatInfo?: { occupied?: number; occupants?: unknown[]; invited?: unknown[] } | undefined
+  locked?: boolean
+  onInvite?: () => void
+}): ReactElement {
+  const { seatKey, label, seatInfo, locked, onInvite } = props
+  const isLocked = locked === true || seatKey === 'signature'
+  /* ★ 人数口径与席位总览一致：只显示人数，不显示容量（「2 人」不是「2/1」） */
+  const ppl = (() => {
+    if (isLocked) return '（已占）'
+    if (seatInfo === undefined) return '空'
+    const n = Array.isArray(seatInfo.occupants)
+      ? seatInfo.occupants.length
+      : (typeof seatInfo.occupied === 'number' ? seatInfo.occupied : 0)
+    if (n > 0) return `${n} 人`
+    const inv = Array.isArray(seatInfo.invited) ? seatInfo.invited.length : 0
+    return inv > 0 ? '已受邀' : '空'
+  })()
+
+  return (
+    <div
+      title={isLocked ? '山海签名位：平台常驻，不可邀请' : '这一位还没有人 —— 点「邀请」生成工位加入码'}
+      style={{
+        /* 与有节点的座位卡同构（同圆角 / 同最小高度），差别只在**虚线边框**：
+           一眼看出「位在、人还没来」。 */
+        border: `1px dashed ${isLocked ? C.accent : C.border}`,
+        borderRadius: 10,
+        padding: '8px 10px',
+        minHeight: 78,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        background: 'transparent',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: FS.small, fontWeight: 600, color: C.text }}>{label}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: FS.tag, color: isLocked ? C.accent : C.dim }}>{ppl}</span>
+      </div>
+      <div style={{ flex: 1, fontSize: FS.tag, color: C.dim, lineHeight: 1.5 }}>
+        {isLocked ? '山海系统默认位' : '还没有人坐这一位'}
+      </div>
+      {isLocked ? null : (
+        <button
+          type="button"
+          onClick={() => { if (onInvite) onInvite() }}
+          style={{ ...btnStyle(false), padding: '3px 8px', fontSize: FS.tag, alignSelf: 'flex-start' }}
+          title="生成一张工位加入码，发给要坐这一位的同事"
+        >
+          🔑 邀请
+        </button>
+      )}
+    </div>
+  )
+}
+
 
 
 /* ══════════════════════════════════════════════════════════════════
@@ -5465,81 +5472,6 @@ function TaskSection(): ReactElement {
         </span>
       </div>
 
-      {/* ★★ 2026-10-26「Agent 版 OA」：项目阶段条。
-          阿开原话：「这样清晰之后，我们的审计以及第三方审计就省事很多了。
-          直接按项目。按任务先后顺序以及任务需求和交付条理非常清晰。」
-          ⇒ 只在**选中单个项目**时显示：看全部项目时没有「这个项目走到哪一步」这回事，
-            硬显示一个进度的平均值是假读数。
-          ★ 顺序即语义：立需求→出计划书→分工→施工→验收→归档，服务端只允许 ±1。 */}
-      {(() => {
-        const cur = projects.find((p) => p.projectId === projFilter)
-        if (cur === undefined) return null
-        const ph = cur.phase
-        const bar = phaseBar(ph)
-        const nx = nextPhase(ph)
-        const pv = prevPhase(ph)
-        const archived = isArchivedPhase(ph)
-        return (
-          <div style={{
-            ...cardStyle, marginBottom: 6, padding: '8px 12px',
-            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-          }}>
-            <span style={{ fontSize: FS.small, fontWeight: 600 }}>
-              {cur.name}
-            </span>
-            <span
-              title={phaseHint(ph)}
-              style={{
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                fontSize: FS.small, letterSpacing: 1,
-                color: phaseIndex(ph) === 0 ? '#9b2c2c' : C.accent,
-              }}
-            >
-              {bar}
-            </span>
-            <span style={{ fontSize: FS.tag, color: archived ? '#1e7e42' : C.dim }}>
-              {phaseLabel(ph, cur.phaseLabel)}（第 {phaseIndex(ph)}/{PROJECT_PHASES.length} 步）
-            </span>
-            {/* ★ 归档态不给「推进」：归档是出口，没有下一步。
-                也不给「退回」—— 归档=冻结，要改先解冻（那是另一个动作，不能藏在这里）。 */}
-            {archived ? (
-              <span style={{ fontSize: FS.tag, color: C.faint }}>已归档 · 冻结不再改</span>
-            ) : (
-              <>
-                {pv !== null ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => { void run(async () => {
-                      const r = await setProjectPhase(cur.projectId, pv)
-                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
-                    }, `已退回「${phaseLabel(pv)}」`) }}
-                    title={`退回上一步：「${phaseLabel(pv)}」`}
-                    style={{ ...btnStyle(false), padding: '3px 10px', fontSize: FS.tag }}
-                  >
-                    ← {phaseLabel(pv)}
-                  </button>
-                ) : null}
-                {nx !== null ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => { void run(async () => {
-                      const r = await setProjectPhase(cur.projectId, nx)
-                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
-                    }, `已推进到「${phaseLabel(nx)}」`) }}
-                    title={phaseHint(nx)}
-                    style={{ ...btnStyle(true), padding: '3px 10px', fontSize: FS.tag }}
-                  >
-                    {phaseLabel(nx)} →
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
-        )
-      })()}
-
       {/* ★ 一键挂载：审计结论（四灯场景 + 资料预检；报告带 Ed25519 签名可验） */}
       {audit !== null ? (
         <div style={{ ...cardStyle, marginBottom: 6 }}>
@@ -5724,7 +5656,7 @@ function TaskSection(): ReactElement {
                     ) : (
                       list.map((t) => (
                         <CardBoundary key={t.task_id}>
-                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} allTasks={tasks} />
+                          <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} />
                         </CardBoundary>
                       ))
                     )}
@@ -5983,9 +5915,6 @@ function TaskCard(props: {
    *  ★ 只从 `task.node_id` 反查工位名 —— `/tasks` **不回 notify_agent**（实测），
    *    所以「指派给谁」这一半在铺主列表上取不到，只能靠发布当时那句 toast。 */
   nodeLabel?: string
-  /** ★★ 2026-10-26：全铺任务（依赖区拿它当「可加为前置」的候选池）。
-   *  由列表层传入；缺省空数组 ⇒ 加依赖的候选为空，但不影响读已有依赖。 */
-  allTasks?: Array<{ task_id: string; title: string; status: string }>
   run: (fn: () => Promise<{ ok: boolean; code?: string; message?: string }>, okMsg?: string) => Promise<void>
 }): ReactElement {
   const { task, myId, busy, run } = props
@@ -6224,15 +6153,6 @@ function TaskCard(props: {
             交付：{shortResult(task.result)}
           </div>
         )
-      ) : null}
-      {/* ★★ 2026-10-26「Agent 版 OA」：依赖 + 交付版本。
-          只在展开时拉数据 —— 收起状态下几十条卡片各发一个请求是性能自杀，
-          而且语义上也不需要（收起 = 不想看细节）。 */}
-      {open ? (
-        <>
-          <TaskDepsSection taskId={task.task_id} allTasks={props.allTasks ?? []} run={run} />
-          <DeliverableVersionsSection taskId={task.task_id} run={run} />
-        </>
       ) : null}
       <div style={{ display: ask !== null ? 'none' : 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
         {/* ★★ 2026-10-20 阿开：「领取和复制重了」⇒ 「领取」已合并进上方的「领取并复制」，
