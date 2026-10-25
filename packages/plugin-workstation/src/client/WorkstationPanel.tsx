@@ -105,6 +105,9 @@ import { PLUGIN_VERSION } from './version.js'
    抽成独立模块而不是写在组件里：判据要能真跑输入→输出，
    写在 JSX 里就只能靠肉眼看截图 —— 那种「验证」等于没验。 */
 import { countSeatTypes, seatBadge, seatSummary, SEAT_ORDER } from './seat-summary.js'
+/* ★★ 2026-10-26：卡座分区（纯逻辑）—— 卡座只放座位，游离 role 进「未归属」。
+   判据能真跑三种脏数据形态，不用起浏览器截图。 */
+import { partitionSeats, emptySeatSlots } from './seat-partition.js'
 /* ★ 083 第一批（邀请码补发闭环）：文案与纯逻辑抽出去，判据才能**真跑**输入→输出，
    而不是对源码 grep 关键词（星月 R-6：同一张关键词表 = 0 命中，那不是通过，是没测）。 */
 import {
@@ -1701,9 +1704,17 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
   const roots = nodes.filter((n) => !n.parent_node_id)
   const childrenOf = (id: string): OrgNodeView[] => nodes.filter((n) => n.parent_node_id === id)
   // ★ 座位表口径（阿开 2026-10-19）：**位** = 叶子节点（post）；只有一个根时它自己也是位
-  //   ⇒ 不按树缩进展示，而按 3 列网格铺开，更像办公室
   const leaves = nodes.filter((n) => childrenOf(n.node_id).length === 0)
-  const rawGrid = leaves.length > 0 ? leaves : nodes
+  /* ★★ 2026-10-26 阿开：「工位布局怎么变了呢？……回到之前的卡座模式啊
+        两行一行 5 个座位，6 个系统默认工位」
+     ⇒ 分区逻辑抽到 `seat-partition.ts`（纯函数，判据能真跑脏数据三形态）。
+       卡座**只放座位**（node_kind='post'）；历史遗留的游离 role 进「未归属」。
+     ★ 原来按「没有子节点」（leaves）判 ⇒ 游离 role 也没有子节点 ⇒ 被当卡片铺进网格，
+       6 系统位 + 8 游离 role = 12 张卡，5×2 卡座被撑乱。 */
+  const part = partitionSeats(nodes)
+  const seatNodes = part.seats
+  const strayNodes = part.stray
+  const rawGrid = seatNodes.length > 0 ? seatNodes : (leaves.length > 0 ? leaves : nodes)
   /* ★★ 2026-10-26 阿开（第三轮）：「工位排号也按这个排」——
      工位卡片网格的**顺序必须与顶部席位表同源**（`SEAT_ORDER`），
      否则上面第 4 行写「管理助理位」、下面卡片却排在别处，人就对不上号。
@@ -1805,6 +1816,18 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
         </button>
       </div>
 
+      {/* ★★ 2026-10-26 阿开：「把这一行移动到顶部，与顶部的
+          🔑 生成工位加入码 给新同事：进本铺 · 装技能 · 领授权，一次做完 …
+          邀请码过期了、或者同事换了台机器，也是从这里重新生成一张补发给他
+          合并到同一栏是不是更好管理。底部一展开已生成就要拉到底部才能看到」
+          ⇒ 加入码整块（标题 + 补发说明 + 时长/张数 + 生成按钮 + 待用码列表）
+            **搬到「工位布局」标题行正下方**，即本区块最顶上。
+          ★ 为什么放这里而不是再往上（页面最顶）：
+            「工位布局」是这一页的主语，发码是它的第一个动作 ——
+            顺序读下来是「这是工位 → 先请人进来 → 看看座位」。放到页面最顶反而
+            跟「工位」这个主语断了。
+          ★ 必须**常显、不折叠**：他要的是「一进来看得见」，折起来就还是得点。 */}
+      <JoinCodeCard compact />
       {/* ★★ 2026-10-23 四类席位说明（古茶定稿文案 · 逐字落地）
           为什么放在工位布局顶部而不是单独的帮助页：
           用户在这一页做「请谁坐哪个位」的决定，说明必须在决定发生的地方。 */}
@@ -1936,10 +1959,10 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
           <div style={{ ...cardStyle, color: C.dim, fontSize: FS.small, lineHeight: LH.normal }}>
             还没有工位 —— 在下面输入一个名字，加第一个。
           </div>
-          {/* ★★ 2026-10-26 阿开：「点开之后的（24 小时 / 1张2张3张 / 生成工位加入码）
-              在底部，改到上方顶部下方」⇒ 卡片**常显**在席位总览下方，不再折叠。
-              ★ 空铺也要有：总览行只在「有工位」分支渲染，这里补一份（判据 S-11f 盯）。 */}
-          <JoinCodeCard compact />
+          {/* ★★ 2026-10-26（第四轮）这一份**已删除** —— 加入码已上移到标题行正下方，
+              且是**无条件渲染**（在三分支之外）⇒ 空铺分支自然也带着，无需再补。
+              ★ 留着就是两处渲染：空铺时上下各一张，正是「同一件事两处显示必然漂移」的病根。
+              判据 `L-4e`（前端）与 `S-11f`（席位）都要跟着改口径。 */}
         </>
       ) : (
         <>
@@ -1962,12 +1985,16 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
              藏在折叠后面等于每次都要点一下；工位页已经收掉了底部只读席位表，
              版面腾得出来。
            ★ 视线顺序：几个位/坐几人/还空几个 → 空位就在眼前 → 下面是发码。 */}
-        <JoinCodeCard compact />
-
+        {/* ★★ 2026-10-26 阿开（第四轮）：「把这一行移动到顶部，与顶部的
+            🔑 生成工位加入码 …… 合并到同一栏是不是更好管理。
+            底部一展开已生成就要拉到底部才能看到」
+           ⇒ 这一份**已搬到本区块顶部**（「工位布局」标题行正下方）。
+           ★ 只留一份：同一个东西两处显示，两处必然漂移（本项目反复栽的坑）。 */}
         <div
           style={{
             display: 'grid',
             // ★ 5 列 × 2 行 = 10 个位（阿开 2026-10-19 定稿：上限 10 位 ⇒ 一行 5 个卡片）
+            //   ★ 2026-10-26 复核：这里**只放座位**（`seatNodes`），游离 role 见下方「未归属」行
             gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
             gap: 8,
             marginTop: 8,
@@ -2024,7 +2051,12 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
             )}
             </Fragment>
           ))}
-          {Array.from({ length: Math.max(0, 10 - gridNodes.length) }).map((_, i) => (
+          {/* ★★ 2026-10-26 阿开：「两行一行 5 个座位，6 个系统默认工位」
+              ⇒ 补空位到**整行**（6 座位 ⇒ 补 4 个 = 两行各 5）。
+             原来写 `10 - gridNodes.length`：6 个座位补 4 个恰好对，但 7 个座位会补 3 个
+             ⇒ 第二行只有 2 个，右边空着，不成「一行 5 个」。
+             `emptySeatSlots` 按行算，任何座位数都补齐整行。 */}
+          {Array.from({ length: emptySeatSlots(gridNodes.length) }).map((_, i) => (
             <EmptySeat
               key={`empty-${i}`}
               canAdd={i === 0}
@@ -2040,6 +2072,47 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
         {gridNodes.length > 10 ? (
           <div style={{ fontSize: FS.small, color: C.dim, marginTop: 6 }}>
             还有 {gridNodes.length - 10} 个位置未显示（先显示前 10 个）
+          </div>
+        ) : null}
+
+        {/* ★★ 2026-10-26 阿开：「工位布局怎么变了呢？……回到之前的卡座模式啊
+            两行一行 5 个座位，6 个系统默认工位」
+            ⇒ 卡座只放座位（post）。下面这些是**不是座位**的历史节点
+              （老结构留下的、没有父节点的 role：Codex / 前端位 / 测试1 …）。
+            ★ 为什么不直接不显示：那是他的东西，藏起来他会问「我的 Codex 呢」。
+              显示在卡座外面，既不占座位格，又找得到、改得动、删得掉。 */}
+        {strayNodes.length > 0 ? (
+          <div style={{ marginTop: 10, padding: '8px 10px', border: `1px dashed ${C.border}`, borderRadius: 8 }}>
+            <div style={{ fontSize: FS.tag, color: C.dim, marginBottom: 4 }}>
+              未归属的工位（{strayNodes.length}）—— 历史结构留下的，不算座位，不占卡座
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {strayNodes.map((n) => (
+                <span
+                  key={n.node_id}
+                  title={`${n.name} —— 不是座位（node_kind=${n.node_kind || '空'}），可改名或删除`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    fontSize: FS.tag, color: C.dim,
+                    border: `1px solid ${C.border}`, borderRadius: 6, padding: '2px 8px',
+                  }}
+                >
+                  {n.name || n.node_id}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onDelete(n)}
+                    title="删除这个节点"
+                    style={{
+                      border: 'none', background: 'transparent', cursor: 'pointer',
+                      color: '#9b2c2c', fontSize: FS.tag, padding: 0, fontFamily: 'inherit',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
         ) : null}
         <TaskStatsBar />
