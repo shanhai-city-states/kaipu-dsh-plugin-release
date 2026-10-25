@@ -69,6 +69,10 @@ import {
 } from './notify-copy.js'
 import { C, FONT, FS, LH } from './theme.js'
 import { PLUGIN_VERSION } from './version.js'
+/* ★★ 2026-10-26：席位数量总览（纯逻辑，可单测）。
+   抽成独立模块而不是写在组件里：判据要能真跑输入→输出，
+   写在 JSX 里就只能靠肉眼看截图 —— 那种「验证」等于没验。 */
+import { countSeatTypes, seatBadge, seatSummary } from './seat-summary.js'
 /* ★ 083 第一批（邀请码补发闭环）：文案与纯逻辑抽出去，判据才能**真跑**输入→输出，
    而不是对源码 grep 关键词（星月 R-6：同一张关键词表 = 0 命中，那不是通过，是没测）。 */
 import {
@@ -1412,8 +1416,85 @@ function TaskStatsBar(): ReactElement {
   )
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   工位区顶部 · 席位数量总览（2026-10-26 阿开）
+
+   ★ 阿开原话：「座位与邀请是否不需要提供邀请按钮，只需要展示每一个类型
+     席位数量 …… 这样整个页面就会剩下很多空间？合理规划一下好看美观一些。」
+
+   ★ 为什么撤掉卡片上的「邀请」按钮：
+     邀请栏（InviteBar）里本来就要再选一次座位类型（INVITE_LAMPS）
+     ⇒ 卡片上那个按钮等于把同一件事问两遍，还占掉每张卡片右侧的空间。
+     而且「邀请要对应上面的座位号」—— 选哪个位这件事，
+     在点按钮那一刻根本还没定，按钮本身就是多余的中间步骤。
+
+   ★ 保留的能力（一个都没少）：
+     · 坐人的位 → 仍有「请出」（不可逆，二次确认）
+     · 签名位 → 仍有「🔒 平台专属 · 不可邀请」说明
+     · 生成邀请 → 统一收到「管理助理（临时代管）」区块那一处
+
+   ★ 显示纪律：
+     · 每个类型都给「已坐/总数」，空着的写「空 N」—— 不让人心算
+     · 坐着谁，收在 `title` 里（hover 可见），不占版面
+     · 未知类型**原样显示**，不隐藏（藏起来 = 用户以为没这个位）
+     · `seatList === null` ⇒ 整行不渲染，绝不显示「0 个位」这种假读数
+   ══════════════════════════════════════════════════════════════════ */
+function SeatSummaryRow({ seats }: { seats: RolesSeat[] | null }): ReactElement | null {
+  if (seats === null) return null
+  const counts = countSeatTypes(seats.map((s) => ({
+    seat: s.seat,
+    label: s.label,
+    holder: s.holder,
+    occupants: s.occupants,
+    full: s.full,
+  })))
+  return (
+    <div
+      style={{
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+        padding: '8px 10px', marginTop: 8,
+        border: `1px solid ${C.border}`, borderRadius: 8, background: C.soft,
+      }}
+    >
+      <span style={{ fontSize: FS.tag, color: C.dim, fontWeight: 600, marginRight: 2 }}>
+        {seatSummary(counts)}
+      </span>
+      {counts.map((c) => {
+        const isEmpty = c.occupied === 0
+        return (
+          <span
+            key={c.key}
+            title={
+              c.holders.length > 0
+                ? `${c.label}：${c.holders.join('、')}（${c.occupied}/${c.total}）`
+                : `${c.label}：都空着（共 ${c.total} 个）`
+            }
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px', borderRadius: 10,
+              fontSize: FS.tag, fontWeight: 600, whiteSpace: 'nowrap',
+              border: `1px solid ${isEmpty ? C.border : 'rgba(200,136,31,0.45)'}`,
+              background: isEmpty ? 'transparent' : 'rgba(200,136,31,0.10)',
+              color: isEmpty ? C.dim : C.text,
+            }}
+          >
+            {seatBadge(c)}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
   const [tree, setTree] = useState<OrgTreeView | null>(null)
+  /* ★★ 2026-10-26：工位区顶部的「每类席位数量」总览数据。
+     为什么不复用 `RolesSeatSection` 里的 seats：那是兄弟组件（`RolesSeatSection`），
+     拿不到彼此 state。这里自己拉一次读数——只读、无副作用，
+     多一次 GET 换来「工位页看见人，同一屏看见每类几个位」，值得。
+     ★ 拉失败不影响工位卡片：`seatList` 保持 null，总览行自己降级成不显示，
+       绝不能让一个统计读数把整个工位页搞白。 */
+  const [seatList, setSeatList] = useState<RolesSeat[] | null>(null)
   const [err, setErr] = useState<{ code: string; message: string; source?: 'action' | 'read'; title?: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState('')
@@ -1457,6 +1538,13 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
 
   useEffect(() => {
     void refresh()
+    /* ★★ 2026-10-26：顺带拉一次席位读数（只读）。
+       ★ 用 `.then` 而不是 await：拉失败就让总览不显示，**不 setErr** ——
+         工位卡片读的是 `/org/tree`，两者来源不同；
+         把席位的错塞进工位的 err，会让用户以为「工位布局坏了」，是归因错位。 */
+    void callPack<RolesSeatsPayload>('rolesSeats', {}).then((r) => {
+      if (r.ok) setSeatList(Array.isArray(r.data.seats) ? r.data.seats : [])
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1729,12 +1817,21 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
         </div>
       ) : (
         <>
+        {/* ★★ 2026-10-26 阿开：「座位与邀请是否不需要提供邀请按钮，只需要展示
+           每一个类型席位数量 …… 这样整个页面就会剩下很多空间」
+           ⇒ 工位区顶部加**一行总览**（总数 + 每类占用），且**撤掉卡片上的邀请按钮**。
+           为什么可以撤：邀请栏（InviteBar）里本来就要再选一次座位类型（INVITE_LAMPS）
+           ⇒ 卡片上的按钮等于把同一件事问两遍，还占掉每张卡片的右侧空间。
+           邀请入口统一收到「管理助理（临时代管）」区块（唯一还需要的生成按钮）。
+           ★ 撤按钮 ≠ 撤能力：坐人的位仍有「请出」，签名位仍有「🔒 不可邀请」说明。 */}
+        <SeatSummaryRow seats={seatList} />
         <div
           style={{
             display: 'grid',
             // ★ 5 列 × 2 行 = 10 个位（阿开 2026-10-19 定稿：上限 10 位 ⇒ 一行 5 个卡片）
             gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
             gap: 8,
+            marginTop: 8,
           }}
         >
           {gridNodes.map((n) => (
@@ -2431,9 +2528,23 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
                 🔒 平台专属 · 不可邀请
               </span>
             ) : (
-              <button type="button" onClick={props.onInvite} disabled={busy} style={btnStyle(props.inviteOpen)}>
-                {props.inviteOpen ? '收起' : '邀请'}
-              </button>
+              /* ★★★ 2026-10-26 阿开：「座位与邀请是否不需要提供邀请按钮，
+                 只需要展示每一个类型席位数量，因为这里的邀请还要对上面的座位号
+                 所以没有必要，唯一有必要的是保留——管理助理（临时代管）的生成邀请按钮。」
+                 ⇒ 空位卡片上**不再渲染「邀请」按钮**。
+                 为什么可以撤而不丢能力：
+                   · 邀请栏（InviteBar）里本来就要再选一次座位类型（INVITE_LAMPS）
+                     ⇒ 卡片上这个按钮等于把同一件事问两遍
+                   · 生成邀请统一收到「管理助理（临时代管）」区块那一处
+                   · 每类几个位、坐了谁 —— 由工位区顶部的 SeatSummaryRow 一眼看全
+                 ★ 不渲染 ≠ 禁用：灰按钮会让人以为「等条件满足就能点」，
+                   而这里是真的不需要在卡片上做这个动作。 */
+              <span
+                title="邀请入口在下方「管理助理（临时代管）」区块 —— 那里选类型、生成一次交代清楚"
+                style={{ fontSize: FS.tag, color: C.dim, whiteSpace: 'nowrap' }}
+              >
+                空位
+              </span>
             )}
 
             {node.undeletable ? null : (
@@ -4086,10 +4197,17 @@ function PackSection({ onUpload, focus }: {
                 {g.rows.map((x) => {
                   const active = x.interactionId === iid
                   return (
+                    /* ★ 必须包一层 Fragment：`.map` 的箭头是 `=> (` 单表达式，
+                       直接返回两个同级元素（条目 button + 下方附件区）编译不过。 */
+                    <Fragment key={x.interactionId}>
                     <button
-                      key={x.interactionId}
                       type="button"
-                      onClick={() => { setIid(x.interactionId); void persist({ interactionId: x.interactionId }) }}
+                      onClick={() => {
+                        /* ★★ 2026-10-26：点「正在看」的那条 ⇒ 收起（再点一次关掉）；
+                           点别的条 ⇒ 切过去并展开。这样「同一条再点」不会没反应。 */
+                        if (active) { setIid(''); void persist({ interactionId: '' }); return }
+                        setIid(x.interactionId); void persist({ interactionId: x.interactionId })
+                      }}
                       style={{
                         display: 'flex', alignItems: 'baseline', gap: 8, width: '100%',
                         textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
@@ -4101,12 +4219,27 @@ function PackSection({ onUpload, focus }: {
                     >
                       <span style={{ flex: 1, minWidth: 0, color: active ? C.text : undefined }}>
                         {packLabel(x)}
-                        {active ? ' ·正在看' : ''}
                       </span>
                       <span style={{ flex: '0 0 auto', fontSize: FS.tag }}>
                         {x.files} 个文件 · 最近 {fmtDay(x.lastAt)}
+                        {' '}
+                        <span style={{ color: active ? '#1f2937' : '#98a2b3', fontWeight: 600 }}>
+                          {active ? '收起 ▴' : '展开 ▾'}
+                        </span>
                       </span>
                     </button>
+                    {/* ★★ 2026-10-26：附件就地展开在**这条协作下方**。
+                        原来附件区在整页最底部，几十条协作时点了看不到任何变化。 */}
+                    {active ? (
+                      <PackFileList
+                        files={files}
+                        busy={busy}
+                        onDownload={(n) => void onDownload(n)}
+                        onDelete={(n) => void onDelete(n)}
+                        inline
+                      />
+                    ) : null}
+                    </Fragment>
                   )
                 })}
               </div>
@@ -4135,6 +4268,12 @@ function PackSection({ onUpload, focus }: {
         </div>
       )}
 
+      {/* ★★ 2026-10-26：原来这里还有一份「按当前 iid 渲染的附件列表」。
+          现在附件就地展开在「选中的那条协作」正下方（见上方 PackFileList inline），
+          底部再挂一份 = 同一个东西两处显示，违反本项目自己的铁律
+          （「同一个东西只留一个地方」）。⇒ 底部整块撤掉，只留没选中时的说明。
+          ★ 撤的理由：列表中每条协作下方已经有它自己的附件，底部这份永远是
+            「上面那条的重复」，而且离视线远 —— 正是阿开说的「点了不知道发生了什么」。 */}
       {ref.interactionId.length === 0 ? (
         <div style={{ marginTop: 6, fontSize: FS.small, color: 'rgba(0,0,0,.55)' }}>
           <strong>按位</strong>：每个座位一个抽屉，一次协作一个文件夹 ——
@@ -4143,36 +4282,78 @@ function PackSection({ onUpload, focus }: {
           {' '}座位留空 ⇒ 由服务端按你的身份解析。
           {' '}ID／座位／项目／备注都存在服务端（换机器、重装插件都还在）；
           改 ID 等于换目录，**旧资料不会跟过来**。
+          {' '}上面点任意一条「这次协作」，附件会**就地**展开在它下面。
         </div>
-      ) : files === null ? (
-        <div style={{ marginTop: 6, fontSize: FS.small, color: 'rgba(0,0,0,.55)' }}>还没有拉到列表（或读取失败）。</div>
-      ) : files.length === 0 ? (
-        <div style={{ marginTop: 6, fontSize: FS.small, color: 'rgba(0,0,0,.55)' }}>这个位上还没有文件。</div>
-      ) : (
-        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {files.map((f) => {
-            const name = typeof f.filename === 'string' ? f.filename : ''
-            if (name.length === 0) return null
-            return (
-              <div
-                key={`${typeof f.seat === 'string' ? f.seat : ''}/${name}`}
-                style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: FS.small, padding: '3px 0', borderBottom: '1px solid rgba(0,0,0,.06)' }}
-              >
-                <span style={{ flex: 1, wordBreak: 'break-all' }}>{name}</span>
-                <span style={{ color: 'rgba(0,0,0,.55)', whiteSpace: 'nowrap' }}>{fmtBytes(f.size)}</span>
-                <button type="button" onClick={() => void onDownload(name)} disabled={busy} style={btnStyle(false)}>
-                  下载
-                </button>
-                <button type="button" onClick={() => void onDelete(name)} disabled={busy} style={btnStyle(false)}>
-                  删除
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      )}
+      ) : null}
 
     </Section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   附件列表 · 可嵌在「选中的那次协作」正下方（2026-10-26 阿开）
+
+   ★ 阿开原话：「资料页面，点击这次协作（XX个文件）在看，
+     建议把附件就显示在当前选中的在看下方，方便人类查看，
+     目前是在底部，现在当前协作太多了，点击之后都不知道发生了什么？」
+
+   ★ 为什么必须内联到条目下方：
+     原来附件区在整个页面的**最底部**，而协作列表按项目分组、可能几十条
+     ⇒ 点了「这次协作（3 个文件）」之后，附件出现在视口之外，
+       用户看不到任何变化 —— 现象上就是「点了没反应」。
+     这不是「提示不够」，是**反馈不在视线内**，加提示治不了。
+
+   ★ 为什么抽成组件：内联渲染 + 底部渲染要用同一份 UI，
+     两处各写一遍必然漂移（一处改了另一处忘），这正是本项目反复栽的坑。
+   ══════════════════════════════════════════════════════════════════ */
+function PackFileList(props: {
+  files: PackFileItem[] | null
+  busy: boolean
+  onDownload: (name: string) => void
+  onDelete: (name: string) => void
+  /** 内联态：外框淡一点，表示"这是上面那条协作的内容"，不是独立区块 */
+  inline?: boolean
+}): ReactElement {
+  const { files, busy, onDownload, onDelete, inline } = props
+  const box: React.CSSProperties = inline === true
+    ? {
+        marginTop: 2, marginLeft: 12, padding: '6px 10px',
+        borderLeft: '2px solid rgba(200,136,31,0.45)',
+        background: 'rgba(200,136,31,0.04)', borderRadius: '0 6px 6px 0',
+        display: 'flex', flexDirection: 'column', gap: 2,
+      }
+    : { marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }
+  if (files === null) {
+    return <div style={{ ...box, fontSize: FS.tag, color: 'rgba(0,0,0,.55)' }}>正在读取文件清单…</div>
+  }
+  if (files.length === 0) {
+    return <div style={{ ...box, fontSize: FS.tag, color: 'rgba(0,0,0,.55)' }}>这次协作还没有附件。</div>
+  }
+  return (
+    <div style={box}>
+      {files.map((f) => {
+        const name = typeof f.filename === 'string' ? f.filename : ''
+        if (name.length === 0) return null
+        return (
+          <div
+            key={`${typeof f.seat === 'string' ? f.seat : ''}/${name}`}
+            style={{
+              display: 'flex', gap: 8, alignItems: 'center', fontSize: FS.small,
+              padding: '3px 0', borderBottom: '1px solid rgba(0,0,0,.06)',
+            }}
+          >
+            <span style={{ flex: 1, wordBreak: 'break-all' }}>{name}</span>
+            <span style={{ color: 'rgba(0,0,0,.55)', whiteSpace: 'nowrap' }}>{fmtBytes(f.size)}</span>
+            <button type="button" onClick={() => onDownload(name)} disabled={busy} style={btnStyle(false)}>
+              下载
+            </button>
+            <button type="button" onClick={() => onDelete(name)} disabled={busy} style={btnStyle(false)}>
+              删除
+            </button>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -5277,22 +5458,34 @@ function TaskSection(): ReactElement {
                   type="button"
                   onClick={() => setOpenSec((p) => ({ ...p, [sec.key]: !open }))}
                   aria-expanded={open}
-                  /* ★ G-2：收起态下这四行就是**页面的全部内容**，所以它必须像"能点的行"，
-                     不能像一行灰注释（上一版就是灰字，看着像标题不像按钮）。
-                     整行都是命中区（`width:100%` + button 本身），不只箭头。 */
+                  /* ★★ 2026-10-26 阿开：「折叠按钮不明显。展开不知道可以收；收起来还知道试一下展开」
+                     ⇒ 问题的本质不是"边框不够亮"，是**展开态没有反向线索**。
+                       原本只有箭头旋转 90°（12ms 渐变动画，人眼基本看不见），
+                       展开后行看上去仍是一个"标题"，没有任何一个字说"能收起来"。
+                     ⇒ 三条一起加，缺一条都还猜不出来：
+                       ① **常显文字**：「展开 ▾」/「收起 ▴」—— 字比图形好认，这是主线索
+                       ② 边框：收起 1px 浅灰实线 / 展开 2px 琥珀实线 + 淡琥珀底 —— 用"线粗"而不是"色深"，
+                          因为浅色边框在浅底上加深一点点，人眼分辨不出来，加粗才看得出状态变了
+                       ③ 箭头：加宽到 12px、颜色随状态走，展开时转 90° 并加 220ms 过渡（12ms 等于没有）
+                     整行仍是命中区（`width:100%` + button），不只箭头。 */
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                    background: open ? 'rgba(200,136,31,0.06)' : 'transparent',
-                    border: `1px solid ${open ? 'rgba(200,136,31,0.45)' : C.border}`,
-                    borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-                    padding: '7px 10px', fontFamily: 'inherit', fontSize: FS.small, color: C.text,
+                    background: open ? 'rgba(200,136,31,0.10)' : '#fff',
+                    border: `${open ? '2px' : '1px'} solid ${open ? C.accent : '#d0d5dd'}`,
+                    borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                    padding: open ? '6px 9px' : '7px 10px',
+                    fontFamily: 'inherit', fontSize: FS.small, color: C.text,
+                    boxShadow: open ? '0 1px 3px rgba(200,136,31,0.18)' : 'none',
+                    transition: 'border-color 160ms, background 160ms, box-shadow 160ms',
                   }}
                 >
                   <span
                     aria-hidden="true"
                     style={{
-                      display: 'inline-block', width: 10, color: C.dim,
-                      transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s',
+                      display: 'inline-block', width: 12, fontSize: 12, lineHeight: 1,
+                      color: open ? C.accent : '#98a2b3',
+                      transform: open ? 'rotate(90deg)' : 'none',
+                      transition: 'transform 220ms ease, color 160ms',
                     }}
                   >
                     ›
@@ -5307,6 +5500,21 @@ function TaskSection(): ReactElement {
                     }}
                   >
                     {list.length}
+                  </span>
+                  {/* ★★ 主线索：字比图形好认。
+                     为什么不用图标收尾：阿开原话「展开不知道可以收」——
+                     缺的就是一个**写着"收"的字**。右侧常显「展开 ▾ / 收起 ▴」，
+                     位置固定在行尾（`marginLeft:auto`），不随标题长短跳动。 */}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      marginLeft: 'auto', flex: '0 0 auto',
+                      fontSize: FS.tag, fontWeight: 600,
+                      color: open ? C.accent : '#667085',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {open ? '收起 ▴' : '展开 ▾'}
                   </span>
                 </button>
                 {open ? (
