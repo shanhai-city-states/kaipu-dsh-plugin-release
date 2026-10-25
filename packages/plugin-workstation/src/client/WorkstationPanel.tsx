@@ -107,7 +107,11 @@ import { PLUGIN_VERSION } from './version.js'
 import { countSeatTypes, seatBadge, seatSummary, SEAT_ORDER } from './seat-summary.js'
 /* ★★ 2026-10-26：卡座分区（纯逻辑）—— 卡座只放座位，游离 role 进「未归属」。
    判据能真跑三种脏数据形态，不用起浏览器截图。 */
-import { partitionSeats, emptySeatSlots } from './seat-partition.js'
+/* ★★★ 2026-10-26 卡座布局（纯逻辑）：恒定 10 格，前 6 格系统位先落座。
+   阿开最终口径：「10 个座位要在顶部 …… 2 行一行 5 个座位，
+   然后把上面的 6 个座位按照上面那样先落座显示系统默认工位」。
+   判据能真跑：喂 15 个脏节点必须仍得 10 格、前 6 格是系统位。 */
+import { buildSeatGrid, systemSeatedCount, emptyCount } from './seat-grid.js'
 /* ★ 083 第一批（邀请码补发闭环）：文案与纯逻辑抽出去，判据才能**真跑**输入→输出，
    而不是对源码 grep 关键词（星月 R-6：同一张关键词表 = 0 命中，那不是通过，是没测）。 */
 import {
@@ -1703,35 +1707,25 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
   const nodes = tree?.nodes ?? []
   const roots = nodes.filter((n) => !n.parent_node_id)
   const childrenOf = (id: string): OrgNodeView[] => nodes.filter((n) => n.parent_node_id === id)
-  // ★ 座位表口径（阿开 2026-10-19）：**位** = 叶子节点（post）；只有一个根时它自己也是位
   const leaves = nodes.filter((n) => childrenOf(n.node_id).length === 0)
-  /* ★★ 2026-10-26 阿开：「工位布局怎么变了呢？……回到之前的卡座模式啊
-        两行一行 5 个座位，6 个系统默认工位」
-     ⇒ 分区逻辑抽到 `seat-partition.ts`（纯函数，判据能真跑脏数据三形态）。
-       卡座**只放座位**（node_kind='post'）；历史遗留的游离 role 进「未归属」。
-     ★ 原来按「没有子节点」（leaves）判 ⇒ 游离 role 也没有子节点 ⇒ 被当卡片铺进网格，
-       6 系统位 + 8 游离 role = 12 张卡，5×2 卡座被撑乱。 */
-  const part = partitionSeats(nodes)
-  const seatNodes = part.seats
-  const strayNodes = part.stray
-  const rawGrid = seatNodes.length > 0 ? seatNodes : (leaves.length > 0 ? leaves : nodes)
-  /* ★★ 2026-10-26 阿开（第三轮）：「工位排号也按这个排」——
-     工位卡片网格的**顺序必须与顶部席位表同源**（`SEAT_ORDER`），
-     否则上面第 4 行写「管理助理位」、下面卡片却排在别处，人就对不上号。
-     ★ 为什么要在这里排而不是靠后端返回顺序：后端按 `created_at` 出（开铺时间序），
-       那个顺序里签名位可能排在末尾；界面顺序是产品语义，不能托管给数据时点。
-     ★ 认不出 seatKey 的老数据：按名字认「签名」，再认不出就**排最后**（不插队、不被藏）。 */
-  const seatKeyOf = (n: OrgNodeView): string => {
-    const k = (n as { seatKey?: string }).seatKey
-    if (typeof k === 'string' && k.length > 0) return k
-    if (n.name.includes('签名')) return 'signature'
-    return ''
-  }
-  const seatRank = (n: OrgNodeView): number => {
-    const i = SEAT_ORDER.indexOf(seatKeyOf(n))
-    return i < 0 ? 999 : i
-  }
-  const gridNodes = rawGrid.slice().sort((a, b) => seatRank(a) - seatRank(b))
+  /* ★★★ 2026-10-26 阿开（最终口径 · 第三版，前两版都理解偏了）：
+     「工位还是保持原来的 10 个座位要在顶部。
+      6 个位 · 4 人已坐 · 2 个空
+      —山海签名位（已占）#1战略位1人 #2管理位1人 #3管理助理位空 #4审计位空 #5执行位2人
+      这里 2 行一行 5 个座位。然后把上面的 6 个座位按照上面那样先落座显示系统默认工位」
+
+     ⇒ 卡座 = **恒定 10 格**（2 行 × 5 列）。
+        前 6 格 = 系统默认位，顺序与顶部席位表逐字同序（SYSTEM_SEAT_ORDER = SEAT_ORDER）。
+        后 4 格 = 空位。
+     ★ 前两版之误：
+       第一版按「没有子节点」取卡片 ⇒ 8 个游离 role 混进卡座，12 张卡撑成 3 行；
+       第二版只放 6 个座位 + 补 4 空位 ⇒ 格数对了，但不是「10 个座位里前 6 个落座」，
+         而是「只有 6 个座位」—— 他要的是卡座仍是 10 格。
+     ★ 非座位节点（游离 role / team 根）一律不进卡座，下方「未归属」区单独列。 */
+  const gridCells = buildSeatGrid(nodes)
+  const strayNodes = nodes.filter((n) => (n.node_kind ?? '') !== 'post')
+  const seatedSystem = systemSeatedCount(gridCells)
+  const gridEmpty = emptyCount(gridCells)
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -2000,78 +1994,82 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
             marginTop: 8,
           }}
         >
-          {gridNodes.map((n) => (
-            <Fragment key={`wrap-${n.node_id}`}>
-            <OrgNodeCard
-              key={n.node_id}
-              node={n}
-              seatInfo={(() => {
-                /* ★ 按 seatKey 查这一位在 `/roles/seats` 里的读数（工位 → 席位定义 → 实际在座）。
-                   老数据可能没 seatKey ⇒ 用名字里认「签名位」兜底，与卡片本身的判据同源。 */
-                if (seatList === null) return undefined
-                const k = ((n as { seatKey?: string }).seatKey ?? '').length > 0
-                  ? ((n as { seatKey?: string }).seatKey as string)
-                  : (n.name.includes('签名') ? 'signature' : '')
-                return k.length > 0 ? seatList.find((x) => x.seat === k) : undefined
-              })()}
-              busy={busy}
-              editing={editing}
-              editName={editName}
-              setEditName={setEditName}
-              onStartRename={(node) => {
-                setEditing(node.node_id)
-                setEditName(node.name)
-              }}
-              onRename={onRename}
-              onDelete={onDelete}
-              onInvite={() => setInviting(inviting === n.node_id ? null : n.node_id)}
-              onEvict={(seat, agentId) => { void (async () => {
-                const r = await evictSeat(seat, agentId)
-                if (!r.ok) {
-                  /* 失败就别 refresh —— 一刷新就可能把这条错误盖掉 */
-                  const title = r.code === 'seat_vacant' ? '这个位置本来就空着'
-                    : r.code === 'seat_protected' ? '系统内置位，不能请出'
-                    : '请出没成功'
-                  setErr({ code: r.code, message: r.message, source: 'action', title })
-                  return
-                }
-                await refresh()
-                setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位置现在空了`)
-              })() }}
-              inviteOpen={inviting === n.node_id}
-            />
-            {inviting === n.node_id && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <InviteBar
-                  node={n}
-                  made={madeBy[n.node_id] ?? null}
-                  onMade={(v) => setMadeBy((prev) => ({ ...prev, [n.node_id]: v }))}
+          {/* ★★★ 2026-10-26 最终口径：**恒定 10 格**，前 6 格系统位先落座。
+              每格要么是「有节点的座位卡」，要么是「空位」——
+              不再区分「6 张卡片 + 4 个补位」，而是「10 个座位，前 6 个坐着系统位」。 */}
+          {gridCells.map((cell, idx) => {
+            const n = cell.node
+            if (n === undefined) {
+              /* 空格：系统位未落座 or 自建空位 —— 两种都渲染成同一个空位块。
+                 ★ canAdd 只给最后一格（追加位置从末尾长出来，不从中间插）。 */
+              return (
+                <EmptySeat
+                  key={`empty-${idx}`}
+                  canAdd={idx === gridCells.length - 1}
+                  busy={busy}
+                  onAdd={(name) => { setDraft(name); void (async () => {
+                    const r = await createOrgNode(name)
+                    if (!r.ok) setErr({ code: r.code, message: r.message })
+                    await refresh()
+                  })() }}
                 />
-              </div>
-            )}
-            </Fragment>
-          ))}
-          {/* ★★ 2026-10-26 阿开：「两行一行 5 个座位，6 个系统默认工位」
-              ⇒ 补空位到**整行**（6 座位 ⇒ 补 4 个 = 两行各 5）。
-             原来写 `10 - gridNodes.length`：6 个座位补 4 个恰好对，但 7 个座位会补 3 个
-             ⇒ 第二行只有 2 个，右边空着，不成「一行 5 个」。
-             `emptySeatSlots` 按行算，任何座位数都补齐整行。 */}
-          {Array.from({ length: emptySeatSlots(gridNodes.length) }).map((_, i) => (
-            <EmptySeat
-              key={`empty-${i}`}
-              canAdd={i === 0}
-              busy={busy}
-              onAdd={(name) => { setDraft(name); void (async () => {
-                const r = await createOrgNode(name)
-                if (!r.ok) setErr({ code: r.code, message: r.message })
-                await refresh()
-              })() }}
-            />
-          ))}
+              )
+            }
+            return (
+              <Fragment key={`wrap-${n.node_id}`}>
+              <OrgNodeCard
+                node={n}
+                seatInfo={(() => {
+                  /* ★ 按 seatKey 查这一位在 `/roles/seats` 里的读数。
+                     ★ 这里用 `cell.seatKey`（卡座算出来的），不用节点字段 ——
+                       保证「卡片显示的那一类」与顶部席位表是同一个来源。 */
+                  if (seatList === null) return undefined
+                  return cell.seatKey.length > 0
+                    ? seatList.find((x) => x.seat === cell.seatKey)
+                    : undefined
+                })()}
+                busy={busy}
+                editing={editing}
+                editName={editName}
+                setEditName={setEditName}
+                onStartRename={(node) => {
+                  setEditing(node.node_id)
+                  setEditName(node.name)
+                }}
+                onRename={onRename}
+                onDelete={onDelete}
+                onInvite={() => setInviting(inviting === n.node_id ? null : n.node_id)}
+                onEvict={(seat, agentId) => { void (async () => {
+                  const r = await evictSeat(seat, agentId)
+                  if (!r.ok) {
+                    /* 失败就别 refresh —— 一刷新就可能把这条错误盖掉 */
+                    const title = r.code === 'seat_vacant' ? '这个位置本来就空着'
+                      : r.code === 'seat_protected' ? '系统内置位，不能请出'
+                      : '请出没成功'
+                    setErr({ code: r.code, message: r.message, source: 'action', title })
+                    return
+                  }
+                  await refresh()
+                  setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位置现在空了`)
+                })() }}
+                inviteOpen={inviting === n.node_id}
+              />
+              {inviting === n.node_id && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <InviteBar
+                    node={n}
+                    made={madeBy[n.node_id] ?? null}
+                    onMade={(v) => setMadeBy((prev) => ({ ...prev, [n.node_id]: v }))}
+                  />
+                </div>
+              )}
+              </Fragment>
+            )
+          })}
         </div>
-        {gridNodes.length > 10 ? (
-          <div style={{ fontSize: FS.small, color: C.dim, marginTop: 6 }}>
-            还有 {gridNodes.length - 10} 个位置未显示（先显示前 10 个）
+        {strayNodes.length > 0 ? (
+          <div style={{ fontSize: FS.tag, color: C.dim, marginTop: 6 }}>
+            另有 {strayNodes.length} 个非座位节点在下方「未归属」区（不属于卡座）
           </div>
         ) : null}
 

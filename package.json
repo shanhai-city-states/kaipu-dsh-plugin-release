@@ -1,6 +1,6 @@
 {
   "name": "@shanhai/kaipu-workspace",
-  "version": "0.2.94",
+  "version": "0.2.95",
   "private": true,
   "license": "MIT",
   "//license": "★ 本字段【必须在】—— 2026-10-07 补回，防的是『每出一版包就抹掉它一次』。两点事实：① 它在**发布面里**（公开仓根 package.json，npm 与仓首页都读它）；② 服务端 2026-10-07 落仓通知点名『v3 的 package.json 未含 license 字段』，且他们已在自己仓内补回（`4a48d7b` 起就有）⇒ **我方若继续不带，就会反复把它冲掉**。值取 `MIT`，依据已定口径（在『是否允许他人商用』拍板前，投稿件按 MIT 元数据走）。★ 相对地：`packages/contract` 是**排除面、不上市场** ⇒ **刻意不写**（理由见该包 package.json 的 `//license`）。判据：`tools/emit-release-snapshot.mjs` 自检段断『发布面里每个 package.json 都有 license 字段』—— 删掉本行它会**当场红**（已证）。",
