@@ -1842,17 +1842,6 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
       ) : (
         <>
 
-        {/* ★★ 2026-10-26 阿开（第二轮纠正）：「生成工位邀请码改回去，是我没讲清楚
-           —— 我指的是点开之后的（24 小时 / 1张2张3张 / 🔑 生成工位加入码）在底部，
-           改到上方顶部下方」。
-           ⇒ 上一版我把**入口按钮**挪了位置、卡片仍折叠；这次改成：
-              席位总览行正下方**常显整块 JoinCodeCard**（含 时长/张数/生成按钮/待用码列表），
-              不再需要「点开」这一步。
-           ★ 为什么常显：这块本来就是铺主最常用的一段（发码、看还剩几张、续期、作废），
-             藏在折叠后面等于每次都要点一下；工位页已经收掉了底部只读席位表，
-             版面腾得出来。
-           ★ 视线顺序：几个位/坐几人/还空几个 → 空位就在眼前 → 下面是发码。 */}
-        <JoinCodeCard compact />
 
         <div
           style={{
@@ -6429,6 +6418,11 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
   /** 同意后就地出的新码（不跳页 —— AC-09）· 只存在内存 */
   const [issued, setIssued] = useState<{ requestId: string; code: string } | null>(null)
   const [issuedCopied, setIssuedCopied] = useState(false)
+  /** ★★ 2026-10-26 阿开：「以下的默认折叠」⇒ 历史码列表默认收起。
+      常显的只有「手上的码  待用 0 / 3  刷新」这一行；码明细要点开才看。
+      为什么：31 条历史码摊开，把工位页撑得很长，日常只看「还剩几张能用」。
+      ★ 默认 false = 收起（他要的就是「以下的默认折叠」）。 */
+  const [codesOpen, setCodesOpen] = useState(false)
   /** 拒绝：就地展开理由输入框（★ 不用 window.confirm —— DSH 宿主里不可靠） */
   const [rejectFor, setRejectFor] = useState<string>('')
   const [rejectWhy, setRejectWhy] = useState<string>('')
@@ -6906,13 +6900,23 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
               padding: '6px 8px', borderRadius: 8, background: '#fff',
               border: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 2,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: FS.tag, color: C.dim }}>
+              <div
+                onClick={() => setCodesOpen((v) => !v)}
+                title={codesOpen ? '收起码明细' : '展开看全部码（含已用/作废/过期）'}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, fontSize: FS.tag,
+                  color: C.dim, cursor: 'pointer', userSelect: 'none',
+                }}
+              >
                 <span style={{ fontWeight: 600, color: C.text }}>手上的码</span>
                 <span>待用 {pendingCodes} / {PENDING_LIMIT}</span>
+                <span style={{ fontSize: FS.tag, color: C.dim }}>
+                  {codesOpen ? '收起 ▴' : `展开全部 ${codeRows.length} 条 ▾`}
+                </span>
                 <span style={{ flex: 1 }} />
                 <button
                   type="button"
-                  onClick={() => refreshCodes()}
+                  onClick={(e) => { e.stopPropagation(); refreshCodes() }}
                   style={{
                     padding: '1px 4px', background: 'transparent', border: 'none', cursor: 'pointer',
                     fontSize: FS.tag, color: C.dim, fontFamily: 'inherit',
@@ -6920,7 +6924,7 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
                   }}
                 >刷新</button>
               </div>
-              {codeRows.map((row) => {
+              {codesOpen ? codeRows.map((row) => {
                 const view = codeRowView(row, codePlain[row.codeHash] ?? '', Date.now())
                 return (
                   <div
@@ -6974,7 +6978,7 @@ function JoinCodeCard({ compact }: { compact?: boolean }): ReactElement {
                     ) : null}
                   </div>
                 )
-              })}
+              }) : null}
             </div>
           ) : (
             <div style={{ fontSize: FS.tag, color: C.dim }}>
