@@ -185,3 +185,134 @@ export interface WorkstationStatusPayload {
   /** ★ 如实说明初始版本是 scaffold 种子（不是故障、不是 live） */
   note?: string
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * 管理助理授权（承响石 018 号方案 + A/B/C/D 拍板）
+ * ═══════════════════════════════════════════════════════════════════════
+ * ★ 三个概念分开，不许混写：
+ *   · 座位（seat）      = 这人在哪个位子上（静态归属，如 management_assistant）
+ *   · 授权（grant）     = 这份代管权**何时到期**（动态租约，有 ttl）
+ *   · 派生权限（tier）  = `effective_authority()` 按授权**实时**算出来的
+ *   ⇒ 界面读 `tier/via`（派生），不读 seat 猜权限。
+ */
+
+/** 一张授权单 —— 代管权的租约实体 */
+export interface GrantRow {
+  grantId: string
+  /** 被授权人（谁替你管） */
+  granteeId: string
+  granteeName: string
+  /** 授予人（铺主本人） */
+  grantedBy: string
+  /** 租约时长（小时）· 档位见 `GrantListPayload.ttlOptions` */
+  ttlHours: number
+  createdAt: string
+  expiresAt: string
+  /** 剩余秒数（服务端算，客户端不自己减 —— 防时钟漂移各算各的） */
+  remainingSeconds: number
+  /** 状态：`available`（码已生成·还没人兑换）| `active`（代管中）| `expired` | `revoked`
+   *  ★ 2026-10-23（083 单 G-1）：新增 `available` —— 授权码已生成但**还没被兑换**。
+   *    这一档 `granteeId/granteeName` 是空的（还不知道会是谁），界面显示「已生成·未兑换」。 */
+  status: string
+  note?: string
+  /** ★ 2026-10-23（G-1）：**码本身**的失效时间（7 天）。
+   *  与 `expiresAt`（代管到期）是两件事：码 7 天内可用；代管从兑换那一刻起算 ttl。 */
+  codeExpiresAt?: string
+  /** ★ 2026-10-23（G-1）：这张单怎么来的 —— `code`（授权码兑换）/ `direct`（直传 granteeId） */
+  via?: string
+}
+
+/** ★ 2026-10-23（083 单 G-1）：`/grants/generate` 的返回 —— **明文码只出现这一次** */
+export interface GrantCodeIssued {
+  grantId: string
+  /** `SHANHAI-GRANT-XXXX-XXXX` · 库内只存 SHA256(code) */
+  code: string
+  /** 码的有效期截止（生成 + 7 天） */
+  codeExpiresAt: string
+  /** 兑换后能代管多久（小时） */
+  ttlHours: number
+}
+
+/** `grantList` 出参 */
+export interface GrantListPayload {
+  grants: GrantRow[]
+  /** 可选档位（24 / 72 / 168 小时）· 由服务端下发，客户端不硬编码 */
+  ttlOptions: number[]
+  accountId: string
+}
+
+/** `grantCreate` 出参 */
+export interface GrantCreated {
+  grantId: string
+  granteeId: string
+  ttlHours: number
+  createdAt: string
+  expiresAt: string
+  remainingSeconds: number
+  /** ★ 到期后落到哪个位子（D 案：转执行位 —— 人还在铺子里，权限收回） */
+  seatAfterExpiry: string
+  note: string
+}
+
+/** 授权留痕事件（谁·代谁·何时·做了什么） */
+export interface GrantEvent {
+  action: string
+  actor: string
+  onBehalfOf: string
+  at: string
+  detail?: string
+}
+
+/** `grantRevoke` / `grantEvents` 出参 */
+export interface GrantEventsPayload {
+  grantId: string
+  events: GrantEvent[]
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * ★★ 2026-10-24 · 邀请码补发闭环（083 第一批 · 块 A）
+ *
+ * 背景（星月任务书 §〇 · ②）：`consume_device_join_code()` 是**消费型**，
+ * 拿旧码去校验会把 `used_at` 写死 ⇒ 申请人反而把自己最后一张码烧了。
+ * 后端已补 `verify_join_code_no_consume()`；前端只按 §二 的契约对接，不碰服务端。
+ *
+ * 两种身份、两套视图（同一组件内分）：
+ *   · 铺主   —— `GET /join/requests?status=pending`（200）⇒ 审批面板 + 红点数
+ *   · 申请人 —— 该接口 403 `not_owner` ⇒ 只看自己那张申请的状态
+ * ⇒ 用「列表能不能读」判身份，**不额外要一个 whoami-role 接口**
+ *   （服务端契约只有 5 个端点，多要一个就要等一轮）。
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/** 待审批条目（`GET /join/requests?status=pending` 的 items 元素） */
+export interface JoinRequestRow {
+  requestId: string
+  nodeId?: string
+  seat?: string
+  applicantName?: string
+  /** human | agent */
+  applicantKind: string
+  reason?: string
+  createdAt?: string
+}
+
+/** `joinRequests` 出参 */
+export interface JoinRequestListPayload {
+  items: JoinRequestRow[]
+  count: number
+}
+
+/** `joinRequestGet` / `approve` 出参（`joinCode` 只在 approved 时有值） */
+export interface JoinRequestStatusPayload {
+  requestId: string
+  /** pending | approved | rejected | expired */
+  status: string
+  joinCode?: string
+  decidedAt?: string
+}
+
+/** `joinRequestCreate` 出参（201） */
+export interface JoinRequestCreated {
+  requestId: string
+  status: string
+  expiresAt?: string
+}

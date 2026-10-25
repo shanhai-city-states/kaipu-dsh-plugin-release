@@ -1,7 +1,6 @@
-url: https://github.com/shanhai-city-states/kaipu-dsh-plugin-release/tree/main/packages/plugin-platform
-name: shanhai-city-states/kaipu-dsh-plugin-release#plugin-platform
-category: workflow
-description:
-  en: "Sidebar panel for store-opening audits in DeepSeek Harness: a scene/run list beside a run-view and report surface. Scaffold release, data wiring lands in a later version."
-  zh: "山海·开铺 场地插件：开铺审计的侧边面板，场景／运行记录与运行视图／报告两栏。当前为骨架版，数据接入在后续版本。"
-tarball: https://github.com/shanhai-city-states/kaipu-dsh-plugin-release/releases/latest/download/kaipu-platform.tgz
+- 常用模型：问题拆解 → 假设验证 → 故障收敛 → 闭环验证。
+- 实际案例：本次“五盏灯修复”事件。问题：手机端选题报错。假设：DeepSeek API 被国内网络阻断。验证：服务器直连通，手机端不通。修复：搭建服务器代理中转，逐一补全 Nginx 规则，强力重启后端。闭环：无痕模式验证五盏灯全亮。
+- 核心原则：每一步都有据可查，有路可退。技术推演不绕路、不猜谜。
+习惯不在人格里，而在「人格 × 负载 × 记忆结构 × 协作对象」。
+-----------------------------------------------------------------------
+

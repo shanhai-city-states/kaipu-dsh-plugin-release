@@ -93,8 +93,48 @@ const walk = (dir) =>
  *     而常量只在 2026-10-19 那次手改成 74 —— 之后没同步 ⇒ 自检从那版起就是红的。
  *   · 依据：以**已发布面**为基准对账（同一把尺子量两次），不是把数字改成恒真；
  *     若将来真新增/删件，仍须逐件说明。
+ * ★★ 2026-10-24 变更 **77 → 79**（083 两批：邀请码补发闭环 + 派活点名通知）：
+ *   · 新增 2 件，都是**工位 client 源码**，都会被 `build-client.mjs` 打进 `lib/client.js`：
+ *       `packages/plugin-workstation/src/client/join-copy.ts`   （083 第一批 · 邀请码补发闭环）
+ *       `packages/plugin-workstation/src/client/notify-copy.ts` （083-r1 · 派活点名通知）
+ *   · 为什么要把这两块拆成独立文件：把「判断」从「渲染」里分出来，判据才能**直接 import 产物**
+ *     跑输入→输出（星月 R-6：对着源码 grep 关键词 = 逻辑必然 0 命中，那不是通过、是没测）。
+ *     拆文件是「判据可执行」的前提，不是为了拆而拆。
+ *   · 同时补一笔**漏账**：77 这个数从 0.2.81（`join-copy.ts` 加入）起实际已是 78，
+ *     上一轮发版没跑本工具 ⇒ 自检红着也没人看见。现按实际件数对齐到 79。
+ *   · 依据同前：按「**扫描面 = 发布面全集**」自动进面，不是为了让判据变绿改数字。
+
+ * ★★ 2026-10-24 变更 **79 → 81**（083-r2 邀请码列表化 + 083-r3 派活绑定工位）：
+ *   · 新增 2 件，同为**工位 client 源码**（都会被 `build-client.mjs` 打进 `lib/client.js`）：
+ *       `packages/plugin-workstation/src/client/invite-code.ts` （083-r2 · 码列表/额度/明文留存判断）
+ *       `packages/plugin-workstation/src/client/node-pick.ts`   （083-r3 · 工位图序号/姓名/三态口径）
+ *   · 拆成独立文件的理由与上次相同：判断要能被判据 import 后喂输入看输出。
+ *     083-r3 还多一层：缩小版工位图与工位页必须**共用同一组取数函数**（seq / holders[].name），
+ *     两处各写一份必然慢慢跑偏 —— 而这一条正是阿开最在意的「不需要切换界面去核对」。
+ *   · 依据同前：「扫描面 = 发布面全集」，自动进面，不是为了让判据变绿改数字。
+
+ * ★★ 2026-10-24 变更 **81 → 82**（工位两项改造）：
+ *   · 新增 1 件 `packages/plugin-workstation/src/client/grant-copy.ts`
+ *     （临时代管授权码区的剩余天数/过期/整段复制话术；判据要喂输入看输出，故独立成文件）。
+ *   · 依据同前：「扫描面 = 发布面全集」，自动进面，不是为了让判据变绿改数字。
+ *
+ * ★★ 2026-10-26 变更 **82 → 83**（工位三处可用性改造 · 阿开实报）：
+ *   · 新增 1 件 `packages/plugin-workstation/src/client/seat-summary.ts`
+ *     （席位数量总览：`countSeatTypes` / `seatSummary` / `seatBadge` / `resolveSeatKey`）。
+ *     · 为什么进：它是 `WorkstationPanel.tsx` **import 的运行时依赖**，
+ *       被 `build-client.mjs` 打进 `lib/client.js` —— 而 `lib/client.js` 就是上架的产物
+ *       ⇒ 按「扫描面 = 发布面全集」**自动进面**。
+ *     · 为什么独立成文件：判断要能被判据 import 后喂输入看输出。
+ *       本轮 28 条判据里有 20 条是纯输入→输出（含未知席位不改名、occupants 多人去重、
+ *       空列表空进空出）；写在 JSX 里就只能靠肉眼看截图，那种「验证」等于没验。
+ *     · 实测：两次注入（改错 label / 破坏 unknown 保护）均真变红，还原后回绿。
+ *   · 依据同前：**同一条规矩**，不是新裁定，也不是为了让判据变绿改数字。
+ *   ⚠️ 本件是被脚本**当场报 `✗ 否（83）`** 才发现的 —— 与 52→53、53→54、81→82 同一情形：
+ *     新增 client 模块 ⇒ 自动进面 ⇒ 期望值过期。**过期了就该改**，
+ *     否则这个判据会长期红，然后被当成噪声忽略。
  */
-const RELEASE_FILE_COUNT = 77
+const RELEASE_FILE_COUNT = 83
+
 
 /** 工坊 `053 §五` 白名单（初定 50 件 · 现值见上 `RELEASE_FILE_COUNT` 的变更说明） */
 const WHITELIST = [

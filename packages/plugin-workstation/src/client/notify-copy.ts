@@ -127,12 +127,37 @@ export function extraHolderTitle(holderCount: number): string {
 }
 
 /**
- * 「有人坐着，但读不到是谁」的提示。
- * 条件：席位被占（seatCount > 0）却没有 holder 记录 —— 这是**异常**，
- * 不是「空位」。以前这种会退化成只显示工位名，看着像没人，与事实相反。
+ * 「有人坐着，但读不到是谁」的提示 —— ★★ 2026-10-26 收窄条件（阿开实测）。
+ *
+ * ## 改前（假阳性满屏）
+ * 条件只有 `seatCount > 0` —— 而 `seat_count` 是**服务端算的「这个工位绑了几个席位」**，
+ * 它回答的是「这个位存在吗」，**不是「有没有人坐」**。
+ *
+ * 后果（阿开截图实证）：
+ *   · 审计位 `seat_count=1`（席位定义还在），但 3 个 Agent 全是 `left` ⇒ 一个真人都没有
+ *   · 签名位 `seat_count=1`（山海签名服务这个平台席位），天生**不对外入驻**
+ *   ⇒ 两张卡都显示「有人，但读不到是谁」，把「空着」说成「有人但看不见」。
+ *   这是**把位的定义当成了人的在场**，与本轮 `holder` 那个 bug 同族。
+ *
+ * ## 改后
+ * 只有「**确实有人被记着、却取不到名字**」才是真异常。要区分三件事：
+ *   ① `holderCount > 0`                  → 正常，有名字，不提示
+ *   ② `seatCount > 0` 且 **席位被标为空** → 老实说「空位」，不许说「有人」
+ *   ③ 席位没被标空、又没有任何 holder 记录 → 这才是「有人但读不到」
+ *
+ * @param holderCount    取到的在座者条数
+ * @param seatCount      这个工位绑定的席位数（位的定义，不是人数）
+ * @param seatVacantish  ★ 席位侧是否明确表示「空」/「不可入驻」（来自 role_seats 的状态）
  */
-export function holderUnknownText(holderCount: number, seatCount: number): string {
+export function holderUnknownText(
+  holderCount: number,
+  seatCount: number,
+  seatVacantish: boolean = false,
+): string {
   if (holderCount > 0) return ''
   if (!Number.isFinite(seatCount) || seatCount <= 0) return ''
+  /* ★ 席位自己说「空着 / 不可入驻」⇒ 就是空位，不是「读不到」。
+     签名位（cap=0）属于「不可入驻」，它的人（山海签名服务）不是 Agent，不该被当成人报。 */
+  if (seatVacantish) return ''
   return '有人，但读不到是谁'
 }

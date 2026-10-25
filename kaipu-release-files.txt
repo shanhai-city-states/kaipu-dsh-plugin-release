@@ -59,9 +59,15 @@ packages/plugin-workstation/scripts/kai-pu-upload.mjs
 packages/plugin-workstation/src/client/WorkstationPanel.tsx
 packages/plugin-workstation/src/client/WorkstationPanelIcon.tsx
 packages/plugin-workstation/src/client/bridge.ts
+packages/plugin-workstation/src/client/grant-copy.ts
 packages/plugin-workstation/src/client/index.ts
+packages/plugin-workstation/src/client/invite-code.ts
+packages/plugin-workstation/src/client/join-copy.ts
 packages/plugin-workstation/src/client/live.ts
+packages/plugin-workstation/src/client/node-pick.ts
+packages/plugin-workstation/src/client/notify-copy.ts
 packages/plugin-workstation/src/client/panel-id.ts
+packages/plugin-workstation/src/client/seat-summary.ts
 packages/plugin-workstation/src/client/theme.ts
 packages/plugin-workstation/src/client/version.ts
 packages/plugin-workstation/src/index.ts
