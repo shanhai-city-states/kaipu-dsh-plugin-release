@@ -131,6 +131,38 @@ async function readInTgz(tgz, inner) {
   return r.code === 0 ? r.out : null
 }
 
+/**
+ * ★ 从包内提取 `PLUGIN_VERSION = "x.y.z"` 的实际值
+ * ------------------------------------------------------------------
+ * 为什么不能只看 `dist/*.tgz` 的文件名或包内 package.json：
+ *   两者都可能是人工改对的，而**真正跑在客户机器上的**是编译进
+ *   `lib/client.js` / `lib/index.js` 的那个字符串常量。
+ *   本判据就是为「package.json 已 0.2.112、代码里还是 0.2.111」这一型而设。
+ * ⚠️ **不是每个包都有这个常量**（实测：platform / wisdom-team 没有，
+ *   只有 workstation 有）⇒ 返回三态，`absent` 表示「本包不适用」，判据要跳过，
+ *   不能当失败。用 null 表示失败会把两个正常的包误报成红的（本判据第一版就栽在这）。
+ * 返回：{ state:'ok', ver } | { state:'absent' } | { state:'bad', why }
+ */
+async function PLUGIN_VERSION_inTgz(tgz) {
+  const files = ['lib/client.js', 'lib/index.js']
+  const found = new Set()
+  let sawAnyFile = false
+  for (const f of files) {
+    const txt = await readInTgz(tgz, f)
+    if (!txt) continue
+    sawAnyFile = true
+    /* ★ 只认「赋值给字面量」这一种；`PLUGIN_VERSION = void 0`（TS 降级占位）
+       与 `import ... PLUGIN_VERSION` 都不计入 —— 见本判据第一版误报的教训。 */
+    const re = /PLUGIN_VERSION\s*=\s*["']([0-9]+\.[0-9]+\.[0-9]+)["']/g
+    let m
+    while ((m = re.exec(txt)) !== null) found.add(m[1])
+  }
+  if (!sawAnyFile) return { state: 'bad', why: '包内 lib/client.js 与 lib/index.js 都读不出来' }
+  if (found.size === 0) return { state: 'absent' }
+  if (found.size > 1) return { state: 'bad', why: `包内出现多个版本值：${[...found].join(' / ')}` }
+  return { state: 'ok', ver: [...found][0] }
+}
+
 /** 仓内某目录下 lib/** 的文件名（相对包目录）*/
 function listLibInRepo(pkgDir) {
   const base = join(ROOT, 'packages', pkgDir, 'lib')
@@ -232,6 +264,28 @@ for (const spec of SPECS) {
 
   const missing = inRepo.filter((f) => !inTgz.includes(f))
   const extra = inTgz.filter((f) => !inRepo.includes(f))
+
+  /* ── ★★ 版本常量核验（2026-10-26 实测踩到，本判据原本抓不到）───────────────
+     症状：客户装的是 0.2.112，插件却每次提示「v0.2.111 → v0.2.112 有更新」。
+     根因：发版只改了 `package.json` 和 `data/plugin-version.json`，**没重跑 build.mjs**
+           ⇒ `src/{client,remote}/version.ts` 仍是旧号 ⇒ 打进 dist 的
+           `PLUGIN_VERSION` 是旧值 ⇒ 客户端**自报旧号**，服务端判「有更新」。
+     ★ 为什么本脚本原来的判据抓不到：它比对的是「包内 lib/** ↔ 仓内 lib/**」，
+       而**仓内 lib/ 自己就是旧的**（build 没重跑）⇒ 两边一致 ⇒ 全绿。
+       「同源」不等于「正确」—— 两边一起错，判据看不出。
+     ⇒ 所以必须另拿一个**独立的真值**来比：`packages/<dir>/package.json` 的 version。
+       它与 `plugin-version.json` 是发版时人工同步的，是唯一不经过 build 的源头。 */
+  const pkgJsonPath = join(ROOT, 'packages', spec.dir, 'package.json')
+  let declaredVer = null
+  try {
+    declaredVer = String(JSON.parse(readFileSync(pkgJsonPath, 'utf8')).version ?? '')
+  } catch { /* 下面按「取不到」处理 */ }
+  const vprobe = await PLUGIN_VERSION_inTgz(tgz)
+  const verOk = vprobe.state === 'absent' || (vprobe.state === 'ok' && Boolean(declaredVer) && vprobe.ver === declaredVer)
+  const verNote = vprobe.state === 'absent'
+    ? `（本包无 PLUGIN_VERSION 常量，跳过版本比对）`
+    : (vprobe.state === 'ok' && verOk ? ` · v${vprobe.ver}` : '')
+
   const diff = []
   for (const f of inRepo.filter((x) => inTgz.includes(x))) {
     const a = await readInTgz(tgz, f)
@@ -244,14 +298,17 @@ for (const spec of SPECS) {
     ? readFileSync(join(ROOT, 'packages', spec.dir, 'lib', 'client.js')).length
     : 0
 
-  const ok = missing.length === 0 && extra.length === 0 && diff.length === 0
+  const ok = missing.length === 0 && extra.length === 0 && diff.length === 0 && verOk
   say(
     ok,
     `${spec.asset} ↔ packages/${spec.dir}/lib`
-      + `${ok ? ` 同源（${inTgz.length} 件 · client.js ${sizeIn} B）` : ''}`
+      + `${ok ? ` 同源（${inTgz.length} 件 · client.js ${sizeIn} B${verNote}）` : ''}`
       + `${missing.length > 0 ? `\n      ✗ 仓内有、包内缺 ${missing.length} 件：${missing.slice(0, 4).join(', ')}` : ''}`
       + `${extra.length > 0 ? `\n      ✗ 包内有、仓内无 ${extra.length} 件：${extra.slice(0, 4).join(', ')}` : ''}`
       + `${diff.length > 0 ? `\n      ✗ 内容不一致 ${diff.length} 件：${diff.slice(0, 4).join(', ')}` : ''}`
+      + `${!verOk ? `\n      ✗ **版本常量对不上**：包内 PLUGIN_VERSION=${vprobe.state === 'ok' ? vprobe.ver : (vprobe.why ?? '取不到')} ｜ packages/${spec.dir}/package.json=${declaredVer ?? '取不到'}`
+          + `\n        ⇒ 客户装完后**自报旧号**，服务端每次判「有更新」，无限提示卸载重装。`
+          + `\n        修：node tools/build.mjs（把 package.json 的 version 写进 src/*/version.ts）⇒ node tools/pack-release.mjs` : ''}`
       + `${!ok ? `\n      ⇒ 这个包是**旧的**。★ 拿它上架 = 用户装到旧版（且市场条目看起来完全正常）。\n        重打：node tools/pack-release.mjs` : ''}`
       + `${!ok && sizeIn !== sizeRepo ? `\n      · 体量对照：包内 client.js ${sizeIn} B ｜ 仓内 ${sizeRepo} B` : ''}`,
   )

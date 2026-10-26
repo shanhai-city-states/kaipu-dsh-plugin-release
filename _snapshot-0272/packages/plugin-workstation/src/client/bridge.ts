@@ -82,23 +82,8 @@ export const ENDPOINTS = {
   tasksUnblock: 'tasksUnblock',
   /** 强行指派（期5b-2 接 UI，本轮只开通道）· `POST /tasks/{id}/assign` */
   tasksAssign: 'tasksAssign',
-  /** 加依赖 · `POST /tasks/{id}/deps` */
+  /** 加依赖（期5b-2 接 UI，本轮只开通道）· `POST /tasks/{id}/deps` */
   tasksDeps: 'tasksDeps',
-  /* ── ★★ 2026-10-26「Agent 版 OA」三件套接线 ──
-     `tasksDeps` 那条注释原本写着「期5b-2 接 UI，本轮只开通道」——
-     这只通道躺了整整一轮没人接，UI 从没做出来（本轮盘点才发现）。
-     ⇒ 现在补齐「读 / 删 / 交付版本」，并把注释里的「本轮只开通道」去掉：
-        通道开着但没人用，比没开更危险 —— 它让后来人以为功能已经有了。 */
-  /** 读任务依赖（前置 + 后继 + 能不能领）· `GET /tasks/{id}/deps` */
-  tasksDepsList: 'tasksDepsList',
-  /** 撤一条依赖（会立刻放行后继）· `DELETE /tasks/{id}/deps/{dep}` */
-  tasksDepsDelete: 'tasksDepsDelete',
-  /** 推进项目阶段 · `PATCH /projects/{id}/phase` */
-  projectPhaseSet: 'projectPhaseSet',
-  /** 读交付版本 · `GET /tasks/{id}/deliverables` */
-  deliverablesList: 'deliverablesList',
-  /** 指定最终稿（回退用）· `POST /tasks/{id}/deliverables/{did}/promote` */
-  deliverablePromote: 'deliverablePromote',
   /** HITL 审批通过 · `POST /tasks/{id}/approve` */
   tasksApprove: 'tasksApprove',
   /** HITL 驳回 · `POST /tasks/{id}/reject` */
@@ -127,44 +112,15 @@ export const ENDPOINTS = {
   /* ── ★ 座位与邀请（真实数据）── */
   /** 本铺真实席位 · `GET /roles/seats` */
   rolesSeats: 'rolesSeats',
-  /* ── ★★ 2026-10-23 · 管理助理授权（承响石 018 号方案 A/B/C/D 拍板）── */
-  /** 授权台账 · `GET /grants` */
-  grantList: 'grantList',
-  /** 授予 · `POST /grants` */
-  grantCreate: 'grantCreate',
-  /** ★ 2026-10-23（G-1）：生成授权码 · `POST /grants/generate`（明文码只回一次） */
-  grantGenerate: 'grantGenerate',
-  /** 收回 · `POST /grants/{gid}/revoke` */
-  grantRevoke: 'grantRevoke',
-  /** 授权流水 · `GET /grants/{gid}/events` */
-  grantEvents: 'grantEvents',
   /** 生成邀请 · `POST /invites` */
   inviteCreate: 'inviteCreate',
   /** ★ 2026-10-21：签发一次性「设备加入码」· `POST /device-join-codes` */
   deviceJoinCodeCreate: 'deviceJoinCodeCreate',
-  /* ── ★★ 2026-10-24 · 邀请码补发闭环（083 第一批·块 A · 5 端点）──
-     ★ 这四个（+get）是**申请人自助补发**那条链的全部后端口子；
-       前端一个都不许自己拼 URL —— 一律过 host（凭据纪律 + 指纹在 host 侧）。 */
-  /** 铺主看待审批列表 · `GET /join/requests?status=pending` */
-  joinRequests: 'joinRequests',
-  /** 申请人查自己那张 · `GET /join/request/{id}` */
-  joinRequestGet: 'joinRequestGet',
-  /** 提交补发申请（无鉴权，靠旧码/指纹自证）· `POST /join/request` */
-  joinRequestCreate: 'joinRequestCreate',
-  /** 同意（仅铺主）· `POST /join/request/{id}/approve` */
-  joinRequestApprove: 'joinRequestApprove',
-  /** 拒绝（仅铺主）· `POST /join/request/{id}/reject` */
-  joinRequestReject: 'joinRequestReject',
   /** 设备台账（= 白名单）· `GET /devices` */
   devicesList: 'devicesList',
   /** 撤销 / 恢复一台设备 · `POST /devices/{fp}/revoke` */
   deviceRevoke: 'deviceRevoke',
   deviceResetSecret: 'deviceResetSecret',
-  /* ── ★★ 2026-10-24（083-r2）· 邀请码列表化：看 / 作废 / 续期 ──
-     ★ 列表不发明文（服务端只存 hash），作废与续期都按 codeHash 定位。 */
-  deviceJoinCodes: 'deviceJoinCodes',
-  deviceJoinCodeRevoke: 'deviceJoinCodeRevoke',
-  deviceJoinCodeRenew: 'deviceJoinCodeRenew',
   /** 设备进出流水 · `GET /devices/events` */
   deviceEvents: 'deviceEvents',
 

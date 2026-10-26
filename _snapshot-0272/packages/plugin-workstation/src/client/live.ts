@@ -138,21 +138,8 @@ export interface OrgNodeView {
   origin?: string
   /** ★ 工位编号（沟通用「几号工位」）—— 服务端按创建顺序分配，删除不回收 */
   seq?: number
-  /** ★ 谁坐在这里（服务端按 agents.lamp ↔ role_seats.seat 归位）
-   *  ★ 2026-10-24（083-r2）：新增 `joinState` 三态（present/joined/invited）——
-   *    原来只有 `online` 一个布尔，分不出「离线」与「压根没来」。 */
-  holders?: Array<{
-    agentId: string; name: string; seat: string; seatLabel?: string; online?: boolean
-    lastSeen?: string | null; joinState?: string; onRoster?: boolean; hasCred?: boolean
-  }>
-  /** ★ 2026-10-24（083-r2）：邀请发了、人还没来。
-   *  只有 `holders` 为空时它才有意义 —— 人已到就不该再显示「已受邀」。 */
-  /** ★ 2026-10-26（4️⃣）：`expiresAt` 前端要靠它判「码还有效吗」；
-   *  `url` 是给人复制的邀请链接（服务端签发时一并给出）。 */
-  invited?: {
-    lamp?: string; invitedName?: string; invitedAt?: string
-    expiresAt?: string; url?: string
-  } | null
+  /** ★ 谁坐在这里（服务端按 agents.lamp ↔ role_seats.seat 归位） */
+  holders?: Array<{ agentId: string; name: string; seat: string; seatLabel?: string; online?: boolean; lastSeen?: string | null }>
   /** 非空 = 不能删，值就是原因（如「被 4 个席位占用」） */
   undeletable?: string | null
   /** ★ false = 不能改名（位被不可替换的席位占用，如平台签名位） */
@@ -329,66 +316,17 @@ export interface TaskItem {
   projectId?: string | null
   /** ★ 2026-10-21：发布人显示名（工位编号 + 昵称，如「#3 阿里星月」） */
   createdByName?: string
-  /** ★ 2026-10-23（阿开定：不上向量上分类标签）—— 任务性质，**互斥单值**。
-   *  status 是「流程走到哪」，kind 是「这是什么活」。Agent 靠它先分流再细看。 */
-  kind?: 'requirement' | 'delivery' | 'report' | 'test' | 'other'
-  /** ★ 2026-10-23 —— 细分关键词，多值。像 skill 的关键词：命中才跳进去看。 */
-  tags?: string[]
-}
-
-/** 服务端 `groups` 分类分组回体（★ 2026-10-26 补回：此前误删） */
-export interface TaskGroups {
-  byKind: Record<string, TaskGroupBrief[]>
-  byStatus: Record<string, TaskGroupBrief[]>
-  kindCounts: Record<string, number>
-  statusCounts: Record<string, number>
 }
 
 export interface TaskListResult {
   tasks: TaskItem[]
   counts: { open: number; claimed: number; done: number; cancelled: number }
-  /** ★ 2026-10-23：`grouped=true` 时服务端给的分类分组（未请求则为 null） */
-  groups?: TaskGroups | null
-  /** ★ 2026-10-26 台阶⑤（甲案）：过滤后、切片前的全集条数。
-   *  `total` 与 `counts` 口径不同，别混：
-   *    - `counts` 九态分布，从 SQL 全量 `rows` 算（不含 required_tags/tags 过滤）
-   *    - `total` 是本 agent **真正能看到**的条数（Python 侧过滤后）
-   *  前端据 `tasks.length < total` 判「还有下一页」。不传 limit 时 total = 本次条数。 */
-  total?: number
-  limit?: number | null
-  offset?: number
 }
 
-/** 服务端 `groups` 回体（只装最小字段，不含 detail） */
-export interface TaskGroupBrief {
-  taskId: string
-  title: string
-  status: string
-  kind?: string
-  tags?: string[]
-  projectId?: string | null
-  createdAt?: string
-  createdByName?: string
-  fileCount?: number
-}
-
-/** 读任务列表
- *  ★ 2026-10-23：`all` 参数**已失去作用面** —— 服务端改为默认全量返回（含 accepted）。
- *     保留形参只为不破坏调用方签名；传什么都一样。
- *  ★ 2026-10-26 台阶⑤（阿开定甲案）：新增 `page` 分页参数。
- *     ★ 默认不传 ⇒ 服务端全量返回，**前端行为零变化**。
- *       这才是甲案的关键：接口先定型，UI 不做没用的翻页（现在全库只有 5 条任务）。
- *     ★ 分页真正要解决的是**传输量**（每条任务带 detail 正文），不是查询次数 ——
- *       服务端 `count_pack_files_by_iids` 本来就是一条 SQL + GROUP BY（无 N+1）。
- */
-export async function loadTasks(
-  all: boolean,
-  page?: { limit?: number; offset?: number },
-): Promise<OrgResult<TaskListResult>> {
+/** 读任务列表（默认只列未完成） */
+export async function loadTasks(all: boolean): Promise<OrgResult<TaskListResult>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const query: Record<string, unknown> = all ? { all: true } : {}
-  if (page?.limit !== undefined) query.limit = page.limit
-  if (page?.offset !== undefined && page.offset > 0) query.offset = page.offset
   const r = await callKaipu<TaskListResult>(connection, 'tasksList', query)
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
@@ -400,33 +338,11 @@ export async function createTask(
   detail: string,
   projectId?: string,
   interactionId?: string,
-  /** ★ 2026-10-23：任务性质。不传 ⇒ 服务端按标题推断（推断不出来给 other）。 */
-  kind?: string,
-  /**
-   * ★ 2026-10-24（083-r1）：点名通知某个 Agent（传 id）。
-   *   不传/空 ⇒ 公池，与旧行为一致 —— 这是硬约束，默认值不许反过来。
-   *   签名域不受影响：`POST /agent/tasks` 的签名仍是 agent_id|ts|title|isDestructive，
-   *   本字段只走铺主的 `POST /tasks`（Bearer），不进签名。
-   */
-  notifyAgent?: string,
-  /**
-   * ★ 2026-10-24（083-r3）：发到哪个工位（`GET /org/tree` 的 `node_id`）。
-   *   不传/空 ⇒ 公共池，与旧行为一致。
-   *   ★ 必须用 `org/tree` 回的真实 id —— 后端 `tasks.node_id` 与 `role_seats.node_id`
-   *     是两套 UUID 空间，自己拼/写死示例值会静默落进公共池（派单书 §二-2.2 的坑）。
-   */
-  nodeId?: string,
 ): Promise<OrgResult<TaskItem>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const query: {
-    title: string; detail: string; projectId?: string; interactionId?: string
-    kind?: string; notifyAgent?: string; nodeId?: string
-  } = { title, detail }
+  const query: { title: string; detail: string; projectId?: string; interactionId?: string } = { title, detail }
   if (typeof projectId === 'string' && projectId.length > 0) query.projectId = projectId
   if (typeof interactionId === 'string' && interactionId.length > 0) query.interactionId = interactionId
-  if (typeof kind === 'string' && kind.length > 0) query.kind = kind
-  if (typeof notifyAgent === 'string' && notifyAgent.length > 0) query.notifyAgent = notifyAgent
-  if (typeof nodeId === 'string' && nodeId.length > 0) query.nodeId = nodeId
   const r = await callKaipu<TaskItem>(connection, 'tasksCreate', query)
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
@@ -443,12 +359,6 @@ export interface ProjectItem {
   archivedAt?: string | null
   /** 该项目下任务数（服务端子查询） */
   taskCount?: number
-  /** ★★ 2026-10-26 项目阶段（requirement/plan/assignment/build/review/archived）
-   *  —— 「Agent 版 OA」的骨头：项目走到哪一步。
-   *  ★ 服务端老版本没有这个字段 ⇒ 可选，缺省按 'requirement' 显示。 */
-  phase?: string
-  /** 阶段人话名（服务端一并给，前端不再自己维护一份映射） */
-  phaseLabel?: string
 }
 
 /** 读项目清单 */
@@ -471,86 +381,6 @@ export async function createProject(name: string): Promise<OrgResult<ProjectItem
 export async function renameProject(projectId: string, name: string): Promise<OrgResult<{ projectId: string; name: string }>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
   const r = await callKaipu<{ projectId: string; name: string }>(connection, 'projectsRename', { projectId, name })
-  if (r.ok === true) return { ok: true, data: r.data }
-  return orgError(r)
-}
-
-/* ══ ★★ 2026-10-26「Agent 版 OA」三件套的前端入口 ══ */
-
-/** 推进 / 退回项目阶段（服务端只允许 ±1 与「任意 → archived」） */
-export async function setProjectPhase(
-  projectId: string, phase: string,
-): Promise<OrgResult<{ projectId: string; phase: string; from?: string; changed: boolean }>> {
-  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<{ projectId: string; phase: string; from?: string; changed: boolean }>(
-    connection, 'projectPhaseSet', { projectId, phase })
-  if (r.ok === true) return { ok: true, data: r.data }
-  return orgError(r)
-}
-
-export interface TaskDepItem { id: string; title: string; status: string }
-export interface TaskDepsPayload {
-  task_id: string
-  dependsOn: TaskDepItem[]
-  blocks: TaskDepItem[]
-  unmet: number
-  claimable: boolean
-}
-
-/** 读任务依赖（双向：我等谁 / 谁等我 / 现在能不能领） */
-export async function loadTaskDeps(taskId: string): Promise<OrgResult<TaskDepsPayload>> {
-  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<TaskDepsPayload>(connection, 'tasksDepsList', { taskId })
-  if (r.ok === true) return { ok: true, data: r.data }
-  return orgError(r)
-}
-
-/** 加一条依赖（自环 / 成环由服务端 409 拦） */
-export async function addTaskDep(
-  taskId: string, dependsOnTaskId: string,
-): Promise<OrgResult<Record<string, unknown>>> {
-  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<Record<string, unknown>>(connection, 'tasksDeps', { taskId, dependsOnTaskId })
-  if (r.ok === true) return { ok: true, data: r.data }
-  return orgError(r)
-}
-
-/** 撤一条依赖（服务端会立刻放行因它卡住的后继） */
-export async function removeTaskDep(
-  taskId: string, dependsOnTaskId: string,
-): Promise<OrgResult<{ removed: boolean }>> {
-  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<{ removed: boolean }>(connection, 'tasksDepsDelete', { taskId, dependsOnTaskId })
-  if (r.ok === true) return { ok: true, data: r.data }
-  return orgError(r)
-}
-
-export interface DeliverableItem {
-  id: string; version: number; is_final: number; filename: string
-  size: number; sha256: string; interaction_id: string; created_at: string
-}
-export interface DeliverablesPayload {
-  task_id: string
-  versions: number[]
-  count: number
-  finalVersion: number
-  items: DeliverableItem[]
-}
-
-/** 读交付版本（同一个任务交了几稿、哪一稿是最终） */
-export async function loadDeliverables(taskId: string): Promise<OrgResult<DeliverablesPayload>> {
-  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<DeliverablesPayload>(connection, 'deliverablesList', { taskId })
-  if (r.ok === true) return { ok: true, data: r.data }
-  return orgError(r)
-}
-
-/** 指定某一稿为最终稿（新交的那稿改坏了，用它回退） */
-export async function promoteDeliverable(
-  taskId: string, deliverableId: string,
-): Promise<OrgResult<{ version: number }>> {
-  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
-  const r = await callKaipu<{ version: number }>(connection, 'deliverablePromote', { taskId, deliverableId })
   if (r.ok === true) return { ok: true, data: r.data }
   return orgError(r)
 }

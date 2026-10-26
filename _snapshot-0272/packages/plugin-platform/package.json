@@ -1,6 +1,6 @@
 {
   "name": "@shanhai/kaipu-platform",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "山海·开铺 · 场地插件（核心）—— 开铺审计的场地面板：场景／运行记录与运行视图／报告两栏。★ 审计数据需配合山海服务端使用。",
   "license": "MIT",

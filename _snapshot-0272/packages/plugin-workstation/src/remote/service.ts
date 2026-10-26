@@ -25,15 +25,6 @@ import * as dshProtocol from '@deepseek-ai/dsh-typert-protocol'
 // ★ 只 import type —— host half 不经打包，契约包是构建期依赖（用户机上没有），
 //   类型被 tsc 擦除 ⇒ 不产生运行时依赖（由桥接检查脚本看护）。
 import type {
-  GrantCodeIssued,
-  GrantCreated,
-  GrantEvent,
-  GrantListPayload,
-  GrantRow,
-  JoinRequestCreated,
-  JoinRequestListPayload,
-  JoinRequestRow,
-  JoinRequestStatusPayload,
   RemoteResult,
   WorkstationState,
   WorkstationStatusPayload,
@@ -93,23 +84,6 @@ export interface OrgNode {
   org_scope?: string
   cross_scope?: number | string | null
   created_at?: string
-  /** ★ 2026-10-24（083-r3）：工位序号 —— 工位页与发布选择器**都只认这个**，
-   *  不按数组下标、不自己编号（两处显示不一致就是阿开最在意的那个错）。 */
-  seq?: number
-  /** ★ 2026-10-24（083-r2）：这个位子上的邀请还挂着（人没来）。
-   *  ★ 只有 `holders` 为空时它才有意义 —— 人已到就说明邀请已完成，不该再显示。 */
-  invited?: { lamp?: string; invitedName?: string; invitedAt?: string } | null
-  /** ★ 2026-10-24（083-r2）：席位上的凭据姿态。present=90 秒内有心跳 /
-   *  joined=有凭据没心跳 / invited=邀请发了人还没来。老数据可能没有。 */
-  holders?: {
-    agentId?: string
-    name?: string
-    seat?: string
-    online?: boolean
-    onRoster?: boolean
-    hasCred?: boolean
-    joinState?: string
-  }[]
   /** ★ 被多少席位绑定 —— >0 即删不掉（服务端 409 referenced） */
   seat_count?: number
   /** ★ 还有多少未归档子节点 —— >0 即删不掉（会断树，409 has_children） */
@@ -146,17 +120,6 @@ export interface TaskCreateQuery {
   projectId?: string
   /** ★ 2026-10-23：这次任务的就交互 ID（前端预生 `task-<uuid>` 后回填，附件才有地方落） */
   interactionId?: string
-  /**
-   * ★ 2026-10-24（083-r1）：点名通知某个 Agent。传 **id 不传名字**（名字可重，id 不会）。
-   *   空/不传 ⇒ 公池，与旧行为完全一致（硬约束：默认必须是不点名）。
-   *
-   * ★ 字段名为什么是 camelCase 而不是 snake_case：
-   *   本接口其余字段都是 snake（node_id / project_id / interaction_id），照抄会写错。
-   *   实测 `POST /tasks` 带 `notify_agent` 返回 400 `unknown_field`（`notifyAgent` 当时也返回 unknown_field，
-   *   说明服务端这版还没上这个字段 —— 见 notify-copy.isNotifyUnsupported 的降级处理）。
-   *   ⇒ 服务端一旦上线，按任务书口径就是 `notifyAgent`，这里已按它发。
-   */
-  notifyAgent?: string
 }
 
 /** `projectsList` 返回的一项 */
@@ -173,26 +136,6 @@ export interface ProjectRow {
 /** `projectsList` 返回 */
 export interface ProjectsListPayload {
   projects: ProjectRow[]
-}
-
-/**
- * `packsInteractions` 的一行 —— 「一次协作有哪几个文件」。
- *
- * ★ 2026-10-23（083 单 G-3）：`title` / `projectName` / `projectId` 是**新补的人话字段**。
- *   服务端没跟上时这三个字段缺席，前端必须走兜底文案，
- *   **绝不允许再回退去显示 `interactionId`**（客户不该看到 `task-<UUID>`）。
- */
-export interface PackInteractionRow {
-  interactionId: string
-  files: number
-  seats: number
-  lastAt: string
-  /** 这次协作对应的任务标题（服务端补） */
-  title?: string
-  /** 所属项目名（服务端补；未归属项目的协作可以没有） */
-  projectName?: string
-  /** 所属项目 id（服务端补；用来分组，不显示） */
-  projectId?: string
 }
 
 /** `tasksList` 入参 */
@@ -312,22 +255,6 @@ export interface TaskRow {
 }
 
 /** `tasksList` 返回 */
-/** ★ 2026-10-24（083-r2）：邀码列表一行。**没有明文字段** —— 服务端只存 hash。 */
-export interface JoinCodeRow {
-  codeHash: string
-  note?: string
-  seat?: string
-  invitedName?: string
-  /** pending | used | expired | revoked */
-  state: string
-  createdAt: string
-  expiresAt: string
-  usedAt?: string | null
-  usedBy?: string
-  revokedAt?: string | null
-  batchId?: string
-}
-
 /* ─────────────────────────────────────────────────────────────────────
  * ★ 期6a-2 · 资料按位（packs）
  *
@@ -657,10 +584,6 @@ export class WorkstationRemoteService extends TypertRemoteService {
     if (typeof query.nodeId === 'string' && query.nodeId.length > 0) body.node_id = query.nodeId
     if (typeof query.projectId === 'string' && query.projectId.length > 0) body.project_id = query.projectId
     if (typeof query.interactionId === 'string' && query.interactionId.length > 0) body.interaction_id = query.interactionId
-    /* ★ 2026-10-24：点名通知。**camelCase** —— 本接口字段白名单是硬校验的（多余字段 400 unknown_field），
-       实测 snake 的 notify_agent 被拒，报错原文就是「不认识的字段：['notify_agent']」。
-       留空不发（不传 = 公池），存量调用零影响。 */
-    if (typeof query.notifyAgent === 'string' && query.notifyAgent.length > 0) body.notifyAgent = query.notifyAgent
     const data = await this.requireHttp().call<TaskRow>('POST', '/tasks', body, signal)
     return { ok: true, data }
   }
@@ -736,114 +659,6 @@ export class WorkstationRemoteService extends TypertRemoteService {
     if (name.length === 0) throw new KaipuHttpError(400, 'empty_name', '项目名不能为空。')
     const data = await this.requireHttp().call<{ projectId: string; name: string }>(
       'PATCH', `/projects/${encodeURIComponent(pid)}`, { name }, signal)
-    return { ok: true, data }
-  }
-
-  /**
-   * 推进项目阶段 · `PATCH /projects/{id}/phase`（2026-10-26 · Agent 版 OA）
-   *
-   * ★ 为什么不在前端做「跳阶」的宽容处理：
-   *   服务端只允许 ±1 与「任意 → archived」，前端如果自己放宽（比如允许直接跳 build），
-   *   就会变成「界面能点、服务端 400 phase_skip」—— 那是把后台判据搬到前台重写，
-   *   两份规则迟早不一致。前端只负责**只显示合法的下一步**。
-   */
-  @Remote('projectPhaseSet')
-  async projectPhaseSet(
-    query: { projectId: string; phase: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{ projectId: string; phase: string; from?: string; changed: boolean }>> {
-    const pid = typeof query.projectId === 'string' ? query.projectId : ''
-    const phase = (query.phase ?? '').trim()
-    if (pid.length === 0) throw new KaipuHttpError(400, 'missing_project_id', '改阶段缺项目 id')
-    if (phase.length === 0) throw new KaipuHttpError(400, 'missing_phase', '改阶段缺目标阶段')
-    const data = await this.requireHttp().call<{ projectId: string; phase: string; from?: string; changed: boolean }>(
-      'PATCH', `/projects/${encodeURIComponent(pid)}/phase`, { phase }, signal)
-    return { ok: true, data }
-  }
-
-  /** 读任务依赖（前置 + 后继 + 能不能领）· `GET /tasks/{id}/deps` */
-  @Remote('tasksDepsList')
-  async tasksDepsList(
-    query: { taskId: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{
-    task_id: string
-    dependsOn: Array<{ id: string; title: string; status: string }>
-    blocks: Array<{ id: string; title: string; status: string }>
-    unmet: number
-    claimable: boolean
-  }>> {
-    const tid = typeof query.taskId === 'string' ? query.taskId : ''
-    if (tid.length === 0) throw new KaipuHttpError(400, 'missing_task_id', '读依赖缺任务 id')
-    const data = await this.requireHttp().call<{
-      task_id: string
-      dependsOn: Array<{ id: string; title: string; status: string }>
-      blocks: Array<{ id: string; title: string; status: string }>
-      unmet: number
-      claimable: boolean
-    }>('GET', `/tasks/${encodeURIComponent(tid)}/deps`, undefined, signal)
-    return { ok: true, data }
-  }
-
-  /** 撤一条依赖（会立刻放行因它卡住的后继）· `DELETE /tasks/{id}/deps/{dep}` */
-  @Remote('tasksDepsDelete')
-  async tasksDepsDelete(
-    query: { taskId: string; dependsOnTaskId: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{ task_id: string; depends_on_task_id: string; removed: boolean }>> {
-    const tid = typeof query.taskId === 'string' ? query.taskId : ''
-    const dep = typeof query.dependsOnTaskId === 'string' ? query.dependsOnTaskId : ''
-    if (tid.length === 0 || dep.length === 0) {
-      throw new KaipuHttpError(400, 'missing_ids', '撤依赖缺任务 id 或前置 id')
-    }
-    const data = await this.requireHttp().call<{ task_id: string; depends_on_task_id: string; removed: boolean }>(
-      'DELETE', `/tasks/${encodeURIComponent(tid)}/deps/${encodeURIComponent(dep)}`, undefined, signal)
-    return { ok: true, data }
-  }
-
-  /** 读交付版本（全部稿 + 哪一稿是最终）· `GET /tasks/{id}/deliverables` */
-  @Remote('deliverablesList')
-  async deliverablesList(
-    query: { taskId: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{
-    task_id: string
-    versions: number[]
-    count: number
-    finalVersion: number
-    items: Array<{
-      id: string; version: number; is_final: number; filename: string
-      size: number; sha256: string; interaction_id: string; created_at: string
-    }>
-  }>> {
-    const tid = typeof query.taskId === 'string' ? query.taskId : ''
-    if (tid.length === 0) throw new KaipuHttpError(400, 'missing_task_id', '读交付版本缺任务 id')
-    const data = await this.requireHttp().call<{
-      task_id: string
-      versions: number[]
-      count: number
-      finalVersion: number
-      items: Array<{
-        id: string; version: number; is_final: number; filename: string
-        size: number; sha256: string; interaction_id: string; created_at: string
-      }>
-    }>('GET', `/tasks/${encodeURIComponent(tid)}/deliverables`, undefined, signal)
-    return { ok: true, data }
-  }
-
-  /** 指定某一稿为最终稿（回退旧稿用）· `POST /tasks/{id}/deliverables/{did}/promote` */
-  @Remote('deliverablePromote')
-  async deliverablePromote(
-    query: { taskId: string; deliverableId: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{ task_id: string; deliverable_id: string; version: number; is_final: boolean }>> {
-    const tid = typeof query.taskId === 'string' ? query.taskId : ''
-    const did = typeof query.deliverableId === 'string' ? query.deliverableId : ''
-    if (tid.length === 0 || did.length === 0) {
-      throw new KaipuHttpError(400, 'missing_ids', '指定最终稿缺任务 id 或稿 id')
-    }
-    const data = await this.requireHttp().call<{ task_id: string; deliverable_id: string; version: number; is_final: boolean }>(
-      'POST', `/tasks/${encodeURIComponent(tid)}/deliverables/${encodeURIComponent(did)}/promote`, {}, signal)
     return { ok: true, data }
   }
 
@@ -1217,14 +1032,10 @@ export class WorkstationRemoteService extends TypertRemoteService {
 
   /** ★ 把一个交互包（所有座位）打包下载成 zip */
   /** ★ 2026-10-21：列出「有资料的交互」—— 打包下载失败，多半是 iid 是历史遗留/从没传过文件 */
-  /* ★ 2026-10-23（083 单 G-3 · 星月）：每条**必须**带人话名字。
-     原来只回 `{interactionId, files, seats, lastAt}` ⇒ 界面只能拿 `task-<UUID>` 截 22 字当标签，
-     客户看到一串机器号（验收 A-4：主界面零 `task-` 字样）。
-     三个字段都是**可选**：老服务端不返回时前端走兜底文案（不显示 UUID），不报错。 */
   @Remote('packsInteractions')
-  async packsInteractions(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ interactions: PackInteractionRow[] }>> {
+  async packsInteractions(query: Record<string, never>, signal?: CancelSignal): Promise<RemoteResult<{ interactions: Array<{ interactionId: string; files: number; seats: number; lastAt: string }> }>> {
     void query
-    const data = await this.requireHttp().call<{ interactions?: PackInteractionRow[] }>(
+    const data = await this.requireHttp().call<{ interactions?: Array<{ interactionId: string; files: number; seats: number; lastAt: string }> }>(
       'GET', '/packs/interactions', undefined, signal)
     return { ok: true, data: { interactions: Array.isArray(data?.interactions) ? data.interactions : [] } }
   }
@@ -1334,98 +1145,6 @@ export class WorkstationRemoteService extends TypertRemoteService {
     }
   }
 
-  /* ── ★★ 2026-10-23 · 管理助理授权（承响石 018 号方案 + 阿开 A/B/C/D 拍板）
-   *
-   *  为什么要有这一组：
-   *    管理位可以临时把「代管权」交给一个人（24h / 72h / 1 周），
-   *    到期自动失效并转执行位。没有界面，这个能力等于不存在 ——
-   *    管理位不可能去手敲 curl 授一个 24 小时的权。
-   *
-   *  ★ 规则（写死在按钮文案里，别让用户猜）：
-   *    · 只有管理位本人能授、能收
-   *    · 授权刻起算，不是首次使用才起算（安全窗口与计时起点必须同一时刻）
-   *    · 收回即时生效（判定层实时读库，无缓存）
-   *    · 到期自动转执行位（不留权、不白占席位）
-   * ───────────────────────────────────────────────────────────────── */
-
-  /** 本铺授权台账（谁在代管、还剩多久） */
-  @Remote('grantList')
-  async grantList(query: { status?: string }, signal?: CancelSignal): Promise<RemoteResult<GrantListPayload>> {
-    const qs = query?.status ? `?status=${encodeURIComponent(query.status)}` : ''
-    const data = await this.requireHttp().call<{
-      grants?: GrantRow[]; ttlOptions?: number[]; accountId?: string
-    }>('GET', '/grants' + qs, undefined, signal)
-    return {
-      ok: true,
-      data: {
-        grants: Array.isArray(data?.grants) ? data.grants : [],
-        ttlOptions: Array.isArray(data?.ttlOptions) ? data.ttlOptions : [24, 72, 168],
-        accountId: data?.accountId ?? '',
-      },
-    }
-  }
-
-  /** 授予管理助理权（时长只有 24 / 72 / 168 三档） */
-  @Remote('grantCreate')
-  async grantCreate(
-    query: { granteeId: string; ttlHours: number; name?: string; note?: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<GrantCreated>> {
-    const data = await this.requireHttp().call<GrantCreated>('POST', '/grants', {
-      granteeId: query.granteeId,
-      ttlHours: query.ttlHours,
-      ...(query.name ? { name: query.name } : {}),
-      ...(query.note ? { note: query.note } : {}),
-    }, signal)
-    return { ok: true, data }
-  }
-
-  /* ── ★ 2026-10-23（083 单 G-1 · 星月）：管理助理改「授权码」───────────────
-   *   旧形态：手填「对方的 Agent id」⇒ 管理位得先知道对方内部 ID 才能授权，
-   *   而客户根本不知道那串 ID（那条输入框就是 0.2.78 界面上的绊脚石）。
-   *   新形态：点「生成授权码」→ 出一串 `SHANHAI-GRANT-XXXX-XXXX` →
-   *   复制整段话发给对方 → 对方发给他自己的 Agent → Agent 调 `/grants/redeem` 兑换。
-   *
-   *   ★ 库内**只存 `SHA256(code)`**，明文只返回这一次（服务端语义）。
-   *   ★ 码 7 天有效；**代管计时从兑换那一刻起算**（不是从生成起算）。
-   *   ★ `grantCreate`（直传 granteeId）保留 —— 给 Agent 自动化用，界面不再走它。 */
-
-  @Remote('grantGenerate')
-  async grantGenerate(
-    query: { ttlHours: number; note?: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<GrantCodeIssued>> {
-    const data = await this.requireHttp().call<GrantCodeIssued>('POST', '/grants/generate', {
-      ttlHours: query.ttlHours,
-      ...(query.note ? { note: query.note } : {}),
-    }, signal)
-    return { ok: true, data }
-  }
-
-  /** 收回（即时生效） */
-  @Remote('grantRevoke')
-  async grantRevoke(
-    query: { grantId: string; reason?: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{ grantId: string; status: string; revokedAt: string }>> {
-    const gid = encodeURIComponent(query.grantId)
-    const data = await this.requireHttp().call<{ grantId: string; status: string; revokedAt: string }>(
-      'POST', `/grants/${gid}/revoke`, query.reason ? { reason: query.reason } : {}, signal)
-    return { ok: true, data }
-  }
-
-  /** 授权流水（actor + onBehalfOf 双字段） */
-  @Remote('grantEvents')
-  async grantEvents(
-    query: { grantId: string },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<{ grantId: string; events: GrantEvent[] }>> {
-    const gid = encodeURIComponent(query.grantId)
-    const data = await this.requireHttp().call<{ grantId: string; events?: GrantEvent[] }>(
-      'GET', `/grants/${gid}/events`, undefined, signal)
-    return { ok: true, data: { grantId: data?.grantId ?? query.grantId, events: Array.isArray(data?.events) ? data.events : [] } }
-  }
-
   /* ── ★ 工位当前交互（存服务端 · 阿开 2026-10-19）──
    *   为什么要挪到服务端：交互 ID 是资料目录的键，「我上次在跟谁协作」
    *   不该因为重装插件就没了；换机器也得还在。 */
@@ -1516,174 +1235,14 @@ export class WorkstationRemoteService extends TypertRemoteService {
 
   @Remote('deviceJoinCodeCreate')
   async deviceJoinCodeCreate(
-    query: { note?: string; ttlHours?: number; count?: number; seat?: string; invitedName?: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<{ code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string; codes?: { code: string; codeHash: string; expiresAt: string }[] }>> {
+    query: { note?: string; ttlHours?: number }, signal?: CancelSignal,
+  ): Promise<RemoteResult<{ code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string }>> {
     const body: Record<string, unknown> = {}
     if (typeof query.note === 'string' && query.note.length > 0) body.note = query.note
     if (typeof query.ttlHours === 'number' && Number.isFinite(query.ttlHours)) body.ttlHours = query.ttlHours
-    /* ★ 2026-10-24（083-r2）：批量与座位/受邀人。不传 count ⇒ 服务端按 1 张处理（存量零影响）。 */
-    if (typeof query.count === 'number' && Number.isFinite(query.count) && query.count > 1) body.count = query.count
-    if (typeof query.seat === 'string' && query.seat.length > 0) body.seat = query.seat
-    if (typeof query.invitedName === 'string' && query.invitedName.length > 0) body.invitedName = query.invitedName
     const data = await this.requireHttp().call<{
       code: string; accountId: string; expiresAt: string; ttlHours: number; howTo?: string
-      codes?: { code: string; codeHash: string; expiresAt: string }[]
     }>('POST', '/device-join-codes', body, signal)
-    return { ok: true, data }
-  }
-
-  /* ── ★★ 2026-10-24（083-r2）：邀请码列表化三个只读/管理端点 ──
-     ★ 列表**永不返回明文**（服务端只存 hash）—— 所以明文只能留在用户本机，
-       这也是「切页面回来码还在」只能靠 localStorage 的根本原因。
-     ★ 作废/续期都用 `codeHash`（12 位）定位，不是明文。 */
-  @Remote('deviceJoinCodes')
-  async deviceJoinCodes(
-    query: { state?: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<{ codes: JoinCodeRow[]; count?: number }>> {
-    const qs = typeof query.state === 'string' && query.state.length > 0
-      ? `?state=${encodeURIComponent(query.state)}` : ''
-    const data = await this.requireHttp().call<{ codes?: JoinCodeRow[]; count?: number }>(
-      'GET', `/device-join-codes${qs}`, undefined, signal)
-    const codes = Array.isArray(data.codes) ? data.codes : []
-    /* ★ exactOptionalPropertyTypes：`count` 只能**缺席**，不能显式给 undefined */
-    return {
-      ok: true,
-      data: typeof data.count === 'number' ? { codes, count: data.count } : { codes },
-    }
-  }
-
-  @Remote('deviceJoinCodeRevoke')
-  async deviceJoinCodeRevoke(
-    query: { codeHash: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<{ codeHash: string; state: string }>> {
-    const h = (query.codeHash ?? '').trim()
-    const data = await this.requireHttp().call<{ codeHash?: string; state?: string }>(
-      'POST', `/device-join-codes/${encodeURIComponent(h)}/revoke`, {}, signal)
-    return { ok: true, data: { codeHash: data.codeHash ?? h, state: data.state ?? 'revoked' } }
-  }
-
-  @Remote('deviceJoinCodeRenew')
-  async deviceJoinCodeRenew(
-    query: { codeHash: string; ttlHours?: number }, signal?: CancelSignal,
-  ): Promise<RemoteResult<{ codeHash: string; state: string; expiresAt: string }>> {
-    const h = (query.codeHash ?? '').trim()
-    const body: Record<string, unknown> = {}
-    if (typeof query.ttlHours === 'number' && Number.isFinite(query.ttlHours)) body.ttlHours = query.ttlHours
-    const data = await this.requireHttp().call<{ codeHash?: string; state?: string; expiresAt?: string }>(
-      'POST', `/device-join-codes/${encodeURIComponent(h)}/renew`, body, signal)
-    return {
-      ok: true,
-      data: { codeHash: data.codeHash ?? h, state: data.state ?? 'pending', expiresAt: data.expiresAt ?? '' },
-    }
-  }
-
-  /* ══════════════════════════════════════════════════════════════════
-     ★★ 2026-10-24 · 邀请码补发闭环（083 第一批 · 块 A · 5 个端点）
-
-     契约来源：星月任务书 §二（`需求/017` 为准）。**一个字段都不许自己加** ——
-     后端 `gateway.py` 的四个端点按那份契约实现，多传字段会被当未知键忽略，
-     少传必填（`accountId`/`applicantKind`/`applicantId`）会 400。
-
-     ★ 为什么 `deviceFp` 在 host 侧自动填：指纹由 host 推导（`deriveFingerprint()`），
-       **渲染层拿不到也不需要拿**。申请人「无旧码」时唯一能自证的就是这台机器，
-       所以这一项必须由 host 兜底，不能指望前端记得传。
-     ★ 为什么 `joinRequestCreate` 允许 `joinCode` 与指纹**都给**：
-       契约写的是「与 deviceFp 至少一个」。两个都给 = 最强自证（旧码 + 原机器）。
-     ══════════════════════════════════════════════════════════════════ */
-
-  /** 铺主看待审批列表 · `GET /join/requests?status=pending` */
-  @Remote('joinRequests')
-  async joinRequests(
-    query: { status?: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<JoinRequestListPayload>> {
-    const status = typeof query.status === 'string' && query.status.length > 0 ? query.status : 'pending'
-    const data = await this.requireHttp().call<{ items?: JoinRequestRow[]; count?: number }>(
-      'GET', `/join/requests?status=${encodeURIComponent(status)}`, undefined, signal)
-    const items = Array.isArray(data?.items) ? data.items : []
-    /* ★ `count` 以服务端为准；服务端没给就按 items 长度兜底（**不要**用它算红点以外的东西） */
-    const count = typeof data?.count === 'number' && Number.isFinite(data.count) ? data.count : items.length
-    return { ok: true, data: { items, count } }
-  }
-
-  /** 申请人查自己那张 · `GET /join/request/{id}` */
-  @Remote('joinRequestGet')
-  async joinRequestGet(
-    query: { requestId: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<JoinRequestStatusPayload>> {
-    const rid = typeof query.requestId === 'string' ? query.requestId.trim() : ''
-    if (rid.length === 0) throw new KaipuHttpError(400, 'missing_request_id', '查申请状态缺申请号')
-    const data = await this.requireHttp().call<JoinRequestStatusPayload>(
-      'GET', `/join/request/${encodeURIComponent(rid)}`, undefined, signal)
-    return { ok: true, data }
-  }
-
-  /** 提交补发申请（无鉴权，靠旧码/指纹自证）· `POST /join/request` */
-  @Remote('joinRequestCreate')
-  async joinRequestCreate(
-    query: {
-      accountId: string
-      applicantKind: string
-      applicantId: string
-      joinCode?: string
-      applicantName?: string
-      nodeId?: string
-      seat?: string
-      reason?: string
-    },
-    signal?: CancelSignal,
-  ): Promise<RemoteResult<JoinRequestCreated>> {
-    const accountId = typeof query.accountId === 'string' ? query.accountId.trim() : ''
-    const applicantKind = typeof query.applicantKind === 'string' ? query.applicantKind.trim() : ''
-    const applicantId = typeof query.applicantId === 'string' ? query.applicantId.trim() : ''
-    if (accountId.length === 0) throw new KaipuHttpError(400, 'missing_account_id', '不知道要申请哪个铺子')
-    if (applicantKind !== 'agent' && applicantKind !== 'human') {
-      throw new KaipuHttpError(400, 'bad_applicant_kind', '申请人类型只能是 agent 或 human')
-    }
-    if (applicantId.length === 0) throw new KaipuHttpError(400, 'missing_applicant_id', '不知道你是谁')
-
-    const body: Record<string, unknown> = { accountId, applicantKind, applicantId }
-    /* ★ 指纹：host 侧兜底 —— 申请人「没旧码」时这是唯一自证物（契约：与 joinCode 至少一个） */
-    const fp = this.requireHttp().fingerprintHint().trim()
-    if (fp.length > 0) body.deviceFp = fp
-    const joinCode = typeof query.joinCode === 'string' ? query.joinCode.trim() : ''
-    if (joinCode.length > 0) body.joinCode = joinCode
-    for (const [k, v] of [
-      ['applicantName', query.applicantName], ['nodeId', query.nodeId],
-      ['seat', query.seat], ['reason', query.reason],
-    ] as const) {
-      if (typeof v === 'string' && v.trim().length > 0) body[k] = v.trim()
-    }
-    const data = await this.requireHttp().callAnon<JoinRequestCreated>('POST', '/join/request', body, signal)
-    return { ok: true, data }
-  }
-
-  /**
-   * 同意（仅铺主）· `POST /join/request/{id}/approve`
-   * ★ 返回里的 `joinCode` 是**新码明文**，只此一次 —— 前端必须当场显示 + 给复制，
-   *   不要吞掉、不要落盘（它不是凭据，但泄露等于谁能进铺子）。
-   */
-  @Remote('joinRequestApprove')
-  async joinRequestApprove(
-    query: { requestId: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<JoinRequestStatusPayload>> {
-    const rid = typeof query.requestId === 'string' ? query.requestId.trim() : ''
-    if (rid.length === 0) throw new KaipuHttpError(400, 'missing_request_id', '同意哪一条申请？')
-    const data = await this.requireHttp().call<JoinRequestStatusPayload>(
-      'POST', `/join/request/${encodeURIComponent(rid)}/approve`, {}, signal)
-    return { ok: true, data }
-  }
-
-  /** 拒绝（仅铺主）· `POST /join/request/{id}/reject`（理由可空） */
-  @Remote('joinRequestReject')
-  async joinRequestReject(
-    query: { requestId: string; reason?: string }, signal?: CancelSignal,
-  ): Promise<RemoteResult<{ requestId: string; status: string }>> {
-    const rid = typeof query.requestId === 'string' ? query.requestId.trim() : ''
-    if (rid.length === 0) throw new KaipuHttpError(400, 'missing_request_id', '拒绝哪一条申请？')
-    const body: Record<string, unknown> = {}
-    if (typeof query.reason === 'string' && query.reason.trim().length > 0) body.reason = query.reason.trim()
-    const data = await this.requireHttp().call<{ requestId: string; status: string }>(
-      'POST', `/join/request/${encodeURIComponent(rid)}/reject`, body, signal)
     return { ok: true, data }
   }
 

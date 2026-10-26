@@ -1,0 +1,22 @@
+{
+  "name": "@shanhai/kaipu-workspace",
+  "version": "0.2.104",
+  "private": true,
+  "license": "MIT",
+  "//license": "★ 本字段【必须在】—— 2026-10-07 补回，防的是『每出一版包就抹掉它一次』。两点事实：① 它在**发布面里**（公开仓根 package.json，npm 与仓首页都读它）；② 服务端 2026-10-07 落仓通知点名『v3 的 package.json 未含 license 字段』，且他们已在自己仓内补回（`4a48d7b` 起就有）⇒ **我方若继续不带，就会反复把它冲掉**。值取 `MIT`，依据已定口径（在『是否允许他人商用』拍板前，投稿件按 MIT 元数据走）。★ 相对地：`packages/contract` 是**排除面、不上市场** ⇒ **刻意不写**（理由见该包 package.json 的 `//license`）。判据：`tools/emit-release-snapshot.mjs` 自检段断『发布面里每个 package.json 都有 license 字段』—— 删掉本行它会**当场红**（已证）。",
+  "type": "module",
+  "description": "山海·开铺 · 插件仓 —— 场地插件（主推）+ 智囊团插件 + 契约层；Tauri 壳为可选零门槛分发形态",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "//scripts": "★ 本仓公开面【不声明 scripts】：构建与验收脚本都在不随本仓发布的判据层（构建期本地可执行）。留一堆指向仓外路径的 script，只会让按字面尝试的人拿到必失败的命令。",
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/react": "^18.3.31"
+  },
+  "//types": "★ 不需要 @types/react-dom —— 本仓 client half 只用 react（createElement / hooks）与 react/jsx-runtime，不挂载根节点（挂载由宿主做）。少一个依赖少一处版本坑。",
+  "//react": "★ 对齐宿主：DSH 用 react@18.3.1 + @types/react@18.3.31（实测自 harness 的 pnpm store）。react 与 react/jsx-runtime 都由宿主 PLATFORM_MODULES 提供，我们只是声明类型 —— 类型版本必须跟宿主一致。"
+}

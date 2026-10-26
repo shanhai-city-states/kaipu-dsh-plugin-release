@@ -1,0 +1,94 @@
+{
+  "name": "@shanhai/kaipu-workstation",
+  "version": "0.2.92",
+  "type": "module",
+  "description": "山海·开铺 · 工位插件 —— 跨云、跨端的 Agent 协作操作台：不同机器、不同平台的 Agent 坐进同一张工位，各自独立凭据；项目上下文共享、资料按位存放、任务在席位间轮转交接，谁做了什么一路留痕。工位数据存在服务端，插件只是界面：卸载不丢数据，重装即回到原样。当前渲染工位持久化态（非实时流）。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanhai-city-states/kaipu-dsh-plugin-release.git",
+    "directory": "packages/plugin-workstation"
+  },
+  "icon": "icon.svg",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "kaipu",
+    "workstation",
+    "gw",
+    "gongwei",
+    "panel",
+    "cross-cloud",
+    "cross-platform",
+    "agent-collaboration",
+    "context-sync",
+    "file-sync"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "//scripts": "★ 公开面不声明 scripts：构建脚本在不随本仓发布的判据层。",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "//inject": "★ 这里是【包名】词表（模块图边 / boot 顺序）；src/client/index.ts 的 inject 是【服务名】词表。两套都要填，填反了会卡在 waiting for services。",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "kaipu": {
+    "//": "★ 本块是【本仓自己的】声明，DSH 官方不读。我们自己的约束一律放 kaipu.*，不塞进 dsh 命名空间。",
+    "dshRange": ">=0.2.0-rc.2 <0.3.0",
+    "//descriptionReviewedAt": "★ 官方 contributing.md：描述会被当作声明并与代码核对。每次改描述都要真的复核代码并更新这个日期 —— --release 缺它即 FAIL。",
+    "descriptionReviewedAt": "2026-10-19",
+    "declaredSurfaces": [
+      "ui.panel",
+      "ui.slot",
+      "data.local"
+    ],
+    "//panel": "★ 面板注册六字段约定（本仓自有声明 · DSH 官方不读 · 机检 tools/check-panel-registry.mjs）。字段口径：panelId 与 patch 的 id、WORKSTATION_PANEL_ID 三处同值；displayName/description 只声明 **语言无关的文案 key**（不写死文案，避免第三份副本）；entryId 是**非 URL 的逻辑标识**（不含 / # :）；parent 可选、本期不填（不把内部架构代号写进发布面）；siblings 待单源派生就位前**必须缺席**。",
+    "panel": {
+      "panelId": "shanhai-kaipu-workstation-gw",
+      "displayName": "meta.title",
+      "description": "meta.description",
+      "entryId": "workstation"
+    },
+    "devContract": "@shanhai/kaipu-contract（内部契约包 · 不随本仓发布 · 构建期依赖，已内联进产物）"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "react": "^18.3.1"
+  },
+  "//": "字段与分发的完整说明见本目录 README.md「字段与分发说明」。react 由宿主 DSH 提供（peer）；契约包是构建期依赖，已内联进产物。"
+}

@@ -184,6 +184,8 @@ interface PackInteractionItem {
   title?: string
   projectName?: string
   projectId?: string
+  /** ★ 2026-10-26：组内第一个文件名 —— manual 通道没有任务标题时的兜底提示 */
+  firstFile?: string
 }
 interface PackDownloadPayload {
   filename: string
@@ -4265,26 +4267,87 @@ function groupPacks(rows: PackInteractionItem[]): PackGroup[] {
      这种组留着就是一串机器号 + 一行数字，既说不清是哪活、也认不出是谁交的 ⇒ 整个组不渲染。
      ★ 判据必须**两边都空**才丢：只要有任务标题（`packLabel` 不是数字兜底），
        它就是「能说清是哪件事」的资料，留着有意义（阿开原话：「下级能显示任务名称的就保留」）。
-     ★ 有项目名的组永远保留，哪怕一个标题都没有 —— 项目名本身就是归属线索。 */
-  const hasNamed = (g: PackGroup): boolean =>
-    g.name.length > 0 || g.rows.some((r) => (r.title ?? '').trim().length > 0)
-  const kept = out.filter((g) => g.key !== '__none__' || hasNamed(g))
+     ★ 有项目名的组永远保留，哪怕一个标题都没有 —— 项目名本身就是归属线索。
+
+     ★★★ 2026-10-26 真机判据抓到的 bug（必看，别改回去）：
+       上一版写的是 `g.name.length > 0 || …`，而 `__none__` 组的 `name` 在上面的
+       `map.get` 初始化里就被兜底成 `'未项目（有任务）'` —— **长度恒 > 0**
+       ⇒ 这个判据对 `__none__` 组**恒真** ⇒ 「没有数据就全删了」从来没生效过，
+         一串「未命名交付（N 个文件）」照样显示（48 个协作全在这一组）。
+       ⇒ 正确判据：`__none__` 组只看**组内有没有真标题**，不看那个兜底名。
+         判据文件：`/tmp/check_grouppacks.js`（4 组用例，改前 2 红 2 绿，改后全绿）。
+     ★ 为什么这条 bug 值得单独留注释：「拿兜底值当判据」是通用陷阱 ——
+       兜底值存在的意义就是「没信息时给个不空的显示」，它**不能反向证明有信息**。 */
+  /* ★★★ 2026-10-26 阿开：「咱们都是测试数据不重要，重要的是把结构定下来」
+     —— 甲案（条目级过滤）：**说不清是哪件事的协作，条目本身就不渲染**。
+
+     为什么要条目级，而不是只在组级：
+       组级过滤只能决定「整组显不显示」。当一个无归属组里**混着** 8 条有标题的
+       和 8 条没标题的，「组保留」就会把 8 条「未命名交付（N 个文件）」一起带出来 ——
+       客户看到一半说得清、一半说不清，这正是阿开说的「体验感」问题。
+
+     判据（能说清的三种情形，任一成立即显示）：
+       ① 有任务标题（`title`）        —— 任务派生，最准
+       ② 有文件名（`firstFile`）      —— manual 通道，文件本身说明内容
+       ③ 有项目归属（`projectId`/名） —— 至少知道属于哪个项目
+     三条都不成立 ⇒ 这条协作在界面上不可见。
+
+     ★★ 重要边界：**这只是「不显示」，不是「删除」**。
+        文件和索引都还在盘上/库里，能通过接口取到；只是资料页不摆一个
+        「未命名交付（2 个文件）」占位（那种条目对客户是噪音，对我们是自欺）。
+        ★ 如果以后要「找回」，把过滤条件放宽即可 —— 数据没丢，丢的只是展示。
+  */
+  const canTellWhat = (r: PackInteractionItem): boolean => {
+    if ((r.title ?? '').trim() !== '') return true
+    if ((r.firstFile ?? '').trim() !== '') return true
+    if ((r.projectId ?? '').trim() !== '') return true
+    if ((r.projectName ?? '').trim() !== '') return true
+    return false
+  }
+
+  /* ★ 条目级过滤在前、组级过滤在后：先剔掉说不清的单条，再看剩下的组还有没有内容。
+     顺序反了会出错：先按组判（组里还有有标题的⇒保留），再剔条目，
+     就会留下一个「只剩 0 条的空组壳」在页面上。 */
+  const visible = out.map((g) => ({ ...g, rows: g.rows.filter(canTellWhat) }))
+  const kept = visible.filter((g) => {
+    if (g.rows.length === 0) return false              /* 剔空了的组，整组不渲染 */
+    if (g.key !== '__none__') return true              /* 有项目名的组：保留 */
+    return g.rows.some((r) => (r.title ?? '').trim().length > 0)  /* 无归属组：必须有真标题 */
+  })
   kept.sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1))
   return kept
 }
 
-/** 一次协作的人话名字：任务标题 → 项目名 → 「N 个文件」。**永不返回 interactionId。**
+/** 一次协作的人话名字：任务标题 → 文件名 → 项目名 → 「N 个文件」。**永不返回 interactionId。**
  *
  * ★★ 2026-10-26 阿开：「是否可以改成项目名称（文件数）—— 点开之后显示：
  *    任务名称（文件数）点开就显示真正的任务名称对应的附件 这样就清晰了」
  *   ⇒ 这里返回的是**第二级（任务名）**。第一级项目名由分组标题给（`groupPacks`）。
  *   ⇒ 去掉「这次协作」这种自造名词：那是系统的内部叫法，客户脑子里没有这个概念；
- *     他要的是「哪件事、几个文件」。有标题就给标题，没标题才退回项目名，
- *     再没有才退回文件数 —— 三级兜底，每一级都是人话。
+ *     他要的是「哪件事、几个文件」。
+ *
+ * ★★★ 2026-10-26 加 `firstFile` 一档（manual 通道专用），原因是一次真机判据：
+ *   manual 交互**天生没有任务标题**，五个人工协作全都退到第三级（项目名），
+ *   页面上于是出现「007-选股咨询师」×2、「006-数据汇总中枢 Skill」×2 ——
+ *   **同一个名字出现两次，客户分不清哪个是体检单模板、哪个是 V1.0-r2 包**。
+ *   ⇒ 退回项目名之前，先用组内第一个文件名说清「这批是什么」。
+ *
+ * 四级兜底顺序（每一级都是人话，越靠前越具体）：
+ *   ① 任务标题（任务派生的协作，最准）
+ *   ② 文件名（manual 通道：没有标题，但文件名本身就是内容说明）
+ *   ③ 项目名（只有归属、没有内容线索时）
+ *   ④ 「N 个文件」（什么都没有）
  */
 function packLabel(r: PackInteractionItem): string {
   const t = (r.title ?? '').trim()
   if (t !== '') return t
+  const f = (r.firstFile ?? '').trim()
+  /* ★ 文件名去掉扩展名再显示 —— 「007-选股咨询师-V1.0-r2.zip」读起来比带 .zip 顺；
+     `lastIndexOf('.') > 0` 防止把 `.gitignore` 这类点开头的名字削成空串。 */
+  if (f !== '') {
+    const dot = f.lastIndexOf('.')
+    return dot > 0 ? f.slice(0, dot) : f
+  }
   const p = (r.projectName ?? '').trim()
   if (p !== '') return p
   const n = Number.isFinite(r.files) ? r.files : 0
@@ -5331,7 +5394,19 @@ function TaskSection(): ReactElement {
 
   const onPublish = (): void => {
     const t = title.trim()
-    if (t.length === 0) return
+    /* ★★ 2026-10-26 阿开：「发布任务书标题那个栏太不显眼了，而且没填标题发布不了，也没提示没反应」
+       ⇒ 原来这里是 `if (t.length === 0) return` —— **静默 return，界面零变化**，
+         正是阿开反复说的「点了没反应」。现在补一条人话错误 + 指路，与下面「先选项目」同一形态。
+       ★ 为什么错误进 `err`（source='action'）而不是 alert：本面板在 DSH 宿主里 alert/confirm 不可靠。 */
+    if (t.length === 0) {
+      setErr({
+        code: 'title_required',
+        message: '还没填任务标题。标题是这条任务在板上的名字 —— 别人靠它认出「这是哪一件事」，所以不能空着。',
+        source: 'action',
+        title: '还差一个标题',
+      })
+      return
+    }
     /* ★★ 2026-10-26 阿开：「以后就不会出现未归类了。除非用户自己创建一个项目名字叫未归类」
        ——「同时要重构逻辑，就是发布任务之前必须先选一个项目或者新建一个项目。UI 要改。
           Agent 发布任务页要改。」
@@ -5907,16 +5982,39 @@ function TaskSection(): ReactElement {
           }}>
             💡 也可以让你的 Agent 发：对管理位的 Agent 说一句「发个帖子：&lt;标题&gt;」，它会代你发布（任务卡标注来源 · 管理位每分钟可发 10 条）。
           </div>
-          <input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) onPublish()
-            }}
-            placeholder="任务标题，如「写完期5验收报告」"
-            style={inputStyle}
-          />
+          {/* ★★ 2026-10-26 阿开：「发布任务书标题那个栏太不显眼了」
+              ⇒ 原来只有一个 placeholder 的裸 input，和下面项目/阶段/通知挤在同一片灰底里，
+                 没有标签、没有必填标识、没有视觉重量 —— 用户不知道「这一栏是最重要的」。
+              现在：① 独立一栏 + 左侧强调条 ② label「任务标题」+ 红点必填
+                    ③ 输入框加粗（maxWidth 收窄，视觉上成为一块「牌子」而不是一个字段） */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 4,
+            borderLeft: `3px solid ${title.trim().length === 0 ? '#dc2626' : C.accent}`,
+            paddingLeft: 8,
+          }}>
+            <label style={{ fontSize: FS.tag, color: C.dim, fontWeight: 600 }}>
+              任务标题 <span style={{ color: '#dc2626' }}>＊必填</span>
+              <span style={{ fontWeight: 400, color: C.faint, marginLeft: 6 }}>
+                别人靠它认出「这是哪一件事」
+              </span>
+            </label>
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) onPublish()
+              }}
+              placeholder="如「写完期5验收报告」"
+              style={{
+                ...inputStyle,
+                fontSize: (FS.tag ?? 12) + 2,
+                fontWeight: 600,
+                padding: '8px 10px',
+                border: `1.5px solid ${title.trim().length === 0 ? C.border : C.accent}`,
+              }}
+            />
+          </div>
           {/* ★★★ 2026-10-26 阿开定（甲案）：原「这条是：需求/交付/回函/测试」下拉改掉。
               ★ 为什么改：那是**另一套分类**，跟项目卡片上的六步流程（立需求→出计划书→分工→
                 施工→验收→归档）毫无关系。用户看到两个都叫「流程/分类」的东西必然困惑 ——
