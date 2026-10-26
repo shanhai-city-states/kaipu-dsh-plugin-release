@@ -5480,6 +5480,222 @@ function TaskSection(): ReactElement {
   const blockedCount = blocked.kind === 'ok' ? blocked.rows.length : 0
   const pendingCount = pending.kind === 'ok' ? pending.rows.length : 0
 
+  /* ★★★ 2026-10-26 阿开：「底部的流程有了，四段展开调整了，但是没有跟随每一个项目走 还是在底部」
+     ★ 根因（查出来的，跟我原来以为的不同）：项目卡片在一个容器（5882–6031），
+       四段+任务卡片在**另一个并列容器**（6343–6446），阶段条孤零零卡在两个容器之间的空隙里。
+       三层彼此不相连 ⇒ 无论点哪个项目，它们都永远渲染在页面最底部。
+     ★ 为什么抽成函数而不是整块搬：四段要引用 searchedTasks/openSec/myId 等 10+ 个外层变量，
+       搬进 map 会让闭包关系难读；抽成「按项目渲染流程区」的函数，参数只有 cur ——
+       一眼看得出它跟哪个项目走。
+     ★ 为什么用 column + 左侧竖线 + 缩进：视觉上挂到项目卡片「下面」，而不是跟卡片平行。
+       阿开说的「跟随项目走」，靠缩进+竖线比靠距离更可靠 —— 距离会被 flexWrap 打乱。 */
+  const renderProjectFlow = (cur: ProjectItem): ReactElement => {
+    const ph = cur.phase
+    const curIdx = phaseIndex(ph)
+    const nx = nextPhase(ph)
+    const pv = prevPhase(ph)
+    const archived = isArchivedPhase(ph)
+    return (
+      <div style={{
+        marginLeft: 12, marginTop: 6, marginBottom: 10,
+        paddingLeft: 10, borderLeft: `2px solid ${C.accent}44`,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        <div style={{
+          ...cardStyle, marginBottom: 6, padding: '8px 12px',
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: FS.small, fontWeight: 600 }}>
+            {cur.name}
+          </span>
+          {/* ★ 六步节点条（2026-10-26 阿开：列出六步、当前高亮、可点改）
+              —— 每一步都带名字，不再用 `●●●○○○`：点阵看不出走到哪一步，
+                 只能看出走了几步。带名字才能「看见自己在流程的哪一环」。
+              —— 可点：铺主 / 管理助理点任意一步直接跳（后端只许 ±1 与 →archived，
+                 越级由服务端 409 拦，前端不做第二套判据）。 */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {PROJECT_PHASES.map((p, i) => {
+              const done = curIdx > i + 1
+              const isCur = curIdx === i + 1
+              const canClick = !busy && !isCur
+              return (
+                <span key={p} style={{ display: 'flex', alignItems: 'center' }}>
+                  {i > 0 ? (
+                    <span style={{ fontSize: FS.tag, color: done || isCur ? C.accent : C.faint, margin: '0 1px' }}>
+                      ›
+                    </span>
+                  ) : null}
+                  <span
+                    title={phaseHint(p) + (canClick ? ' · 点击跳到这一步' : '')}
+                    onClick={canClick ? () => { void run(async () => {
+                      const r = await setProjectPhase(cur.projectId, p)
+                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
+                    }, `已切到「${phaseLabel(p)}」`) } : undefined}
+                    style={{
+                      fontSize: FS.tag,
+                      fontWeight: isCur ? 700 : 400,
+                      cursor: canClick ? 'pointer' : 'default',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      color: isCur ? '#fff' : (done ? C.accent : C.dim),
+                      background: isCur ? C.accent : 'transparent',
+                      border: `1px solid ${isCur ? C.accent : (done ? C.accent : C.border)}`,
+                    }}
+                  >
+                    {phaseLabel(p, cur.phase === p ? cur.phaseLabel : undefined)}
+                  </span>
+                </span>
+              )
+            })}
+          </span>
+          <span style={{ fontSize: FS.tag, color: archived ? '#1e7e42' : C.dim }}>
+            第 {curIdx}/{PROJECT_PHASES.length} 步
+          </span>
+          {/* ★ 归档态不给「推进」：归档是出口，没有下一步。
+              也不给「退回」—— 归档=冻结，要改先解冻（那是另一个动作，不能藏在这里）。 */}
+          {archived ? (
+            <span style={{ fontSize: FS.tag, color: C.faint }}>已归档 · 冻结不再改</span>
+          ) : (
+            <>
+              {pv !== null ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { void run(async () => {
+                    const r = await setProjectPhase(cur.projectId, pv)
+                    return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
+                  }, `已退回「${phaseLabel(pv)}」`) }}
+                  title={`退回上一步：「${phaseLabel(pv)}」`}
+                  style={{ ...btnStyle(false), padding: '3px 10px', fontSize: FS.tag }}
+                >
+                  ← {phaseLabel(pv)}
+                </button>
+              ) : null}
+              {nx !== null ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { void run(async () => {
+                    const r = await setProjectPhase(cur.projectId, nx)
+                    return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
+                  }, `已推进到「${phaseLabel(nx)}」`) }}
+                  title={phaseHint(nx)}
+                  style={{ ...btnStyle(true), padding: '3px 10px', fontSize: FS.tag }}
+                >
+                  {phaseLabel(nx)} →
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+          <div>
+            {/* ★★★ 2026-10-26 阿开定（任务页设计图 V3 §三）：四段由「竖排长条」改为「并排一行」。
+                ★ 为什么并排：竖排时四个长条各占一整行，四个段头就吃掉 4 行高度，
+                  而这一行里其实只写了「段名 + 条数 + 展开」，横向空间全浪费。
+                  并排后四段共用一行，页面立刻短一截。
+                ★ 为什么 flex:1 平均分：阿开原话「把一行平均分一下就可以了」——
+                  不按内容宽度自适应，因为四段条数变化会让按钮宽度跳来跳去，反而更难扫。
+                ★ 为什么卡片移到「四段行下方」而不是留在段内：每段只占 25% 宽，
+                  卡片塞进 25% 格子里会挤成一列窄条；移到整行下方，卡片有全宽可用。 */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              {TASK_SECTIONS.map((sec) => {
+                const list = searchedTasks.filter((t) => sec.match(t, myId))
+                const open = openSec[sec.key] ?? sec.openByDefault
+                return (
+                  <button
+                    key={sec.key}
+                    type="button"
+                    onClick={() => setOpenSec((p) => ({ ...p, [sec.key]: !open }))}
+                    aria-expanded={open}
+                    /* ★ 展开态的三条线索沿用 0.2.94 的实证结论（阿开：「展开不知道可以收」）：
+                       ① 常显文字「展开 ▾ / 收起 ▴」—— 字比图形好认，这是主线索
+                       ② 边框 1px 灰 → 2px 蓝（用「线粗」而不是「色深」，浅底上加深看不出来）
+                       ③ 内边距同步减 1px，抵消边框增厚，避免四段并排时高度不齐
+                       ★★ 2026-10-26 台阶⑧（阿开定）：「四段的展开按钮建议放在 数字背后同一行
+                          这样可以更好看一些。目前是上下2行」⇒ **改成单行**：
+                          圆点 · 段名 · 条数 · 展开▾ —— 全在一行。
+                          ★ 展开指示**紧跟数字**（`marginLeft: 2`），不推到最右 ——
+                            阿开说「数字背后」，就是紧贴；推远会让它跟数字脱钩。
+                          ★ 为什么不用 column 两行：四个段各多占一行 = 白吃掉 ~20px 高度，
+                            而第二行只有一个「展开」两字，横向空间全浪费。 */
+                    style={{
+                      flex: 1, minWidth: 0,
+                      display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5,
+                      background: open ? 'rgba(59,111,224,0.10)' : '#fff',
+                      border: `${open ? '2px' : '1px'} solid ${open ? C.accent : '#d0d5dd'}`,
+                      borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                      padding: open ? '5px 9px' : '6px 10px',
+                      fontFamily: 'inherit', color: C.text,
+                      transition: 'border-color 160ms, background 160ms',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {/* 圆点：区分「有活/没活」，一眼扫出哪段该点 */}
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flex: '0 0 auto', width: 6, height: 6, borderRadius: 3,
+                        background: list.length > 0 ? C.accent : '#d0d5dd',
+                      }}
+                    />
+                    <span style={{
+                      fontSize: FS.small, fontWeight: 600, whiteSpace: 'nowrap',
+                      overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
+                      color: list.length > 0 ? C.text : C.dim,
+                    }}>
+                      {sec.title}
+                    </span>
+                    <span style={{
+                      flex: '0 0 auto', minWidth: 16, textAlign: 'center',
+                      fontSize: FS.tag, fontWeight: 600,
+                      color: list.length > 0 ? C.text : C.dim,
+                    }}>
+                      {list.length}
+                    </span>
+                    {/* 展开/收起指示：推到最右（marginLeft:'auto'），与条数同一行
+                        ★ 阿开原话「放在 数字背后同一行」= 紧跟在数字后面
+                        ⇒ 不用 marginLeft:auto 推远，紧贴数字更符合"背后"这个说法 */}
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flex: '0 0 auto', marginLeft: 2,
+                        fontSize: FS.tag, fontWeight: 600,
+                        color: open ? C.accent : '#667085',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {open ? '收起 ▴' : '展开 ▾'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {/* ★ 展开的卡片：挂在「四段这一行」的下方，占整行宽度，按 TASK_SECTIONS 顺序排列。
+                ★ 四段互不影响（甲案）：可以同时展开多段，各段卡片依次往下排。
+                ★ 空段不显示卡片区（不占位置），只有展开了且有内容/有提示才出现。 */}
+            {TASK_SECTIONS.map((sec) => {
+              const list = searchedTasks.filter((t) => sec.match(t, myId))
+              const open = openSec[sec.key] ?? sec.openByDefault
+              if (!open) return null
+              return (
+                <div key={sec.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                  {list.length === 0 ? (
+                    <div style={{ ...cardStyle, fontSize: FS.tag, color: C.dim }}>{sec.empty}</div>
+                  ) : (
+                    list.map((t) => (
+                      <CardBoundary key={t.task_id}>
+                        <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} allTasks={tasks} />
+                      </CardBoundary>
+                    ))
+                  )}
+                </div>
+              )
+            })}
+          </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ marginTop: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -5783,9 +5999,18 @@ function TaskSection(): ReactElement {
                 type="text"
                 value={kw}
                 onChange={(e) => setKw(e.target.value)}
-                placeholder={searchMode === 'project' ? '🔍 项目名…' : '🔍 任务关键词…'}
+                placeholder={searchMode === 'project' ? '🔍 项目名…' : '🔍 任务关键词（标题+正文，全部项目）…'}
                 style={{
-                  width: 220, padding: '5px 9px', fontSize: FS.tag,
+                  /* ★★ 2026-10-26 阿开实测：「太短了，连默认的提示语都没显示全」。
+                     220px 是按「🔍 项目名…」这种短提示语定的宽；但任务模式那句是
+                     「🔍 输入任务关键词（标题+正文，全部项目）…」，20 个汉字放不下 ⇒
+                     被截成「🔍 输入任务关…」，等于提示语失效（人被截断的框劝退，不知道能搜什么）。
+                     ⇒ 改两层宽：
+                       · 项目模式 240px（提示语短，够用就好，别占位）
+                       · 任务模式 320px（照最长提示语按字宽算：20 汉字 × 14px ≈ 280 + 图标 + 内边距）
+                     ★ 不给 flex:1：撑满会把「清空」和两个单选推到很远的右边，阿开说过点起来不方便。 */
+                  width: searchMode === 'project' ? 240 : 320,
+                  padding: '5px 9px', fontSize: FS.tag,
                   border: '1px solid ' + C.border, borderRadius: 6, background: '#fff', color: C.text,
                 }}
               />
@@ -5863,55 +6088,6 @@ function TaskSection(): ReactElement {
           {projNotice ? (
             <div style={{ ...cardStyle, marginBottom: 6, fontSize: FS.small }}>{projNotice}</div>
           ) : null}
-          {/* ★★★ 2026-10-26 台阶⑤（阿开 V3 图共识）：一个搜索框 + 两个单选。
-              ★ 为什么放这里（项目区最上方）：搜索是「先缩小范围再看」，位置必须在**被搜的东西之前**。
-                放四段上方也行，但项目模式搜的是**项目卡片**，框离卡片越近越不会被误认为搜任务。
-              ★ 为什么单选用「● ○」而不是下拉：只有两个值，下拉要多点一次才看得到有几种选择；
-                单选一眼看全，且当前模式永远可见（下拉会把当前值藏起来）。
-              ★ 切模式**不清空**关键词 —— 阿开原话「避免一个关键词输入 2 次」。 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <input
-              type="text"
-              value={kw}
-              onChange={(e) => setKw(e.target.value)}
-              placeholder={searchMode === 'project' ? '🔍 输入项目名关键词…' : '🔍 输入任务关键词（标题+正文，全部项目）…'}
-              style={{
-                flex: 1, minWidth: 0, padding: '6px 10px', fontSize: FS.small,
-                border: '1px solid ' + C.border, borderRadius: 6, background: '#fff', color: C.text,
-              }}
-            />
-            {kw !== '' ? (
-              <button
-                type="button"
-                onClick={() => setKw('')}
-                style={{ ...btnStyle(false), fontSize: FS.tag, padding: '4px 8px' }}
-                title="清空关键词"
-              >
-                清空
-              </button>
-            ) : null}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: FS.small, color: C.dim }}>
-              {([['project', '项目'], ['task', '任务']] as const).map(([k, label]) => (
-                <label
-                  key={k}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer',
-                    color: searchMode === k ? C.accent : C.dim,
-                    fontWeight: searchMode === k ? 600 : 400,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="searchMode083"
-                    checked={searchMode === k}
-                    onChange={() => setSearchMode(k)}
-                    style={{ cursor: 'pointer', margin: 0 }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </div>
           {/* ★ 任务模式下的范围提示：让人知道「现在搜的是全部项目，不是当前项目」——
               否则搜出别的项目的任务会以为串项目了。 */}
           {searchMode === 'task' && kw.trim() !== '' ? (
@@ -5919,8 +6095,10 @@ function TaskSection(): ReactElement {
               搜「{kw.trim()}」：全部项目范围，命中 {searchedTasks.length} 条（不受上面项目选中影响）
             </div>
           ) : null}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {projects.map((p) => (
+              <>
               <div
                 key={p.projectId}
                 /* ★★ 2026-10-26 阿开定（设计图 V3）：项目卡片 = 筛选入口。
@@ -6067,6 +6245,12 @@ function TaskSection(): ReactElement {
                   </>
                 )}
               </div>
+              {/* ★★★ 2026-10-26 阿开：「四段没有跟随每一个项目走」。⇒ 流程区跟在**当前选中项目的卡片下面**。
+                  ★ 为什么判 `p.projectId === projFilter` 而不判「第一个项目」：
+                    选中的那个才有数据（searchedTasks 已按 projFilter 过滤），别的项目下面挂一份空四段=骗人。
+                  ★ 为什么用 Fragment 包起来：卡片本身有 key，流程区不需要自己的 key（它是卡片的一部分）。 */}
+              {p.projectId === projFilter ? renderProjectFlow(p) : null}
+              </>
             ))}
           </div>
         </div>
@@ -6077,104 +6261,6 @@ function TaskSection(): ReactElement {
         </div>
       ) : null}
 
-      {(() => {
-        const cur = projects.find((p) => p.projectId === projFilter)
-        if (cur === undefined) return null
-        const ph = cur.phase
-        const curIdx = phaseIndex(ph)
-        const nx = nextPhase(ph)
-        const pv = prevPhase(ph)
-        const archived = isArchivedPhase(ph)
-        return (
-          <div style={{
-            ...cardStyle, marginBottom: 6, padding: '8px 12px',
-            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-          }}>
-            <span style={{ fontSize: FS.small, fontWeight: 600 }}>
-              {cur.name}
-            </span>
-            {/* ★ 六步节点条（2026-10-26 阿开：列出六步、当前高亮、可点改）
-                —— 每一步都带名字，不再用 `●●●○○○`：点阵看不出走到哪一步，
-                   只能看出走了几步。带名字才能「看见自己在流程的哪一环」。
-                —— 可点：铺主 / 管理助理点任意一步直接跳（后端只许 ±1 与 →archived，
-                   越级由服务端 409 拦，前端不做第二套判据）。 */}
-            <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              {PROJECT_PHASES.map((p, i) => {
-                const done = curIdx > i + 1
-                const isCur = curIdx === i + 1
-                const canClick = !busy && !isCur
-                return (
-                  <span key={p} style={{ display: 'flex', alignItems: 'center' }}>
-                    {i > 0 ? (
-                      <span style={{ fontSize: FS.tag, color: done || isCur ? C.accent : C.faint, margin: '0 1px' }}>
-                        ›
-                      </span>
-                    ) : null}
-                    <span
-                      title={phaseHint(p) + (canClick ? ' · 点击跳到这一步' : '')}
-                      onClick={canClick ? () => { void run(async () => {
-                        const r = await setProjectPhase(cur.projectId, p)
-                        return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
-                      }, `已切到「${phaseLabel(p)}」`) } : undefined}
-                      style={{
-                        fontSize: FS.tag,
-                        fontWeight: isCur ? 700 : 400,
-                        cursor: canClick ? 'pointer' : 'default',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        color: isCur ? '#fff' : (done ? C.accent : C.dim),
-                        background: isCur ? C.accent : 'transparent',
-                        border: `1px solid ${isCur ? C.accent : (done ? C.accent : C.border)}`,
-                      }}
-                    >
-                      {phaseLabel(p, cur.phase === p ? cur.phaseLabel : undefined)}
-                    </span>
-                  </span>
-                )
-              })}
-            </span>
-            <span style={{ fontSize: FS.tag, color: archived ? '#1e7e42' : C.dim }}>
-              第 {curIdx}/{PROJECT_PHASES.length} 步
-            </span>
-            {/* ★ 归档态不给「推进」：归档是出口，没有下一步。
-                也不给「退回」—— 归档=冻结，要改先解冻（那是另一个动作，不能藏在这里）。 */}
-            {archived ? (
-              <span style={{ fontSize: FS.tag, color: C.faint }}>已归档 · 冻结不再改</span>
-            ) : (
-              <>
-                {pv !== null ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => { void run(async () => {
-                      const r = await setProjectPhase(cur.projectId, pv)
-                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
-                    }, `已退回「${phaseLabel(pv)}」`) }}
-                    title={`退回上一步：「${phaseLabel(pv)}」`}
-                    style={{ ...btnStyle(false), padding: '3px 10px', fontSize: FS.tag }}
-                  >
-                    ← {phaseLabel(pv)}
-                  </button>
-                ) : null}
-                {nx !== null ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => { void run(async () => {
-                      const r = await setProjectPhase(cur.projectId, nx)
-                      return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
-                    }, `已推进到「${phaseLabel(nx)}」`) }}
-                    title={phaseHint(nx)}
-                    style={{ ...btnStyle(true), padding: '3px 10px', fontSize: FS.tag }}
-                  >
-                    {phaseLabel(nx)} →
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
-        )
-      })()}
 
       {/* ★ 一键挂载：审计结论（四灯场景 + 资料预检；报告带 Ed25519 签名可验） */}
       {audit !== null ? (
@@ -6379,113 +6465,7 @@ function TaskSection(): ReactElement {
                   照旧文案会让人到处找「全部」按钮。改成指**真实存在**的操作：点上面的项目卡片。 */
                : '这个项目下还没有任务 —— 点上面别的项目卡片，看那个项目的任务。'}
         </div>
-      ) : (
-        <div>
-          {/* ★★★ 2026-10-26 阿开定（任务页设计图 V3 §三）：四段由「竖排长条」改为「并排一行」。
-              ★ 为什么并排：竖排时四个长条各占一整行，四个段头就吃掉 4 行高度，
-                而这一行里其实只写了「段名 + 条数 + 展开」，横向空间全浪费。
-                并排后四段共用一行，页面立刻短一截。
-              ★ 为什么 flex:1 平均分：阿开原话「把一行平均分一下就可以了」——
-                不按内容宽度自适应，因为四段条数变化会让按钮宽度跳来跳去，反而更难扫。
-              ★ 为什么卡片移到「四段行下方」而不是留在段内：每段只占 25% 宽，
-                卡片塞进 25% 格子里会挤成一列窄条；移到整行下方，卡片有全宽可用。 */}
-          <div style={{ display: 'flex', gap: 6 }}>
-            {TASK_SECTIONS.map((sec) => {
-              const list = searchedTasks.filter((t) => sec.match(t, myId))
-              const open = openSec[sec.key] ?? sec.openByDefault
-              return (
-                <button
-                  key={sec.key}
-                  type="button"
-                  onClick={() => setOpenSec((p) => ({ ...p, [sec.key]: !open }))}
-                  aria-expanded={open}
-                  /* ★ 展开态的三条线索沿用 0.2.94 的实证结论（阿开：「展开不知道可以收」）：
-                     ① 常显文字「展开 ▾ / 收起 ▴」—— 字比图形好认，这是主线索
-                     ② 边框 1px 灰 → 2px 蓝（用「线粗」而不是「色深」，浅底上加深看不出来）
-                     ③ 内边距同步减 1px，抵消边框增厚，避免四段并排时高度不齐
-                     ★★ 2026-10-26 台阶⑧（阿开定）：「四段的展开按钮建议放在 数字背后同一行
-                        这样可以更好看一些。目前是上下2行」⇒ **改成单行**：
-                        圆点 · 段名 · 条数 · 展开▾ —— 全在一行。
-                        ★ 展开指示**紧跟数字**（`marginLeft: 2`），不推到最右 ——
-                          阿开说「数字背后」，就是紧贴；推远会让它跟数字脱钩。
-                        ★ 为什么不用 column 两行：四个段各多占一行 = 白吃掉 ~20px 高度，
-                          而第二行只有一个「展开」两字，横向空间全浪费。 */
-                  style={{
-                    flex: 1, minWidth: 0,
-                    display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5,
-                    background: open ? 'rgba(59,111,224,0.10)' : '#fff',
-                    border: `${open ? '2px' : '1px'} solid ${open ? C.accent : '#d0d5dd'}`,
-                    borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-                    padding: open ? '5px 9px' : '6px 10px',
-                    fontFamily: 'inherit', color: C.text,
-                    transition: 'border-color 160ms, background 160ms',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {/* 圆点：区分「有活/没活」，一眼扫出哪段该点 */}
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      flex: '0 0 auto', width: 6, height: 6, borderRadius: 3,
-                      background: list.length > 0 ? C.accent : '#d0d5dd',
-                    }}
-                  />
-                  <span style={{
-                    fontSize: FS.small, fontWeight: 600, whiteSpace: 'nowrap',
-                    overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
-                    color: list.length > 0 ? C.text : C.dim,
-                  }}>
-                    {sec.title}
-                  </span>
-                  <span style={{
-                    flex: '0 0 auto', minWidth: 16, textAlign: 'center',
-                    fontSize: FS.tag, fontWeight: 600,
-                    color: list.length > 0 ? C.text : C.dim,
-                  }}>
-                    {list.length}
-                  </span>
-                  {/* 展开/收起指示：推到最右（marginLeft:'auto'），与条数同一行
-                      ★ 阿开原话「放在 数字背后同一行」= 紧跟在数字后面
-                      ⇒ 不用 marginLeft:auto 推远，紧贴数字更符合"背后"这个说法 */}
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      flex: '0 0 auto', marginLeft: 2,
-                      fontSize: FS.tag, fontWeight: 600,
-                      color: open ? C.accent : '#667085',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {open ? '收起 ▴' : '展开 ▾'}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          {/* ★ 展开的卡片：挂在「四段这一行」的下方，占整行宽度，按 TASK_SECTIONS 顺序排列。
-              ★ 四段互不影响（甲案）：可以同时展开多段，各段卡片依次往下排。
-              ★ 空段不显示卡片区（不占位置），只有展开了且有内容/有提示才出现。 */}
-          {TASK_SECTIONS.map((sec) => {
-            const list = searchedTasks.filter((t) => sec.match(t, myId))
-            const open = openSec[sec.key] ?? sec.openByDefault
-            if (!open) return null
-            return (
-              <div key={sec.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                {list.length === 0 ? (
-                  <div style={{ ...cardStyle, fontSize: FS.tag, color: C.dim }}>{sec.empty}</div>
-                ) : (
-                  list.map((t) => (
-                    <CardBoundary key={t.task_id}>
-                      <TaskCard task={t} myId={myId} busy={busy} run={run} projectName={projectNameOf(t.projectId)} nodeLabel={nodeLabelOf(t.node_id)} allTasks={tasks} />
-                    </CardBoundary>
-                  ))
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
+      ) : null}
     </div>
   )
 }
