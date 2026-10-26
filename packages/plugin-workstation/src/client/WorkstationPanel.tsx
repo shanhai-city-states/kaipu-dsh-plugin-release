@@ -87,7 +87,7 @@ import { PLUGIN_VERSION } from './version.js'
 /* ★★ 2026-10-26：席位数量总览（纯逻辑，可单测）。
    抽成独立模块而不是写在组件里：判据要能真跑输入→输出，
    写在 JSX 里就只能靠肉眼看截图 —— 那种「验证」等于没验。 */
-import { countSeatTypes, seatBadge, seatSummary, SEAT_ORDER, SEAT_LABELS } from './seat-summary.js'
+import { countSeatTypes, seatBadge, seatSummary, SEAT_ORDER, SEAT_LABELS, isAdvisorSeat } from './seat-summary.js'
 /* ★ 083 第一批（邀请码补发闭环）：文案与纯逻辑抽出去，判据才能**真跑**输入→输出，
    而不是对源码 grep 关键词（星月 R-6：同一张关键词表 = 0 命中，那不是通过，是没测）。 */
 import {
@@ -1708,7 +1708,9 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
   const seatKeyOf = (n: OrgNodeView): string => {
     const k = (n as { seatKey?: string }).seatKey
     if (typeof k === 'string' && k.length > 0) return k
-    if (n.name.includes('签名')) return 'signature'
+    /* ★ 2026-10-26 改名后必须走归一化判据：中文名已从「签名位」变「山海顾问位」，
+       按「含签名」匹配会全部失效 ⇒ 静默放开锁定。判据正本 = seat-summary.isAdvisorSeat */
+    if (isAdvisorSeat(n.seatKey, n.name)) return 'signature'
     return ''
   }
   const seatRank = (n: OrgNodeView): number => {
@@ -1931,7 +1933,7 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
                 if (seatList === null) return undefined
                 const k = ((n as { seatKey?: string }).seatKey ?? '').length > 0
                   ? ((n as { seatKey?: string }).seatKey as string)
-                  : (n.name.includes('签名') ? 'signature' : '')
+                  : (isAdvisorSeat(n.name, n.name) ? 'signature' : '')
                 return k.length > 0 ? seatList.find((x) => x.seat === k) : undefined
               })()}
               busy={busy}
@@ -2214,7 +2216,7 @@ function InviteBar(props: { node: OrgNodeView; made: { url: string; expiresAt: s
     const hit = INVITE_LAMPS.find((x) => x.label === node.name || node.name.startsWith(x.label))
     if (hit) return hit.value
     // ③ 名字命中锁定席位（签名位不在 INVITE_LAMPS 里，要单独认）
-    if (node.name.includes('签名位') || node.name.includes('签名')) return 'signature'
+    if (isAdvisorSeat(node.seatKey, node.name)) return 'signature'
     return 'execution'
   })()
   const locked = LOCKED_SEAT_KEYS.has(seatKey)
@@ -2548,7 +2550,7 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
        而系统模板建的签名位一定有 seat 绑定 —— 两者都要覆盖。 */
   const cardSeatKey = ((node as { seatKey?: string }).seatKey ?? '').length > 0
     ? ((node as { seatKey?: string }).seatKey as string)
-    : (node.name.includes('签名位') || node.name.includes('签名') ? 'signature' : '')
+    : (isAdvisorSeat(node.seatKey, node.name) ? 'signature' : '')
   const seatLocked = LOCKED_SEAT_KEYS.has(cardSeatKey)
   /** 请出要二次确认：凭证一作废不可恢复 */
   const [evictArm, setEvictArm] = useState(false)
@@ -3059,7 +3061,7 @@ function EmptySeat(props: {
  * ══════════════════════════════════════════════════════════════════ */
 function resolveSeatKeyByName(name: string): string {
   const s = (name ?? '').trim()
-  if (s.includes('签名')) return 'signature'
+  if (isAdvisorSeat(s, s)) return 'signature'
   if (s.includes('战略')) return 'strategy'
   if (s.includes('管理助理')) return 'management_assistant'
   if (s.includes('管理')) return 'management'
@@ -5763,10 +5765,62 @@ function TaskSection(): ReactElement {
       {/* ★ 期6-L2 · 项目（长期实体：归档 = 打包全部资料 + manifest；不删原件） */}
       {projects.length > 0 ? (
         <div style={{ marginTop: 14 }}>
+          {/* ★★★ 2026-10-26 台阶⑦（阿开定）：搜索框 + 两个单选**搬进「项目」标题同一行**。
+              ★ 阿开原话：「搜索框不需要单独占一行 放中间就可以了 也不要那么长 太长了
+                点项目和任务不方便」。
+              ★ 为什么搬上来：搜索框本来和这排标题是**一个模块**，单独占一行既浪费高度、
+                又把「项目」标题和它要筛的卡片隔开。合到一行后标题行就是「操作条」。
+              ★ 为什么收窄 + 居中：撑满(flex:1)会让「清空」和两个单选被推到手很远的右边；
+                固定 220px 居中，手指/鼠标落点在中间，符合阿开说的「点起来不方便」的痛点。
+              ★ 为什么保留 flexWrap：窄屏（手机）放不下时**整块换行**，不压缩搜索框。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
             <div style={{ fontSize: FS.title, fontWeight: 600 }}>项目</div>
             <span style={{ fontSize: FS.tag, color: C.dim }}>{projects.length}</span>
             <span style={{ flex: 1 }} />
+            {/* 搜索框 + 单选：一个模块，居中放标题行右半 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="text"
+                value={kw}
+                onChange={(e) => setKw(e.target.value)}
+                placeholder={searchMode === 'project' ? '🔍 项目名…' : '🔍 任务关键词…'}
+                style={{
+                  width: 220, padding: '5px 9px', fontSize: FS.tag,
+                  border: '1px solid ' + C.border, borderRadius: 6, background: '#fff', color: C.text,
+                }}
+              />
+              {kw !== '' ? (
+                <button
+                  type="button"
+                  onClick={() => setKw('')}
+                  style={{ ...btnStyle(false), fontSize: FS.tag, padding: '3px 7px' }}
+                  title="清空关键词"
+                >
+                  清空
+                </button>
+              ) : null}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: FS.tag, color: C.dim }}>
+                {([['project', '项目'], ['task', '任务']] as const).map(([k, label]) => (
+                  <label
+                    key={k}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+                      color: searchMode === k ? C.accent : C.dim,
+                      fontWeight: searchMode === k ? 600 : 400,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="searchMode083"
+                      checked={searchMode === k}
+                      onChange={() => setSearchMode(k)}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
             <span style={{ fontSize: FS.tag, color: C.dim }}>归档 = 打包资料 + 清单，不删原件</span>
           </div>
           {pendingArchive !== null ? (
@@ -6027,7 +6081,7 @@ function TaskSection(): ReactElement {
         const cur = projects.find((p) => p.projectId === projFilter)
         if (cur === undefined) return null
         const ph = cur.phase
-        const bar = phaseBar(ph)
+        const curIdx = phaseIndex(ph)
         const nx = nextPhase(ph)
         const pv = prevPhase(ph)
         const archived = isArchivedPhase(ph)
@@ -6039,18 +6093,48 @@ function TaskSection(): ReactElement {
             <span style={{ fontSize: FS.small, fontWeight: 600 }}>
               {cur.name}
             </span>
-            <span
-              title={phaseHint(ph)}
-              style={{
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                fontSize: FS.small, letterSpacing: 1,
-                color: phaseIndex(ph) === 0 ? '#9b2c2c' : C.accent,
-              }}
-            >
-              {bar}
+            {/* ★ 六步节点条（2026-10-26 阿开：列出六步、当前高亮、可点改）
+                —— 每一步都带名字，不再用 `●●●○○○`：点阵看不出走到哪一步，
+                   只能看出走了几步。带名字才能「看见自己在流程的哪一环」。
+                —— 可点：铺主 / 管理助理点任意一步直接跳（后端只许 ±1 与 →archived，
+                   越级由服务端 409 拦，前端不做第二套判据）。 */}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              {PROJECT_PHASES.map((p, i) => {
+                const done = curIdx > i + 1
+                const isCur = curIdx === i + 1
+                const canClick = !busy && !isCur
+                return (
+                  <span key={p} style={{ display: 'flex', alignItems: 'center' }}>
+                    {i > 0 ? (
+                      <span style={{ fontSize: FS.tag, color: done || isCur ? C.accent : C.faint, margin: '0 1px' }}>
+                        ›
+                      </span>
+                    ) : null}
+                    <span
+                      title={phaseHint(p) + (canClick ? ' · 点击跳到这一步' : '')}
+                      onClick={canClick ? () => { void run(async () => {
+                        const r = await setProjectPhase(cur.projectId, p)
+                        return r.ok ? { ok: true } : { ok: false, code: r.code, message: r.message }
+                      }, `已切到「${phaseLabel(p)}」`) } : undefined}
+                      style={{
+                        fontSize: FS.tag,
+                        fontWeight: isCur ? 700 : 400,
+                        cursor: canClick ? 'pointer' : 'default',
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        color: isCur ? '#fff' : (done ? C.accent : C.dim),
+                        background: isCur ? C.accent : 'transparent',
+                        border: `1px solid ${isCur ? C.accent : (done ? C.accent : C.border)}`,
+                      }}
+                    >
+                      {phaseLabel(p, cur.phase === p ? cur.phaseLabel : undefined)}
+                    </span>
+                  </span>
+                )
+              })}
             </span>
             <span style={{ fontSize: FS.tag, color: archived ? '#1e7e42' : C.dim }}>
-              {phaseLabel(ph, cur.phaseLabel)}（第 {phaseIndex(ph)}/{PROJECT_PHASES.length} 步）
+              第 {curIdx}/{PROJECT_PHASES.length} 步
             </span>
             {/* ★ 归档态不给「推进」：归档是出口，没有下一步。
                 也不给「退回」—— 归档=冻结，要改先解冻（那是另一个动作，不能藏在这里）。 */}
@@ -6318,10 +6402,17 @@ function TaskSection(): ReactElement {
                   /* ★ 展开态的三条线索沿用 0.2.94 的实证结论（阿开：「展开不知道可以收」）：
                      ① 常显文字「展开 ▾ / 收起 ▴」—— 字比图形好认，这是主线索
                      ② 边框 1px 灰 → 2px 蓝（用「线粗」而不是「色深」，浅底上加深看不出来）
-                     ③ 内边距同步减 1px，抵消边框增厚，避免四段并排时高度不齐 */
+                     ③ 内边距同步减 1px，抵消边框增厚，避免四段并排时高度不齐
+                     ★★ 2026-10-26 台阶⑧（阿开定）：「四段的展开按钮建议放在 数字背后同一行
+                        这样可以更好看一些。目前是上下2行」⇒ **改成单行**：
+                        圆点 · 段名 · 条数 · 展开▾ —— 全在一行。
+                        ★ 展开指示**紧跟数字**（`marginLeft: 2`），不推到最右 ——
+                          阿开说「数字背后」，就是紧贴；推远会让它跟数字脱钩。
+                        ★ 为什么不用 column 两行：四个段各多占一行 = 白吃掉 ~20px 高度，
+                          而第二行只有一个「展开」两字，横向空间全浪费。 */
                   style={{
                     flex: 1, minWidth: 0,
-                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+                    display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5,
                     background: open ? 'rgba(59,111,224,0.10)' : '#fff',
                     border: `${open ? '2px' : '1px'} solid ${open ? C.accent : '#d0d5dd'}`,
                     borderRadius: 8, cursor: 'pointer', textAlign: 'left',
@@ -6331,34 +6422,35 @@ function TaskSection(): ReactElement {
                     overflow: 'hidden',
                   }}
                 >
-                  {/* 第一行：圆点 + 段名 + 条数。圆点用来区分「有活/没活」，一眼扫出哪段该点 */}
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%', minWidth: 0 }}>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        flex: '0 0 auto', width: 6, height: 6, borderRadius: 3,
-                        background: list.length > 0 ? C.accent : '#d0d5dd',
-                      }}
-                    />
-                    <span style={{
-                      fontSize: FS.small, fontWeight: 600, whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                      color: list.length > 0 ? C.text : C.dim,
-                    }}>
-                      {sec.title}
-                    </span>
-                    <span style={{
-                      flex: '0 0 auto', minWidth: 16, textAlign: 'center',
-                      fontSize: FS.tag, fontWeight: 600,
-                      color: list.length > 0 ? C.text : C.dim,
-                    }}>
-                      {list.length}
-                    </span>
-                  </span>
-                  {/* 第二行：展开/收起指示（★第二线索，字优先） */}
+                  {/* 圆点：区分「有活/没活」，一眼扫出哪段该点 */}
                   <span
                     aria-hidden="true"
                     style={{
+                      flex: '0 0 auto', width: 6, height: 6, borderRadius: 3,
+                      background: list.length > 0 ? C.accent : '#d0d5dd',
+                    }}
+                  />
+                  <span style={{
+                    fontSize: FS.small, fontWeight: 600, whiteSpace: 'nowrap',
+                    overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
+                    color: list.length > 0 ? C.text : C.dim,
+                  }}>
+                    {sec.title}
+                  </span>
+                  <span style={{
+                    flex: '0 0 auto', minWidth: 16, textAlign: 'center',
+                    fontSize: FS.tag, fontWeight: 600,
+                    color: list.length > 0 ? C.text : C.dim,
+                  }}>
+                    {list.length}
+                  </span>
+                  {/* 展开/收起指示：推到最右（marginLeft:'auto'），与条数同一行
+                      ★ 阿开原话「放在 数字背后同一行」= 紧跟在数字后面
+                      ⇒ 不用 marginLeft:auto 推远，紧贴数字更符合"背后"这个说法 */}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      flex: '0 0 auto', marginLeft: 2,
                       fontSize: FS.tag, fontWeight: 600,
                       color: open ? C.accent : '#667085',
                       whiteSpace: 'nowrap',

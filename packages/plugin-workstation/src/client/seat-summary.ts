@@ -56,7 +56,12 @@ export const SEAT_LABELS: Readonly<Record<string, string>> = {
   audit: '审计位',
   management: '管理位',
   strategy: '战略位',
-  signature: '签名位',
+  /* ★★ 2026-10-26 阿开：签名位改名「山海顾问位」
+     —— 原话：「把签名位改成山海顾问位，因为签名是系统能力服务
+        （告诉客户有这个签名服务即可）。山海顾问位包含了签名能力」
+     ★ seat key 仍是 `signature`（值域不动），只改对外呈现的名字。
+     ★ 后端 `DEFAULT_SEATS` 的 label/holder_name 已同步改（store.py）。 */
+  signature: '山海顾问位',
   management_assistant: '管理助理位',
 }
 
@@ -76,6 +81,44 @@ export const SEAT_LABELS: Readonly<Record<string, string>> = {
  *       它不该占格子 —— 否则会出现「既没人在坐、又不是空位」这种怪卡片。
  *     ⇒ 本轮从 SEAT_ORDER 移除；助理入口搬到「工位布局」标题右侧（`GrantEntry`）。
  *     ★ 后端 `DEFAULT_SEATS` 同步移除该位（见 store.py），前端不再渲染它。 */
+/**
+ * ★★ 2026-10-26 阿开：签名位改名「山海顾问位」。
+ *
+ * **为什么必须有这个函数**：本仓有 6 处按「名字里含『签名』」判断锁定座位。
+ * 一改名（label 从「签名位」→「山海顾问位」），那 6 处**全部失效** ——
+ * 后果不是报错，是**静默放开**：签名位卡片重新长出邀请按钮，
+ * 点了发出去的是执行位码（2026-10-24 已发生过一次同类事故）。
+ *
+ * ⇒ 判据收敛到这一处：**只认 seat key，不认中文名**。
+ *   中文名是给人看的，随时会改；seat key 是存储值域，改了要迁移。
+ *   名字只作**老数据兜底**（seatKey 缺失时才用），且新旧两个名字都要认。
+ */
+const ADVISOR_SEAT_NAMES: ReadonlyArray<string> = [
+  '山海顾问位',   // 新名（2026-10-26 起）
+  '签名位',       // 旧名（存量铺子/老文档，必须继续认，否则老数据判不出锁定位）
+]
+
+/** 这个座位节点是不是「山海顾问位」（= 平台位，不可邀请/不可改名） */
+export function isAdvisorSeat(seatKey: string | undefined, name: string | undefined): boolean {
+  const key = (seatKey ?? '').trim()
+  /* ① seatKey 在 ⇒ **它定案，名字不参与**。
+     ★★ 2026-10-26 判据 S-3f 抓到的设计缺陷（原实现）：
+        原来写 `if (key==='signature') return true`，key 不是 signature 时**继续走名字兜底**
+        ⇒ `isAdvisorSeat('execution','山海顾问位')` 返回 true
+        ⇒ 后果：一个执行位只要被改名成「山海顾问位」，它的邀请按钮就消失（被误锁）。
+        名字是给人看的、可以随手改；seatKey 是存储值域、改了要迁移。
+        **有 key 就信 key，名字一个字都不看。** */
+  if (key !== '') return key === 'signature'
+  /* ② 老数据没有 seatKey（空串）⇒ 退回名字认，新旧名字都认 */
+  const n = (name ?? '').trim()
+  if (n === '') return false
+  if (ADVISOR_SEAT_NAMES.some((x) => n === x || n.includes(x))) return true
+  /* ③ ★ 兜底：名字里还带「签名」两字的（如「签名位（平台专属）」）也认 ——
+     这是迁移期的不完美处，但**宁可多认（锁上）也不能少认（静默放开）**。
+     ★ 仅在**无 seatKey** 时适用 —— 有 key 的已在 ① 定案，不会走到这里。 */
+  return n.includes('签名')
+}
+
 export const SEAT_ORDER: ReadonlyArray<string> = [
   'signature',
   'strategy',
@@ -171,6 +214,11 @@ export function resolveSeatKey(s: SeatLike): string {
     const name = SEAT_LABELS[k]
     if (name !== undefined && label.includes(name)) return k
   }
+  /* ★★ 2026-10-26 改名兼容：签名位 →「山海顾问位」。
+     `SEAT_LABELS.signature` 现在是「山海顾问位」，因此**旧名「签名位」不再被上面的
+     循环命中** —— 存量铺子（迁移前建的位、老文档、老请求体）会掉成 `unknown`。
+     ⇒ 在这里补一条旧名兜底。★ 宁可多认（认成平台位=锁上），不可少认（unknown=静默放开邀请）。 */
+  if (label.includes('签名')) return 'signature'
   return 'unknown'
 }
 
