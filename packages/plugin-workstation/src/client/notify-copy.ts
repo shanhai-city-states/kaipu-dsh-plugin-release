@@ -147,15 +147,21 @@ export function extraHolderTitle(holderCount: number): string {
  *
  * @param holderCount    取到的在座者条数
  * @param seatCount      这个工位绑定的席位数（位的定义，不是人数）
- * @param seatVacantish  ★ 席位侧是否明确表示「空」/「不可入驻」（来自 role_seats 的状态）
+ * @param seatVacantish  ★ 席位侧结论：`true`=明确空/不可入驻，`false`=明确有人，
+ *                       **`undefined`=读数没回来（不知道）**
  */
 export function holderUnknownText(
   holderCount: number,
   seatCount: number,
-  seatVacantish: boolean = false,
+  seatVacantish: boolean | undefined = undefined,
 ): string {
   if (holderCount > 0) return ''
   if (!Number.isFinite(seatCount) || seatCount <= 0) return ''
+  /* ★★★ 2026-10-26 阿开实测（「第一个没邀请过也显示有人但读不到是谁」）：
+     「读数没回来」不能当成「有人」。它既不是空也不是有人，是**不知道** ⇒ 闭嘴。
+     原来的实现把这个 case 混进 `false`，导致签名位（永远没有 occupants 读数）
+     长期显示「有人，但读不到是谁」—— 把「看不见读数」说成了「有个人但查不出名字」。 */
+  if (seatVacantish === undefined) return ''
   /* ★ 席位自己说「空着 / 不可入驻」⇒ 就是空位，不是「读不到」。
      签名位（cap=0）属于「不可入驻」，它的人（山海签名服务）不是 Agent，不该被当成人报。 */
   if (seatVacantish) return ''
