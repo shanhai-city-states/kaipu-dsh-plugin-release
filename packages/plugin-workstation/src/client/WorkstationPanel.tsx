@@ -3328,6 +3328,44 @@ const KIND_COLOR: Record<string, string> = {
   test: '#9ca3af',
 }
 
+/**
+ * ★★★ 2026-10-26（阿开定·甲案）：**阶段 → 性质** 的自动映射。
+ *
+ * 背景：界面原来有**两套分类** —— 项目卡片上六步（立需求→…→归档），
+ * 新建任务里又有「这条是：需求/交付/回函/测试」。用户要学两个概念，
+ * 阿开质问：「这个还在不是说好跟外面的六步流程一样吗？」
+ *
+ * 甲案：**用户只看到并选择一套 —— 阶段**。`kind` 退回成**系统字段**，
+ * 由这里从阶段推出来，Agent 的分流行为一个字都不用改。
+ *
+ * 映射依据（为什么这么对，不是随便配的）：
+ *   · 立需求 / 出计划书 / 分工 ⇒ `requirement`
+ *       —— 这三个阶段派出去的都是「要人产出东西」的活（写需求、写方案、领任务）。
+ *   · 施工 ⇒ `requirement`
+ *       —— 施工期的任务绝大多数是「去做、做完交件」，也是要人产出。
+ *   · 验收 ⇒ `report`
+ *       —— 验收期派的多是「看一眼、给结论」，Agent 扫一眼即可，不必当重活。
+ *   · 归档 ⇒ `report`
+ *       —— 归档期只剩通知与留痕类。
+ *
+ * ★ 为什么不映射到 `test`/`delivery`：那两个是给「测试链路」「交回件」用的，
+ *   属于**协作动作的类别**，不是项目阶段，硬映射会在验收期产生语义错位。
+ *   这两类仍可由服务端按标题推断兜底（保留原有能力）。
+ */
+const PHASE_TO_KIND: Record<string, string> = {
+  requirement: 'requirement',
+  plan: 'requirement',
+  assignment: 'requirement',
+  build: 'requirement',
+  review: 'report',
+  archived: 'report',
+}
+
+/** 阶段 → 性质；未知阶段给空串（让服务端按标题推断，不比瞎猜差） */
+function phaseToKind(phase: string): string {
+  return PHASE_TO_KIND[phase] ?? ''
+}
+
 /** 状态色：沿用本文件既有色值（LAMP_COLOR / C），不引入新主题 */
 function statusTone(status: string): string {
   switch (normStatus(status)) {
@@ -4869,11 +4907,15 @@ function TaskSection(): ReactElement {
   const [composing, setComposing] = useState(false)
   const [title, setTitle] = useState('')
   const [detail, setDetail] = useState('')
-  /* ★ 2026-10-23：任务分类（空 = 让服务端按标题推断，推断不出来给 other）。
-     有它 Agent 才能先分流：需求要动手、回函只扫一眼、测试直接跳过。 */
-  const [newKind, setNewKind] = useState('')
+  /* ★★★ 2026-10-26 甲案：任务的「所属阶段」（六步之一），替掉原来的「性质」下拉。
+     · newPhase   = 用户看到并选择的值（默认跟项目当前阶段走）
+     · phaseTouched = 用户是否手动改过。改过就不再被「项目阶段变了」覆盖 ——
+       否则用户选好「立需求」，切个项目回来就被冲掉，那种静默改写比不给选更糟。 */
+  const [newPhase, setNewPhase] = useState<string>('requirement')
+  const [phaseTouched, setPhaseTouched] = useState(false)
   /* ★ 期6-L2：项目归属（空 = 未归类） */
   const [projects, setProjects] = useState<ProjectItem[]>([])
+
   /* ★ 2026-10-21：项目清单读失败以前是**静默**的（「读失败不清空」）⇒
      阿开连着两次说「项目不见了」却没有任何提示。现在把失败摆出来。 */
   const [projErr, setProjErr] = useState<{ code: string; message: string } | null>(null)
@@ -5032,6 +5074,19 @@ function TaskSection(): ReactElement {
   }
 
   const [projId, setProjId] = useState('')
+  /* ★ 2026-10-26 甲案：「所属阶段」默认跟项目当前阶段走。
+     ★ 为什么用 useEffect 挂在 projId 上，而不是在每处 setProjId 里都写一行：
+       现在有「新建项目后自动选中」「下拉切换」等多个入口，逐处写必漏（这项目已经栽过
+       「搬家漏删」的坑）。挂在 projId 上，**不关心是谁改的**，只关心它变了。
+     ★ 为什么不覆盖 phaseTouched：用户手选过的值属于用户的决定，
+       被「切项目」这种副作用冲掉，是静默改写用户输入 —— 比不给选更糟。 */
+  useEffect(() => {
+    if (phaseTouched) return
+    const cur = projects.find((p) => p.projectId === projId)
+    const ph = cur?.phase
+    if (typeof ph === 'string' && ph !== '' && ph !== 'archived') setNewPhase(ph)
+  }, [projId, projects, phaseTouched])
+
   const [projNew, setProjNew] = useState(false)
   const [projName, setProjName] = useState('')
   const [projNotice, setProjNotice] = useState<string | null>(null)
@@ -5203,7 +5258,7 @@ function TaskSection(): ReactElement {
          附件才有确定的家 —— 否则「先传文件再建任务」时无法知道该传给谁。 */
       const tid = newUuid()
       let r = await createTask(
-        t, detail.trim(), projId || undefined, `task-${tid}`, newKind || undefined,
+        t, detail.trim(), projId || undefined, `task-${tid}`, phaseToKind(newPhase) || undefined,
         notifyId || undefined, nodeId || undefined,
       )
       /* ★ 2026-10-24（083-r1）：服务端这版 `POST /tasks` 还没有 notifyAgent 字段，
@@ -5217,7 +5272,7 @@ function TaskSection(): ReactElement {
       if (!r.ok && notifyId.length > 0 && isNotifyUnsupported(r.code, r.message)) {
         degraded = true
         r = await createTask(
-          t, detail.trim(), projId || undefined, `task-${tid}`, newKind || undefined,
+          t, detail.trim(), projId || undefined, `task-${tid}`, phaseToKind(newPhase) || undefined,
           undefined, nodeId || undefined,
         )
       }
@@ -5762,22 +5817,30 @@ function TaskSection(): ReactElement {
             placeholder="任务标题，如「写完期5验收报告」"
             style={inputStyle}
           />
-          {/* ★ 2026-10-23 阿开定「不上向量上分类标签」—— 发布时顺手选一下，
-              比事后按标题猜准得多。留空则由服务端推断（推断不出来给「未分类」）。 */}
+          {/* ★★★ 2026-10-26 阿开定（甲案）：原「这条是：需求/交付/回函/测试」下拉改掉。
+              ★ 为什么改：那是**另一套分类**，跟项目卡片上的六步流程（立需求→出计划书→分工→
+                施工→验收→归档）毫无关系。用户看到两个都叫「流程/分类」的东西必然困惑 ——
+                阿开原话：「这个还在不是说好跟外面的六步流程一样吗？」
+              ★ 甲案精神：**用户只学一套概念**。界面只留六步（任务的「所属阶段」）；
+                后端 `kind` 是 Agent 分流字段，**由阶段自动映射**（见 phaseToKind），用户不用懂。
+              ★ 为什么自动带入 + 允许改：90% 的任务就属于项目当前阶段，每次手选是浪费；
+                但偶尔要补一条早期阶段的任务（比如施工期补一条「立需求」），所以允许改。
+              ★ 为什么「跟着项目」而不是写死：项目阶段会推进，切项目后默认值必须跟着变
+                （见 useEffect 里的同步）；用户一旦手改过，就不再被覆盖（touched 标记）。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: FS.tag, color: C.dim }}>
-            <span>这条是：</span>
+            <span>所属阶段</span>
             <select
-              value={newKind}
-              onChange={(e) => setNewKind(e.target.value)}
+              value={newPhase}
+              onChange={(e) => { setNewPhase(e.target.value); setPhaseTouched(true) }}
               style={{ ...inputStyle, padding: '3px 6px', flex: '0 0 auto', width: 130 }}
             >
-              <option value="">自动判断</option>
-              <option value="requirement">需求（要人干活）</option>
-              <option value="delivery">交付（交回的件）</option>
-              <option value="report">回函（只同步信息）</option>
-              <option value="test">测试（验证链路用）</option>
+              {PROJECT_PHASES.filter((p) => p !== 'archived').map((p) => (
+                <option key={p} value={p}>{phaseLabel(p)}</option>
+              ))}
             </select>
-            <span style={{ color: C.faint }}>Agent 靠它先分流，不用逐条读全文</span>
+            <span style={{ color: C.faint }}>
+              跟项目当前阶段走，可改 · Agent 按它分流
+            </span>
           </div>
           <textarea
             value={detail}
