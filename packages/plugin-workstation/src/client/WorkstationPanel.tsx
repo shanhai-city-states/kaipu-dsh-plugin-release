@@ -2238,6 +2238,10 @@ function InviteBar(props: { node: OrgNodeView; made: { url: string; expiresAt: s
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  /* ★ 2026-10-26：邀请链接那条路径也补了「📋 复制给新同事的指令」——
+     它的「已复制」用独立状态，否则会和「复制链接」的 ✓ 串台
+     （点复制指令后链接按钮也变成 ✓ 已复制，人会以为链接复制了）。 */
+  const [guideCopied, setGuideCopied] = useState(false)
 
   const create = async (): Promise<void> => {
     /* ★★★ 2026-10-24 甲层：**锁定坐席不许发码**。
@@ -2346,6 +2350,90 @@ function InviteBar(props: { node: OrgNodeView; made: { url: string; expiresAt: s
               }}
             >
               {copied ? '✓ 已复制' : '复制链接'}
+            </button>
+            {/* ★★ 2026-10-26 阿开：「工位没有你说的『📋 复制给新同事的指令』」
+                ⇒ 对。邀请**链接**这条路径原来只有「复制链接」，
+                  而带钥匙教程的那份指南只挂在**加入码**那条路径上。
+                  两条都是「发给新同事的入口」，凭什么一条有一份没有？
+                  ⇒ 链接这里也补一个，走同一个 `joinGuideText()`（教程一处改全处生效）。
+                  ★ 与加入码那条的差别只在「二、用这个加入码进铺」那一节：
+                    链接给的是 URL（点开就能领凭据），加入码给的是码（要手填）。
+                  ★ 为什么不用窗 `window.confirm` / 弹窗：DSH 宿主里不可靠（已踩过两次）。 */}
+            <button
+              type="button"
+              onClick={() => {
+                void (async () => {
+                  const guide = joinGuideText([
+                    '请帮我完成三件事，一次做完。',
+                    '',
+                    '一、装开铺工位插件',
+                    '在插件市场搜 kaipu-plugin-workstation 并安装，然后用我的账号登录。',
+                    '',
+                    '二、打开这个邀请链接进场',
+                    '邀请链接：' + made.url,
+                    '用浏览器打开它，点「接受邀请，领取凭据」—— 会给你一个 agentSecret（只显示一次，立刻存好）。',
+                    '',
+                    '三、装「山海数据看板」技能并领授权',
+                    '1) 下载并解压：https://agent.ak2029.com/dl084/dashboard-hub.tar.gz',
+                    '   解压得到 dashboard-hub 文件夹，整个放进你的技能目录。',
+                    '2) 打开 dashboard-hub/hub.json（没有就复制 hub.json.example），保证有且只有：',
+                    '   {"url": "https://agent.ak2029.com/hub-084"}',
+                    '3) 在 dashboard-hub 目录里运行：',
+                    '   python scripts/hub_dash.py claim',
+                    '4) 验证：',
+                    '   python scripts/hub_dash.py profile <表格路径>',
+                    '',
+                    '授权码不用手工填 —— claim 会自动读本机的工位设备凭据并领到，'
+                    + '免费额度，一年到期后回工位插件重领。',
+                    '',
+                    '四、以后传资料（重要：不要开浏览器传，直接调接口）',
+                    '铺主给你「交互 ID」后，用下面这条（把 6 个 {..} 换成真实值）：',
+                    '  TS=$(date +%s)',
+                    '  SHA=$(sha256sum /path/to/your-file.zip | cut -d\' \' -f1)',
+                    '  MSG="{agentId}|${TS}|{accountId}|your-file.zip|${SHA}"',
+                    '  SIG=$(printf \'%s\' "$MSG" | openssl dgst -sha256 -hmac "{secret}" -r | cut -d\' \' -f1)',
+                    '  curl -sS -X POST "https://agent.ak2029.com/kai-pu/packs/{交互ID}/files" \\',
+                    '    -H "X-Agent-Id: {agentId}" -H "X-Account-Id: {accountId}" -H "X-Ts: ${TS}" \\',
+                    '    -H "X-Filename: your-file.zip" -H "X-Body-Sha256: ${SHA}" -H "X-Sig: ${SIG}" \\',
+                    '    --data-binary @/path/to/your-file.zip',
+                    '成功判据：HTTP 200 且返回的 sha256 与本地 sha256sum 一致。',
+                    '★ 签名串用竖线分隔，和领活（agentId+ts 直接拼）不一样。',
+                    '★ 座位决定目录：执行位传的在 execution 下，管理位看不见执行位的 ⇒ 先问对方在哪个位。',
+                    '★★ 文件名必须纯 ASCII（your-file.zip）—— 中文名放不进 HTTP 头，且服务端会先 unquote 再算签名 ⇒ 必然 401。',
+                    '',
+                    '五、钥匙会到期，到期了你自己能换（不用等人搬）',
+                    '每次领任务（poll）返回里多一个 keyStatus，看它的 state：',
+                    '  ok / no_prev    → 没事，继续干活',
+                    '  renew_available → 旧钥匙还在宽限期，新钥匙已在服务端保险箱，去取',
+                    '  expired         → 别死循环，报错给主人，等人点「重置连接」',
+                    '',
+                    'state 是 renew_available 时，用【当前这把钥匙】签名去取：',
+                    '  TS=$(date +%s)',
+                    '  SIG=$(printf \'%s\' "{agentId}${TS}" | openssl dgst -sha256 -hmac "{当前secret}" -r | cut -d\' \' -f1)',
+                    '  curl -sS -X POST "https://agent.ak2029.com/kai-pu/agent/key/claim" \\',
+                    '    -H "Content-Type: application/json" \\',
+                    '    -d "{\\"agentId\\":\\"{agentId}\\",\\"accountId\\":\\"{accountId}\\",\\"ts\\":${TS},\\"sig\\":\\"${SIG}\\"}"',
+                    '',
+                    '★ body 只能有这四个字段，多一个都不行。',
+                    '★ 签名串是 agentId+ts 直接拼，中间没有任何分隔符 —— 和上面上传包的竖线格式不一样。',
+                    '★ sig 放 JSON body，不放 HTTP 头。',
+                    '',
+                    '返回 200：agentSecret 就是新钥匙',
+                    '  1) 用 printf 写入（不要 echo，会多一个换行）',
+                    '  2) 回读校验：长度 43',
+                    '  3) 立刻换掉内存里的密钥 —— 文件改了内存没换 = 下一轮还是 401',
+                    '返回 409 no_pending_key 不是错误：铺主还没点重置，等下一轮，不要重试。',
+                  ])
+                  if (await copyText(guide)) {
+                    setGuideCopied(true)
+                    setTimeout(() => setGuideCopied(false), 1800)
+                  }
+                })()
+              }}
+              style={{ ...btnStyle(false), minWidth: 96 }}
+              title="把「怎么装插件 / 怎么进场 / 怎么传资料 / 钥匙到期怎么自己换」整份指令复制下来，直接发给新同事"
+            >
+              {guideCopied ? '✓ 已复制' : '📋 复制给新同事的指令'}
             </button>
           </div>
         </div>
