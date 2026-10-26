@@ -2876,29 +2876,6 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
                     取消
                   </button>
                 </>
-              ) : resetArm ? (
-                /* ★★ 2026-10-26（阿开定）：重置连接的二次确认。
-                   为什么不在 window.confirm 里问：DSH 宿主里不可靠（已踩过）。
-                   ★ 这里必须说清「不会断线」—— 否则铺主会以为是「踢下线重来」，
-                     不敢点。这个按钮的设计前提就是**重置不断线**。 */
-                <>
-                  <button
-                    type="button"
-                    onClick={() => { setResetArm(false); props.onResetKey(holders[0]?.agentId ?? '') }}
-                    disabled={busy}
-                    style={{ ...btnStyle(false), background: '#2f6f4e', color: '#fff', border: 'none' }}
-                    title="生成新钥匙放进保险箱，Agent 下次来领任务时自己取走"
-                  >
-                    确认重置
-                  </button>
-                  <button type="button" onClick={() => setResetArm(false)} disabled={busy} style={btnStyle(false)}>
-                    取消
-                  </button>
-                  <div style={{ fontSize: 11, color: '#6b7280', gridColumn: '1 / -1', marginTop: 4 }}>
-                    ⓘ 新钥匙放进保险箱，Agent 下次来领任务时自己取走。**不会当场断开** ——
-                    旧钥匙在 24 小时内仍可用，取走后自动作废。
-                  </div>
-                </>
               ) : (
                 <>
                   <button
@@ -2910,15 +2887,17 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
                   >
                     🔑 重置连接
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setEvictArm(true)}
-                    disabled={busy}
-                    title={`请出 ${primaryHolder?.name || '?'}（凭证会作废，工位保留）${extraHolders > 0 ? `　⚠ 该位另有 ${extraHolders} 条在职记录（数据异常，请联系运维）` : ''}`}
-                    style={{ ...btnStyle(false), border: '1px solid #c0392b', color: '#c0392b' }}
-                  >
-                    请出
-                  </button>
+                  {resetArm ? null : (
+                    <button
+                      type="button"
+                      onClick={() => setEvictArm(true)}
+                      disabled={busy}
+                      title={`请出 ${primaryHolder?.name || '?'}（凭证会作废，工位保留）${extraHolders > 0 ? `　⚠ 该位另有 ${extraHolders} 条在职记录（数据异常，请联系运维）` : ''}`}
+                      style={{ ...btnStyle(false), border: '1px solid #c0392b', color: '#c0392b' }}
+                    >
+                      请出
+                    </button>
+                  )}
                 </>
               )
             ) : invitedLive ? (
@@ -3001,6 +2980,62 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
           </>
         )}
       </div>
+
+      {/* ★★ 2026-10-26 阿开：「重置按钮现在的方式不好，字太多工位卡座直接变形了，
+          建议改成跟生成链接一样在卡片下面展开显示，保持卡片的长宽」
+          ⇒ 把重置的二次确认**移出按钮行**，改为卡片底部独占一行的展开区。
+
+          为什么之前会变形：按钮行是 `display:flex` 的单行容器（`marginTop:'auto'` 压底），
+          把「确认重置 + 取消 + 三行长说明」全塞进去，flex 不知道该怎么折行
+          ⇒ 要么把按钮挤扁，要么把 minHeight:78 的卡片撑高，卡座就不方了。
+
+          现在的样子（与 InviteBar 同一个范式）：
+            · 按钮行只剩 [🔑 重置连接] [请出]，永远两枚，宽度可预期
+            · 展开区在下面独占整行，`auto` 高度 ⇒ 卡片只向下长，宽度不动
+            · 展开时**隐藏「请出」**（见上面 `resetArm ? null :`）——
+              避免同一行同时出现「确认重置」和「请出」两个红色危险动作，
+              铺主一慌就点错。 */}
+      {resetArm ? (
+        <div
+          style={{
+            marginTop: 8,
+            padding: '8px 10px',
+            border: '1px solid #2f6f4e',
+            borderRadius: 8,
+            background: '#f2f8f4',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <div style={{ fontSize: FS.tag, color: '#2f6f4e', fontWeight: 600 }}>
+            🔑 换一把新钥匙给 {primaryHolder?.name || '这个 Agent'}？
+          </div>
+          <div style={{ fontSize: FS.tag, color: C.dim, lineHeight: 1.5 }}>
+            新钥匙放进保险箱，它下次来领任务时自己取走。<b>不会当场断开</b> ——
+            旧钥匙 24 小时内仍可用，取走后自动作废。
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => { setResetArm(false); props.onResetKey(holders[0]?.agentId ?? '') }}
+              disabled={busy}
+              style={{ ...btnStyle(true), background: '#2f6f4e', borderColor: '#2f6f4e', fontSize: FS.tag }}
+              title="生成新钥匙放进保险箱，Agent 下次来领任务时自己取走"
+            >
+              确认重置
+            </button>
+            <button
+              type="button"
+              onClick={() => setResetArm(false)}
+              disabled={busy}
+              style={{ ...btnStyle(false), fontSize: FS.tag }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
