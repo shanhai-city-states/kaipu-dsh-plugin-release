@@ -203,6 +203,22 @@ export async function createOrgNode(
   return orgError(r)
 }
 
+/** ★★ 2026-10-26（阿开定 · 钥匙保险箱）：重置一位 Agent 的连接
+ *
+ *  动作（服务端）：① 当前钥匙进 24h 宽限期 ② 新钥匙放进保险箱 ③ **不**当场换钥匙
+ *  ⇒ 与「请出」的根本区别：**人还在，只是换钥匙**；而且不断线（旧钥匙到期前一直可用）。
+ *
+ *  ★ 返回体里**没有新密钥明文** —— 新钥匙在服务端等 Agent 自取。
+ *    所以铺主不需要、也拿不到明文：这条路径的全部意义就是「人不搬钥匙」。
+ */
+export async function resetAgentKey(agentId: string): Promise<OrgResult<{ agentId: string; pendingSecret: boolean; graceHours: number; message: string }>> {
+  if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }
+  const r = await callKaipu<{ agentId: string; pendingSecret: boolean; graceHours: number; message: string }>(
+    connection, 'agentResetConnection', { agentId })
+  if (r.ok === true) return { ok: true, data: r.data }
+  return orgError(r)
+}
+
 /** ★ 请出一个位上的 Agent（只清这一个） */
 export async function evictSeat(seat: string, agentId?: string): Promise<OrgResult<{ seat: string; evicted: { agentId: string; name: string } }>> {
   if (connection === null) return { ok: false, code: 'no_channel', message: '没有数据通道。' }

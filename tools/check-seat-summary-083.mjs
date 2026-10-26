@@ -34,7 +34,7 @@ if (!process.execArgv.includes('--experimental-strip-types')) {
 }
 
 /* ★ 直接 import .ts —— strip-types 负责翻译，我们不猜类型语法 */
-const { countSeatTypes, seatSummary, seatBadge, resolveSeatKey } =
+const { countSeatTypes, seatSummary, seatBadge, resolveSeatKey, isAdvisorSeat } =
   await import('../packages/plugin-workstation/src/client/seat-summary.ts')
 
 let pass = 0
@@ -73,25 +73,65 @@ function ck(name, cond, got) {
     r[r.length - 1] && r[r.length - 1].key === 'audit', r.map((x) => x.key))
 }
 {
-  /* ★ 六位全量顺序：与 `store.DEFAULT_SEATS` 及阿开给的清单一致 */
+  /* ★ 五位全量顺序：与 `store.DEFAULT_SEATS` 一致
+     ★ 0.2.103 起 `management_assistant` 不在 DEFAULT_SEATS —— 它不是座位，
+       是一段有时限的代管授权（见 seat-summary.ts L74 注释），故不进排序输入。 */
   const r = countSeatTypes([
     { seat: 'management', label: '管理位' },
     { seat: 'execution', label: '执行位' },
     { seat: 'audit', label: '审计位' },
     { seat: 'strategy', label: '战略位' },
-    { seat: 'management_assistant', label: '管理助理位' },
     { seat: 'signature', label: '签名位' },
   ])
   const got = r.map((x) => x.key).join(',')
-  /* ★★ 2026-10-26 阿开二次定稿（覆盖同日早间）：签名/战略/管理/助理/审计/执行 */
-  ck('S-2c 六位顺序=签名/战略/管理/助理/审计/执行',
-    got === 'signature,strategy,management,management_assistant,audit,execution', got)
+  ck('S-2c 五位顺序=签名/战略/管理/审计/执行（0.2.103 起助理位不占座位）',
+    got === 'signature,strategy,management,audit,execution', got)
 }
 
 /* ── S-3 缺 seat 字段 ⇒ 按 label 认字 ── */
 {
   ck('S-3a label 认出执行位', resolveSeatKey({ label: '执行位' }) === 'execution', resolveSeatKey({ label: '执行位' }))
-  ck('S-3b label 认出签名位', resolveSeatKey({ label: '签名位' }) === 'signature', resolveSeatKey({ label: '签名位' }))
+  /* ★★ 2026-10-26 阿开：签名位改名「山海顾问位」（含签名能力）。
+     ★ 判据升级：**新旧两个名字都必须认** ——
+       新名是现盘（47 个铺子已迁移），旧名是存量/老文档/老请求体。
+       只认新名 ⇒ 老数据判不出锁定位 ⇒ 静默放开邀请（2026-10-24 事故复发）。
+       只认旧名 ⇒ 新铺子全判不出。
+       ⇒ 一条判据同时压住两个方向。 */
+  ck('S-3b 新名「山海顾问位」认出锁定席位',
+     resolveSeatKey({ label: '山海顾问位' }) === 'signature',
+     resolveSeatKey({ label: '山海顾问位' }))
+  ck('S-3c ★旧名「签名位」仍认（存量兼容）',
+     resolveSeatKey({ label: '签名位' }) === 'signature',
+     resolveSeatKey({ label: '签名位' }))
+  ck('S-3d ★带后缀的旧名也认（「签名位（平台专属）」）',
+     resolveSeatKey({ label: '签名位（平台专属）' }) === 'signature',
+     resolveSeatKey({ label: '签名位（平台专属）'}))
+  /* ★★ 2026-10-26 改名轮（注入测试暴露的缺口）：
+     `isAdvisorSeat` 有**两条**判据路径 —— ① seatKey === 'signature'（正本）
+     ② 名字兜底（老数据）。上面 S-3b~S-3d 只压住了 ② 名字路径；
+     注入「删掉 seatKey 判据」时判据仍全绿 ⇒ **正本路径没被覆盖**。
+     ⇒ 补两条：seatKey 单独就能定案（名字乱写成什么都认），且 seatKey 优先级最高。 */
+  ck('S-3e ★seatKey 单独定案（名字乱写也认，不靠名字）',
+     isAdvisorSeat('signature', '完全不相干的名字') === true,
+     String(isAdvisorSeat('signature', '完全不相干的名字')))
+  ck('S-3f ★seatKey 优先于名字（别的 seat 不被名字带偏）',
+     isAdvisorSeat('execution', '山海顾问位') === false,
+     String(isAdvisorSeat('execution', '山海顾问位')))
+  ck('S-3g 空 seatKey + 新名 ⇒ 认出（老数据无 seatKey 的真实形态）',
+     isAdvisorSeat('', '山海顾问位') === true,
+     String(isAdvisorSeat('', '山海顾问位')))
+  /* ★★ 2026-10-26 注入 C 暴露：上面三条压的是 `resolveSeatKey` 的兜底，
+     没有一条压 `isAdvisorSeat` **自己**的「签名」兜底 ——
+     删掉那行判据仍全绿。而那是**锁定判据的唯一兜底**（老数据名字只剩「签名位（平台专属）」）。 */
+  ck('S-3h ★无 seatKey + 「签名位（平台专属）」⇒ isAdvisorSeat 认出',
+     isAdvisorSeat('', '签名位（平台专属）') === true,
+     String(isAdvisorSeat('', '签名位（平台专属）')))
+  ck('S-3i ★无 seatKey + 「山海签名服务」这种人名 ⇒ 也认（宁可锁上）',
+     isAdvisorSeat('', '山海签名服务') === true,
+     String(isAdvisorSeat('', '山海签名服务')))
+  ck('S-3j 无 seatKey + 完全不相干的名字 ⇒ 不误认',
+     isAdvisorSeat('', '执行位') === false,
+     String(isAdvisorSeat('', '执行位')))
 }
 
 /* ── S-4 未知类型：不隐藏、不改名、保留原 label ── */
@@ -218,27 +258,52 @@ function ck(name, cond, got) {
      —— 我指的是**点开之后的**（24 小时 / 1张2张3张 / 🔑 生成工位加入码）在底部，
      改到上方顶部下方」。
      ⇒ 不再有「按钮 + 就地展开」这一步，改成 `<JoinCodeCard />` **常显**。 */
-  /* ★ 取**最后**一处：空铺分支与主入口各有一个 `<JoinCodeCard compact />`，
-     主入口在总览行下方（位置更后）。search 取第一处会命中空铺那份 ⇒ 假红。 */
-  const iCard = panel.lastIndexOf('<JoinCodeCard compact />')
-  ck('S-11d 加入码卡片常显（不再折叠按钮）', iCard > 0, iCard)
-  ck('S-11e 卡片在席位总览行之后', iCard > iSummary && iSummary > 0, { iCard, iSummary })
+  /* ★★ 2026-10-26（第四轮）：加入码已移到「工位布局」标题行正下方，
+     且在三分支**之外**无条件渲染 ⇒ 全文件只有一份，有工位/空铺共用。
+     ★ 旧口径（S-11d/e/g）是「两处各一份、取最后那处、要求 ≥2」——
+       那是它还在三分支内时的形态；现在按位置判：标题区之后、席位总览之前。 */
+  const allP = panel.split('\n')
+  const iClearBtn2 = allP.findIndex((l) => l === '          一键清场')
+  /* ★★ 2026-10-26（第五轮）：阿开要「顶部的生成工位邀请码按钮」回来，
+     卡片改为受 `showJoinCard` 控制（按钮是入口、卡是本体，共用一个开关）
+     ⇒ 整行精确匹配 `<JoinCodeCard compact />` 失效，改成「该行包含它」。
+     ★ 判的是**存在 + 位置**，不是匹配格式：格式会随受控写法变，位置不会。 */
+  const iCard = allP.findIndex((l) => l.includes('<JoinCodeCard compact />'))
+  ck('S-11d 加入码卡片存在（受 showJoinCard 控制）', iCard > 0, iCard)
+  /* 新位置口径：在标题行之后（一键清场之后）—— 一进来看得见。
+     ★ 不再要求「在 SeatSummaryRow 之前」：那六行汇总 0.2.96 已按阿开
+       「只要卡座 + 第三行说明」整块退出渲染，锚点不存在（旧断言会永远 -1）。 */
+  ck('S-11e 卡片在标题行之后（顶部可见）',
+    iCard > iClearBtn2 && iClearBtn2 > 0,
+    { iClearBtn: iClearBtn2, iCard })
   /* ★ 反向：不许再有「点开」那一步的切换按钮 */
   const toggle = /\{showJoin \? '▾' : '🔑'\} 生成工位加入码/.test(panel)
   ck('S-11f 不再需要折叠按钮（常显）', toggle === false, `still=${toggle}`)
-  /* ★ 空铺分支也要有（判据独立锚它，不只数次数） */
-  const iEmpty2 = panel.indexOf('还没有工位 —— 在下面输入一个名字，加第一个。')
+  /* ★ 无条件渲染 ⇒ 只需一份（有工位/空铺共用）。
+     要求「≥2」是旧形态，现在留 2 份反而是重复渲染。 */
   const cardCount = (panel.match(/<JoinCodeCard\s+compact\s*\/>/g) || []).length
-  ck('S-11g 空铺分支+有工位分支都有卡片（≥2 处）', cardCount >= 2, cardCount)
+  ck('S-11g 加入码唯一（全文件只有一份）', cardCount === 1, cardCount)
   /* ★ 反向：标题栏按钮堆里不许再有它 */
-  const titleBarHasJoin = /<button[\s\S]{0,400}?生成工位加入码[\s\S]{0,80}?<\/button>\s*\n\s*<button[\s\S]{0,50}?一键清场/.test(panel)
-  ck('S-11h 标题栏按钮堆已撤', titleBarHasJoin === false, `still=${titleBarHasJoin}`)
+  /* ★★ 2026-10-26（第五轮）：阿开「顶部的生成工位邀请码按钮呢？」
+     ⇒ 标题栏**必须有**这个按钮（反转旧判据：旧的是「已撤」）。
+     ★ 为什么反转不算放水：原来撤它是因为和卡片重复；
+       现在它是卡片的开关（收起/展开），职责不同，不重复。 */
+  const titleBarHasJoin = panel.includes('🔑 生成工位加入码')
+  ck('S-11h 标题栏有「🔑 生成工位加入码」开关', titleBarHasJoin === true, `found=${titleBarHasJoin}`)
 }
 
 /* ── S-8/S-9 接线：改了三处，每一处都要真接上（防"写了没用"） ── */
 {
   const panel = readFileSync('packages/plugin-workstation/src/client/WorkstationPanel.tsx', 'utf8')
-  ck('S-8a 总览行已渲染', panel.includes('<SeatSummaryRow'), 'not found')
+  /* ★★ 2026-10-26（第五轮）：`SeatSummaryRow` 那六行汇总 0.2.96 已按阿开
+     「只要卡座 + 第三行说明」退出渲染 ⇒ 旧判据「必须渲染」永久假红。
+     ★ 但它内嵌的 `ManagementGrantSection`（管理助理授码）不能跟着失联 ——
+       这是本次实测抓到的**真回归**：汇总行一删，授码入口就点不到了。
+     ⇒ 判据改成**两件事都要真**：① 汇总行不再渲染 ② 授码入口另有承接。 */
+  const summaryRendered = /<SeatSummaryRow\s+seats=/.test(panel)
+  ck('S-8a 总览行已退出渲染（0.2.96 定稿）', summaryRendered === false, `still=${summaryRendered}`)
+  const maEntry = panel.includes('功能介绍与指定') && panel.includes('<ManagementGrantSection embedded />')
+  ck('S-8a2 管理助理授码入口另有承接（不随汇总行失联）', maEntry === true, `found=${maEntry}`)
   ck('S-8b 从 seat-summary 导入', panel.includes("from './seat-summary.js'"), 'not found')
   // ★ 反向：卡片上的「邀请」按钮必须已撤
   const inviteBtn = /onClick=\{props\.onInvite\}[\s\S]{0,200}?邀请/.test(panel)
@@ -276,13 +341,16 @@ function ck(name, cond, got) {
 /* ── S-13 收起按钮显著化（阿开：「刷新旁边增加一个收起」）── */
 {
   const panel = readFileSync('packages/plugin-workstation/src/client/WorkstationPanel.tsx', 'utf8')
-  ck('S-13a 展开时出现明确的「收起 ▴」按钮', panel.includes('收起 ▴') === true, 'not found')
-  /* ★ 反向：列表头不许再有「▾ 刷新」 —— 也就是「收起」不能只是把刷新按钮改个名 */
-  ck('S-13b 收起是独立按钮，不劫持「刷新」',
-    /\{\s*showSeatGuide\s*\?\s*'▾'\s*:\s*'▸'\s*\}\s*席位说明/.test(panel), '席位说明按钮名应稳定')
-  /* ★ 席位说明入口名必须稳定（不能变成「收起」—— 否则下次找不到入口） */
-  ck('S-13c 入口名稳定（永远是「席位说明」）',
-    panel.includes('席位说明</button>') || /席位说明\s*<\/button>/.test(panel), 'not found')
+  /* ★★ 2026-10-26（第五轮）：阿开「顶多增加第三行同样高度的介绍席位桌面直接显示，
+     不需要单独按钮」⇒ 席位说明改**常显**，`showSeatGuide` state 与折叠按钮全删
+     ⇒ 原 S-13a/b/c 三条（都在验折叠按钮）永久假红。
+     ⇒ 改判「常显 + 确实没有折叠按钮」：这才是他要的形态。 */
+  const searGuideRendered = panel.includes('{SEAT_GUIDE.map((s) => (')
+  ck('S-13a 席位说明常显渲染（与卡座同构横排）', searGuideRendered === true, `found=${searGuideRendered}`)
+  ck('S-13b 不再有折叠 state（showSeatGuide 已删）',
+    panel.includes('showSeatGuide') === false, 'still present')
+  ck('S-13c 席位说明无折叠按钮（不需要点一下）',
+    panel.includes('席位说明</button>') === false, 'still present')
 }
 
 /* ── S-14 ★★ 「席位一览（只读）」整块删除（阿开：全部不要，只留管理助理）── */
@@ -307,13 +375,13 @@ function ck(name, cond, got) {
   ck('S-15a DEFAULT_SEATS 能取到', m !== null, 'not found')
   if (m) {
     const seats = [...m[1].matchAll(/\("([a-z_]+)",/g)].map((x) => x[1])
-    ck('S-15b 标配恰好 6 个位', seats.length === 6, seats)
+    ck('S-15b 标配恰好 5 个位（0.2.103 起助理位不占座位）', seats.length === 5, seats)
     ck('S-15c 签名位排第一', seats[0] === 'signature', seats)
-    ck('S-15d 六个位齐全（含 strategy 与 management_assistant）',
-      ['signature','management','execution','audit','strategy','management_assistant']
+    ck('S-15d 五个位齐全（含 strategy；助理位不占座位故不含）',
+      ['signature','management','execution','audit','strategy']
         .every((k) => seats.includes(k)), seats)
-    ck('S-15e 顺序与前端 SEAT_ORDER 一致（签名/战略/管理/助理/审计/执行）',
-      seats.join(',') === 'signature,strategy,management,management_assistant,audit,execution',
+    ck('S-15e 顺序与前端 SEAT_ORDER 一致（签名/战略/管理/审计/执行）',
+      seats.join(',') === 'signature,strategy,management,audit,execution',
       seats.join(','))
   }
 }
@@ -344,10 +412,22 @@ function ck(name, cond, got) {
   /* ① 横向项目胶囊（ProjectChip）已不再用于项目筛选行 */
   ck('S-17a 项目筛选不再用横向 ProjectChip 列表',
     panel.includes('<ProjectChip active={projFilter === \'\'}') === false, 'chip row still there')
-  /* ② 换成下拉，且「全部项目」带总数 */
-  ck('S-17b 项目筛选已是下拉（含「全部项目」）',
-    panel.includes('全部项目（') === true && panel.includes('onChange={(e) => setProjFilter(e.target.value)}') === true,
-    'select missing')
+  /* ② ★★ 2026-10-26 阿开定（任务页 V3）：项目筛选下拉**已删除**，改为「点项目卡片选中」。
+     ★ 判据跟着设计走 —— 旧判据要求下拉存在，设计变了就必须改，否则它会挡住新设计。
+     新判据验三件事（缺一条都说明改歪了）：
+       a) 下拉确实没了（不许残留）
+       b) 项目卡片上有 setProjFilter 的点击绑定（选中入口还在，只是换了壳）
+       c) 选中态有视觉标识（蓝框 accent），不是"点了看不出来" */
+  ck('S-17b 项目筛选下拉已删除（改为点卡片选中）',
+    panel.includes('全部项目（') === false &&
+    panel.includes('onChange={(e) => setProjFilter(e.target.value)}') === false,
+    '下拉仍存在 / 未删除')
+  ck('S-17b2 项目卡片有点击选中入口',
+    panel.includes('setProjFilter(p.projectId)') === true || panel.includes('setProjFilter(p.projectId') === true,
+    '点卡片选中入口缺失')
+  ck('S-17b3 选中项目有蓝框标识',
+    panel.includes('projFilter === p.projectId') === true,
+    '选中态标识缺失')
   /* ③ 「未归类」筛选入口已删 —— 阿开：「未归类全删了」 */
   ck('S-17c 「未归类」筛选入口已删',
     panel.includes("projFilter === '__none__'") === false, 'none filter still present')

@@ -1468,6 +1468,29 @@ export class WorkstationRemoteService extends TypertRemoteService {
     }
   }
 
+  /** ★★ 2026-10-26（阿开定 · 钥匙保险箱）：重置一位 Agent 的连接
+   *
+   *  ★ 与 `seatEvict` 的区别必须一眼看清：
+   *    · seatEvict        = 把这个人**请走**（凭证作废，位空出来）
+   *    · agentResetConn.  = 这个人**还在**，只是换一把钥匙（且不断线）
+   *  ★ 返回**不含 agentSecret**：新钥匙在服务端保险箱里等 Agent 自取。
+   *    铺主看不到明文，也就不需要搬 —— 这是本条路径的全部意义。
+   */
+  @Remote('agentResetConnection')
+  async agentResetConnection(query: { agentId: string }, signal?: CancelSignal): Promise<RemoteResult<{ agentId: string; pendingSecret: boolean; graceHours: number; message: string }>> {
+    const data = await this.requireHttp().call<{ agentId?: string; pendingSecret?: boolean; graceHours?: number; message?: string }>(
+      'POST', `/agents/${encodeURIComponent(query.agentId)}/reset-connection`, {}, signal)
+    return {
+      ok: true,
+      data: {
+        agentId: typeof data?.agentId === 'string' ? data.agentId : query.agentId,
+        pendingSecret: data?.pendingSecret === true,
+        graceHours: typeof data?.graceHours === 'number' ? data.graceHours : 24,
+        message: typeof data?.message === 'string' ? data.message : '',
+      },
+    }
+  }
+
   /** ★ 请出一个位上的 Agent（只清这一个，不动别的位；多人同坐时必须点名） */
   @Remote('seatEvict')
   async seatEvict(query: { seat: string; agentId?: string }, signal?: CancelSignal): Promise<RemoteResult<{ seat: string; evicted: { agentId: string; name: string } }>> {

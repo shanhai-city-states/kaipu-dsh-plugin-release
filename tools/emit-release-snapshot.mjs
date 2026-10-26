@@ -133,7 +133,7 @@ const walk = (dir) =>
  *     新增 client 模块 ⇒ 自动进面 ⇒ 期望值过期。**过期了就该改**，
  *     否则这个判据会长期红，然后被当成噪声忽略。
  */
-const RELEASE_FILE_COUNT = 83
+const RELEASE_FILE_COUNT = 86
 
 
 /** 工坊 `053 §五` 白名单（初定 50 件 · 现值见上 `RELEASE_FILE_COUNT` 的变更说明） */

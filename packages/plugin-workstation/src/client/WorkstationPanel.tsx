@@ -32,6 +32,7 @@ import {
   checkPluginVersion,
   clearAgents,
   evictSeat,
+  resetAgentKey,
   exportPack,
   purgePack,
   cancelPurge,
@@ -1960,6 +1961,18 @@ function OrgSection(props: { onGoDevices?: () => void }): ReactElement {
                 await refresh()
                 setNotice(`已请出 ${r.data.evicted.name || r.data.evicted.agentId}，这个位置现在空了`)
               })() }}
+              /* ★★ 2026-10-26（阿开定 · 钥匙保险箱）：重置连接。
+                 ★ 与请出的区别必须体现在提示语里 —— 请出是「请走」，
+                   重置是「换钥匙、人还在」。用户混淆两者会误踢人。 */
+              onResetKey={(agentId) => { void (async () => {
+                const r = await resetAgentKey(agentId)
+                if (!r.ok) {
+                  setErr({ code: r.code, message: r.message, source: 'action', title: '重置没成功' })
+                  return
+                }
+                await refresh()
+                setNotice(`已重置 ${agentId} 的连接：新钥匙在保险箱，它下次来领任务时自动取走（旧钥匙 ${r.data.graceHours ?? 24} 小时内仍可用）`)
+              })() }}
               inviteOpen={inviting === n.node_id}
             />
             {inviting === n.node_id && (
@@ -2457,6 +2470,10 @@ interface OrgNodeCardProps {
   inviteOpen: boolean
   /** ★ 请出：这个位上的人离场（只清这一个位） */
   onEvict: (seat: string, agentId: string) => void
+  /** ★★ 2026-10-26（阿开定 · 钥匙保险箱）：重置这位 Agent 的连接。
+      ★ 参数只要 agentId —— 不用 seat，因为重置的是「这个 Agent 的钥匙」，
+        不是「这个位」（位上的钥匙属于坐在这的那个人）。 */
+  onResetKey: (agentId: string) => void
 }
 
 /** 一个「位」= 3 列网格里的一张卡（不缩进、不展开子级 —— 座位表口径） */
@@ -2554,6 +2571,9 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
   const seatLocked = LOCKED_SEAT_KEYS.has(cardSeatKey)
   /** 请出要二次确认：凭证一作废不可恢复 */
   const [evictArm, setEvictArm] = useState(false)
+  /** ★★ 2026-10-26（阿开定 · 钥匙保险箱）：重置连接要二次确认 ——
+      它会把当前钥匙挪进宽限期并生成新钥匙，Agent 下次来取就换掉了。 */
+  const [resetArm, setResetArm] = useState(false)
 
   return (
     <div
@@ -2856,16 +2876,50 @@ function OrgNodeCard(props: OrgNodeCardProps): ReactElement {
                     取消
                   </button>
                 </>
+              ) : resetArm ? (
+                /* ★★ 2026-10-26（阿开定）：重置连接的二次确认。
+                   为什么不在 window.confirm 里问：DSH 宿主里不可靠（已踩过）。
+                   ★ 这里必须说清「不会断线」—— 否则铺主会以为是「踢下线重来」，
+                     不敢点。这个按钮的设计前提就是**重置不断线**。 */
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setResetArm(false); props.onResetKey(holders[0]?.agentId ?? '') }}
+                    disabled={busy}
+                    style={{ ...btnStyle(false), background: '#2f6f4e', color: '#fff', border: 'none' }}
+                    title="生成新钥匙放进保险箱，Agent 下次来领任务时自己取走"
+                  >
+                    确认重置
+                  </button>
+                  <button type="button" onClick={() => setResetArm(false)} disabled={busy} style={btnStyle(false)}>
+                    取消
+                  </button>
+                  <div style={{ fontSize: 11, color: '#6b7280', gridColumn: '1 / -1', marginTop: 4 }}>
+                    ⓘ 新钥匙放进保险箱，Agent 下次来领任务时自己取走。**不会当场断开** ——
+                    旧钥匙在 24 小时内仍可用，取走后自动作废。
+                  </div>
+                </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setEvictArm(true)}
-                  disabled={busy}
-                  title={`请出 ${primaryHolder?.name || '?'}（凭证会作废，工位保留）${extraHolders > 0 ? `　⚠ 该位另有 ${extraHolders} 条在职记录（数据异常，请联系运维）` : ''}`}
-                  style={{ ...btnStyle(false), border: '1px solid #c0392b', color: '#c0392b' }}
-                >
-                  请出
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setResetArm(true) }}
+                    disabled={busy}
+                    title={`${primaryHolder?.name || '这个 Agent'} 连不上工位时点这里：换一把新钥匙放进保险箱，它下次来领任务自己取走（不会当场断线）`}
+                    style={{ ...btnStyle(false), border: '1px solid #2f6f4e', color: '#2f6f4e' }}
+                  >
+                    🔑 重置连接
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEvictArm(true)}
+                    disabled={busy}
+                    title={`请出 ${primaryHolder?.name || '?'}（凭证会作废，工位保留）${extraHolders > 0 ? `　⚠ 该位另有 ${extraHolders} 条在职记录（数据异常，请联系运维）` : ''}`}
+                    style={{ ...btnStyle(false), border: '1px solid #c0392b', color: '#c0392b' }}
+                  >
+                    请出
+                  </button>
+                </>
               )
             ) : invitedLive ? (
               /* ★★★ 2026-10-26 阿开（4️⃣ · 定稿）：

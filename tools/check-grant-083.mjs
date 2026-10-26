@@ -30,6 +30,10 @@ const SRC_PANEL = join(WS, 'src/client/WorkstationPanel.tsx')
 const SRC_GRANT = join(WS, 'src/client/grant-copy.ts')
 const LIB_GRANT = join(WS, 'lib/client/grant-copy.js')
 const LIB_BUNDLE = join(WS, 'lib/client.js')
+/* ★ E 段（2026-10-26 三定稿 · 管理助理改「指派已有 Agent」）：跨前后端两处真值 */
+const SRC_SEAT_SUMMARY = join(WS, 'src/client/seat-summary.ts')
+const STORE_PY = process.env.KAIPU_STORE_PY
+  || '/opt/shanhai-toolkit-opensource/modules/08-workshop/kai-pu/src/store.py'
 
 let pass = 0
 let fail = 0
@@ -49,7 +53,7 @@ function stripComments(t) {
   return t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
 
-for (const f of [SRC_PANEL, SRC_GRANT, LIB_GRANT, LIB_BUNDLE]) {
+for (const f of [SRC_PANEL, SRC_GRANT, LIB_GRANT, LIB_BUNDLE, SRC_SEAT_SUMMARY, STORE_PY]) {
   if (!existsSync(f)) {
     console.error(`缺文件：${f}\n（先跑 node tools/build.mjs）`)
     process.exit(2)
@@ -205,13 +209,20 @@ check('C-2 展开状态是**一张表**（openSec[key]），不是单个 key —
   && /const open = openSec\[sec\.key\] \?\? sec\.openByDefault/.test(panel),
   `声明命中=${/useState<Record<string, boolean>>\(\{\}\)/.test(panel)}，取值命中=${/openSec\[sec\.key\]/.test(panel)}`)
 
-check('C-3 数量徽标 = 该段**当前实际条数**（list.length，不是估算的常量）',
-  /\{sec\.title\}<\/b>/.test(panel) && /\{list\.length\}/.test(panel),
-  `list.length 渲染=${/\{list\.length\}/.test(panel)}`)
+/* ★★ 2026-10-26 台阶④：四段形态从「竖排长条」改为「并排一行两行式」，
+   C-3/C-4 原判据绑的是旧形态（{sec.title}</b> 包在 <b> 里 + › 箭头旋转），
+   形态按阿开定稿变了 ⇒ 判据必须跟着改，否则它挡住的是新设计而非缺陷。
+   新形态（设计图V3 §三）：段名是 <span>、指示是文字「展开 ▾ / 收起 ▴」、圆点表有无活。 */
+check('C-3 数量 = 该段**当前实际条数**（list.length，不是估算的常量）',
+  /* ★ 2026-10-26 台阶⑤：数据源从 `visibleTasks` 改为 `searchedTasks`
+     （阿开定的搜索：任务模式跨全部项目筛选）。判据跟着实现走，不许反过来绑住实现 ——
+     但仍必须验「四段各自的 list 是从**筛选后**的数据来的」，不许直接用全量 tasks。 */
+  /\{list\.length\}/.test(panel) && /const list = (?:searchedTasks|visibleTasks)\.filter/.test(panel),
+  `list.length 渲染=${/\{list\.length\}/.test(panel)} · 数据源=${(/const list = (searchedTasks|visibleTasks)\.filter/.exec(panel) || [])[1] || '无'}`)
 
-check('C-4 收起箭头是 ›，展开时旋转 90°（视觉上就是 ⌄）',
-  panel.includes('›') && /transform: open \? 'rotate\(90deg\)' : 'none'/.test(panel),
-  `旋转命中=${/rotate\(90deg\)/.test(panel)}`)
+check('C-4 展开指示是**文字**（展开 ▾ / 收起 ▴），不靠箭头图形',
+  panel.includes("'收起 ▴' : '展开 ▾'") || panel.includes('收起 ▴') && panel.includes('展开 ▾'),
+  `文字线索=${panel.includes('收起 ▴')}`)
 
 check('C-5 整行可点（button 撑满宽度 + aria-expanded 供读屏）',
   /width: '100%'/.test(panel) && /aria-expanded=\{open\}/.test(panel),
@@ -241,6 +252,116 @@ check('D-3 复制文案里不含 API 路径 / 错误码（给人看的话不该�
 check('D-4 grant-copy.ts 不 import 任何东西（纯函数才判得动）',
   !/^\s*import\s/m.test(grant),
   `import 命中=${/^\s*import\s/m.test(grant)}`)
+
+/* ═════════════ E 段 · 管理助理 = 「指派已有 Agent」（2026-10-26 三定稿） ═════════════
+ *
+ * ★ 阿开原话：「管理助理位参考 2.84 版本的功能……当时是可以选择代理时间。
+ *   **指定某个工位的 Agent 做助理**」
+ *   ⇒ 首选形态是**从本铺已坐着的 Agent 里挑人**，不是发码让新人进来。
+ *   ⇒ 助理位**不再占卡片**，入口搬到「工位布局」标题行右侧。
+ *
+ * ★ 为什么 E 段必须存在：本轮改完后我做过注入验证 —— 把标题按钮删掉、
+ *   把 onAssign 改名、把助理位加回 SEAT_ORDER、把 DEFAULT_SEATS 加回助理位，
+ *   **原有 8 套判据全部照绿**。判据不认这四处改动，等于这一轮没有判据。
+ *   所以 E 段每条都配了反向对照（改坏必须变红）。
+ */
+
+console.log('\n── E 段 · 管理助理 = 指派已有 Agent（本轮新形态）──')
+
+const seatSum = decodeEscapes(stripComments(readFileSync(SRC_SEAT_SUMMARY, 'utf8')))
+const storePy = readFileSync(STORE_PY, 'utf8')
+
+/* E-1 座位顺序里不再有 management_assistant（它不占格子） */
+const orderBlock = (() => {
+  const i = seatSum.indexOf('export const SEAT_ORDER')
+  const j = seatSum.indexOf(']', i)
+  return i >= 0 && j > i ? seatSum.slice(i, j) : ''
+})()
+check('E-1 SEAT_ORDER 里没有 management_assistant（助理不占座位卡）',
+  orderBlock.length > 0 && !orderBlock.includes('management_assistant'),
+  `orderBlock 含助理位=${orderBlock.includes('management_assistant')} · 长度=${orderBlock.length}`)
+
+/* E-1b 但 SEAT_LABELS 仍保留它 —— 老数据里可能还有这个 key，删了会变成 unknown 假读数 */
+check('E-1b SEAT_LABELS 仍保留 management_assistant 的中文名（老数据不落 unknown）',
+  /management_assistant:\s*'管理助理位'/.test(seatSum),
+  '标签保留=true')
+
+/* E-2 审计位仍在 SEAT_ORDER（撤助理位不能连带把审计位也删了） */
+check('E-2 审计位仍在 SEAT_ORDER（撤助理位不连带删审计位）',
+  /'audit',\s*\n?\s*'execution'/.test(orderBlock) || orderBlock.includes("'audit'"),
+  `含 audit=${orderBlock.includes("'audit'")} · 含 execution=${orderBlock.includes("'execution'")}`)
+
+/* E-3 标题行有助理入口按钮，且它的开关是 grantOpen（不是 showJoin / inviting） */
+check('E-3 「工位布局」标题行有管理助理入口（👑 管理助理）',
+  panel.includes('👑 管理助理') && /setGrantOpen\(\(v\) => !v\)/.test(panel),
+  `含按钮=${panel.includes('👑 管理助理')} · 含 setGrantOpen 切换=${/setGrantOpen\(\(v\) => !v\)/.test(panel)}`)
+
+/* E-4 入口挂在 OrgSection（工位布局）里，不是挂在别处 */
+const orgStart = panel.indexOf('function OrgSection')
+const orgEnd = panel.indexOf('function OrgNodeCard', orgStart)
+const orgBody = orgStart >= 0 && orgEnd > orgStart ? panel.slice(orgStart, orgEnd) : ''
+check('E-4 助理入口与展开区都在 OrgSection 体内（就在工位布局标题下）',
+  orgBody.includes('👑 管理助理') && orgBody.includes('<ManagementGrantSection embedded />'),
+  `入口在=${orgBody.includes('👑 管理助理')} · 组件在=${orgBody.includes('<ManagementGrantSection embedded />')}`)
+
+/* E-5 指派走 grantCreate（直传 granteeId），不是 grantGenerate（发码）
+ *
+ * ★★ 注入验证逼出来的修正：初版只查「grantCreate 在不在这一节里」——
+ *    我把 `onAssign` 改名（等于指派按钮点了没反应）它照样绿。
+ *    原因：`grantCreate` 这串字符在文件里出现了，**不管有没有被调用**。
+ *    ⇒ 改成查**调用链完整**：定义存在 + 按钮 onClick 绑的是它。
+ *    （这是「字符串在文件里出现 ≠ 功能还在」的第二次踩坑，记在这儿。） */
+const grantSecBody = panel.slice(
+  panel.indexOf('function ManagementGrantSection'),
+  panel.indexOf('function groupPacks', panel.indexOf('function ManagementGrantSection')))
+const hasOnAssignDef = /const onAssign\s*=\s*async/.test(grantSecBody)
+const assignBtnBinds = /onClick=\{\(\) => void onAssign\(\)\}/.test(grantSecBody)
+const callsGrantCreate = /callPack<[^>]*>\('grantCreate'/.test(grantSecBody)
+check('E-5 指派走 grantCreate 且调用链完整（定义 + 按钮绑定 + 真调用）',
+  hasOnAssignDef && assignBtnBinds && callsGrantCreate,
+  `定义=${hasOnAssignDef} · 按钮绑定=${assignBtnBinds} · 调 grantCreate=${callsGrantCreate}`)
+
+/* E-6 指派必须带 granteeId + ttlHours（缺一个后端就 400） */
+check('E-6 指派请求体含 granteeId 与 ttlHours',
+  /granteeId:\s*pickAgent/.test(grantSecBody) && /ttlHours:\s*ttl\b/.test(grantSecBody),
+  `granteeId=${/granteeId:\s*pickAgent/.test(grantSecBody)} · ttlHours=${/ttlHours:\s*ttl\b/.test(grantSecBody)}`)
+
+/* E-7 候选人来自 occupants（真实在场者），不是 holder.name（位属于谁） */
+check('E-7 候选人取自 occupants（真实在场），且真的灌进 seatAgents',
+  /\.occupants/.test(grantSecBody) && !/holder\.name/.test(grantSecBody)
+  && /setSeatAgents\(out\)/.test(grantSecBody),
+  `occupants=${/\.occupants/.test(grantSecBody)} · 误用 holder.name=${/holder\.name/.test(grantSecBody)} · setSeatAgents=${/setSeatAgents\(out\)/.test(grantSecBody)}`)
+
+/* E-8 发码形态保留为兜底（对方还没进铺时才用得上） */
+check('E-8 发码（grantGenerate）保留为兜底路径',
+  /callPack<[^>]*>\('grantGenerate'/.test(grantSecBody),
+  `grantGenerate 命中=${/callPack<[^>]*>\('grantGenerate'/.test(grantSecBody)}`)
+
+/* E-9 后端 DEFAULT_SEATS 不再定义管理助理位 */
+const defSeats = (() => {
+  const i = storePy.indexOf('DEFAULT_SEATS = [')
+  const j = storePy.indexOf(']', i)
+  return i >= 0 && j > i ? storePy.slice(i, j) : ''
+})()
+check('E-9 后端 DEFAULT_SEATS 不再定义 management_assistant',
+  defSeats.length > 0 && !defSeats.includes('"management_assistant"'),
+  `含助理位=${defSeats.includes('"management_assistant"')} · 座位线条数=${(defSeats.match(/^\s+\("/gm) || []).length}`)
+
+/* E-10 后端仍保留 6→5 位的重排：reconcile 里有「清理不在 DEFAULT_SEATS 的系统位」 */
+check('E-10 reconcile_org_seats 会清掉已移除的系统位（否则存量铺子永远残留助理卡）',
+  /keep_seats\s*=\s*\{[^}]*DEFAULT_SEATS/.test(storePy) && /archived_at=\?/.test(storePy) &&
+  /st_seat in keep_seats/.test(storePy),
+  `keep_seats=${/keep_seats\s*=\s*\{[^}]*DEFAULT_SEATS/.test(storePy)} · 归档=${/archived_at=\?/.test(storePy)}`)
+
+/* E-11 清理必须保护「有人的位」（不能把在场 Agent 连人带位抹掉） */
+check('E-11 清理跳过有 enabled agent 的位（不误删活人）',
+  /status='enabled'\s+LIMIT 1/.test(storePy) && /kept_busy/.test(storePy),
+  `查 enabled=${/status='enabled'\s+LIMIT 1/.test(storePy)} · kept_busy=${/kept_busy/.test(storePy)}`)
+
+/* E-12 产物里真的含助理入口（防「漏跑 build 打旧包」） */
+check('E-12 产物 bundle 含「👑 管理助理」（build 吃到改动）',
+  bundle.includes('👑 管理助理'),
+  `bundle 含=${bundle.includes('👑 管理助理')} · 大小=${(bundle.length / 1024).toFixed(1)}KB`)
 
 /* ─────────────────────────── 汇总 ─────────────────────────── */
 

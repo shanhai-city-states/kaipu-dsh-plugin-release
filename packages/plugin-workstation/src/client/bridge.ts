@@ -175,6 +175,8 @@ export const ENDPOINTS = {
   orgClearAgents: 'orgClearAgents',
   /** 请出单个位上的 Agent */
   seatEvict: 'seatEvict',
+  /** ★★ 2026-10-26（阿开定 · 钥匙保险箱）：重置一位 Agent 的连接（换钥匙不踢人） */
+  agentResetConnection: 'agentResetConnection',
   /** 通知列表 */
   notifications: 'notifications',
   /** 通知全部已读 */
