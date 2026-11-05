@@ -14,8 +14,15 @@
  *   待服务端五项（契约 §五）落地后，`state()` 改读真
  *   `kaipu-workstation/state`（source='live'）；本文件只换取数源，不改 wire 形状。
  *
- * ★ 凭据纪律（承 plugin-platform）：工位插件**不持有模型 Key、不直连服务端域名**。
- *   期1 仅渲染持久化态（本地种子），不发起任何对外 HTTP；凭据议题留待服务端接入期。
+ * ★ 凭据纪律（承 plugin-platform）：工位插件**不持有模型 Key**；`deviceToken` 只活在本进程内存，
+ *   不写盘、不进日志、不传给渲染层（详见 kai-pu-http.ts 文件头三条）。
+ *
+ * ★ 对外 HTTP：**期4 起已接线** —— 配置了 `baseUrl` 就建 `KaipuHttpClient`，
+ *   `org*` / `tasks*` / `projects*` / `packs*` / `rolesSeats` / `device*` / `joinRequest*`
+ *   等 73 处走真服务端；未配置时抛 `not_configured`，面板显示「未接入」而不是假装成功。
+ *   ★ 唯一仍是本地种子的是 `state()`：期1 起恒返回 scaffold 持久化态（source='scaffold'），
+ *   待契约 §五五项落地后改读真 `kaipu-workstation/state`。
+ *   ⇒ 旧注释「不发起任何对外 HTTP」写于期1（2026-10-27），期4 接线后已失效，勿再据此判断能力。
  */
 
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
